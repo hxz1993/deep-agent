@@ -23,6 +23,7 @@ from pydantic_ai.usage import UsageLimits
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete, event, insert, select, update
 
+from deep_agent.db.serialization import StoredUserPromptPart
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.event_persister import EventPersister
 from deep_agent.agent.runner import AgentRunner
@@ -287,7 +288,7 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
         await restore_plan_snapshot(deps, {"items": [{"id": "read", "content": "读取合成附件", "status": "completed"}]})
         expected_plan = await current_plan_snapshot(deps)
         messages = [
-            ModelRequest(parts=[UserPromptPart([
+            ModelRequest(parts=[StoredUserPromptPart([
                 {"kind": "text-content", "content": "分析合成预算"},
                 {"kind": "attachment-ref", "id": "synthetic-file", "name": "合成预算.xlsx", "mime": "application/vnd.ms-excel"},
                 {"kind": "context-ref", "key": "range", "type": "deeptable.range", "label": "预算!B2:C4", "metadata": {"token": "SYNTHETIC_PRIVATE_CONTEXT"}},
@@ -327,7 +328,7 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
             output_config={key: value for key, value in CONTRACT.items() if key != "schema_digest"}), user_id="trusted-config-editor")
         baseline = (configured.updated_by, configured.updated_at)
         def response(messages, info):
-            return ModelResponse(parts=[ToolCallPart("lease_result", {"ok": True}, "out-actor")])
+            return ModelResponse(parts=[ToolCallPart("output__lease_result", {"ok": True}, "out-actor")])
         runner = AgentRunner(Agent(FunctionModel(response), deps_type=AgentDeps), self.store, UsageLimits(request_limit=5))
         runner._output_config_loader = AsyncMock(return_value=CONTRACT)
         result = await runner.run(self.sid, "synthetic", AgentDeps(session_id=self.sid, agent_id=self.agent_id, user="owner"))
@@ -394,7 +395,7 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
                 def response(messages, info):
                     calls.append(True)
                     return (ModelResponse(parts=[TextPart(candidate)]) if len(calls) == 1 else
-                            ModelResponse(parts=[ToolCallPart("lease_result", {"ok": True}, "accepted")]))
+                            ModelResponse(parts=[ToolCallPart("output__lease_result", {"ok": True}, "accepted")]))
                 async def stream(messages, info):
                     result = response(messages, info)
                     for index, part in enumerate(result.parts):
@@ -438,7 +439,7 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
         requested = []
         def response(messages, info):
             requested.append(True)
-            return ModelResponse(parts=[ToolCallPart("lease_result", {"ok": True}, "output-1")])
+            return ModelResponse(parts=[ToolCallPart("output__lease_result", {"ok": True}, "output-1")])
         runner = AgentRunner(Agent(FunctionModel(response), deps_type=AgentDeps), self.store, UsageLimits(request_limit=10))
         runner._output_config_loader = AsyncMock(return_value=CONTRACT)
         deps = AgentDeps(session_id=self.sid, agent_id=self.agent_id, user="owner")
@@ -464,9 +465,9 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(streaming=streaming):
                 sid = uuid4().hex
                 def response(messages, info):
-                    return ModelResponse(parts=[ToolCallPart("lease_result", {"ok": True}, "out-1")])
+                    return ModelResponse(parts=[ToolCallPart("output__lease_result", {"ok": True}, "out-1")])
                 async def stream(messages, info):
-                    yield {0: DeltaToolCall(name="lease_result", json_args='{"ok":true}', tool_call_id="out-1")}
+                    yield {0: DeltaToolCall(name="output__lease_result", json_args='{"ok":true}', tool_call_id="out-1")}
                 runner = AgentRunner(Agent(FunctionModel(response, stream_function=stream), deps_type=AgentDeps), self.store, UsageLimits(request_limit=5))
                 runner._output_config_loader = AsyncMock(return_value=CONTRACT)
                 deps = AgentDeps(session_id=sid, agent_id=self.agent_id, user="owner")
@@ -492,7 +493,7 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
             return await original(progress, ctx, hook=hook)
         def response(messages, info):
             calls.append(True)
-            return ModelResponse(parts=[ToolCallPart("lease_result", {}, f"bad-{len(calls)}")])
+            return ModelResponse(parts=[ToolCallPart("output__lease_result", {}, f"bad-{len(calls)}")])
         runner = AgentRunner(Agent(FunctionModel(response), deps_type=AgentDeps), self.store, UsageLimits(request_limit=5))
         runner._output_config_loader = AsyncMock(return_value=CONTRACT)
         with patch.object(MessagePersistenceCapability, "_save", reject_checkpoint):
@@ -511,9 +512,9 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(stage=stage, streaming=streaming):
                 sid = uuid4().hex
                 def response(messages, info):
-                    return ModelResponse(parts=[ToolCallPart("lease_result", {"ok": True}, "out-1")])
+                    return ModelResponse(parts=[ToolCallPart("output__lease_result", {"ok": True}, "out-1")])
                 async def stream(messages, info):
-                    yield {0: DeltaToolCall(name="lease_result", json_args='{"ok":true}', tool_call_id="out-1")}
+                    yield {0: DeltaToolCall(name="output__lease_result", json_args='{"ok":true}', tool_call_id="out-1")}
                 runner = AgentRunner(Agent(FunctionModel(response, stream_function=stream), deps_type=AgentDeps), self.store, UsageLimits(request_limit=5))
                 runner._output_config_loader = AsyncMock(return_value=CONTRACT)
                 deps = AgentDeps(session_id=sid, agent_id=self.agent_id, user="owner")
@@ -525,7 +526,7 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
                 elif stage == "title":
                     async def bad_title():
                         raise injected
-                    failure = patch.object(runner, "_start_title_generation", new=AsyncMock(return_value=asyncio.create_task(bad_title())))
+                    failure = patch.object(runner, "_start_title_generation", side_effect=lambda *args, **kwargs: asyncio.create_task(bad_title()))
                 elif stage == "flush":
                     failure = patch.object(self.persister, "flush", new=AsyncMock(side_effect=injected))
                 else:
@@ -563,7 +564,7 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
             nonlocal count
             count += 1
             value = {"ok": "SYNTHETIC_PRIVATE_VALUE"} if count == 1 else {"ok": True}
-            return ModelResponse(parts=[ToolCallPart("lease_result", value, f"out-{count}")])
+            return ModelResponse(parts=[ToolCallPart("output__lease_result", value, f"out-{count}")])
         runner = AgentRunner(Agent(FunctionModel(response), deps_type=AgentDeps), self.store, UsageLimits(request_limit=5))
         runner._output_config_loader = AsyncMock(return_value=CONTRACT)
         with patch("deep_agent.diagnostics.emit", side_effect=lambda name, **fields: logs.append((name, fields))):
@@ -651,7 +652,7 @@ class StructuredOutputLiveTests(unittest.IsolatedAsyncioTestCase):
         async def stream(messages, info):
             nonlocal model_calls
             model_calls += 1
-            yield {0: DeltaToolCall(name="lease_result", json_args='{"ok":', tool_call_id="once")}
+            yield {0: DeltaToolCall(name="output__lease_result", json_args='{"ok":', tool_call_id="once")}
             ready.set()
             await release.wait()
             yield {0: DeltaToolCall(json_args='true}')}
@@ -720,13 +721,12 @@ class AgentOutputListScaleTests(unittest.IsolatedAsyncioTestCase):
     async def test_ten_hundred_thousand_agents_use_one_list_query_and_one_batch_resolver(self):
         for count in (10, 100, 1000):
             with self.subTest(count=count):
-                agents, configs, expected_flags = [], [], {}
+                agents, configs = [], []
                 for index in range(count):
                     aid, mode = str(uuid4()), index % 3
                     agents.append({"id": aid, "name": f"scale-{index}", "prompt": "synthetic",
                         "updated_by": f"operator-{index % 25}",
                         "structured_output_enabled": mode == 1 or (mode == 2 and bool(index % 2))})
-                    expected_flags[aid] = mode == 2
                     if mode:
                         configs.append({"agent_id": aid, "name": f"result_{index}",
                             "description": "must not load full definitions for this list",
@@ -749,7 +749,7 @@ class AgentOutputListScaleTests(unittest.IsolatedAsyncioTestCase):
                 started = time.perf_counter()
                 try:
                     with patch("deep_agent.api.v1.agents.resolve_diagnostic_users", resolver):
-                        response = await self.client.get("/api/v1/agents", headers=self.headers)
+                        response = await self.client.get("/api/v1/agents?include_updater=true", headers=self.headers)
                 finally:
                     event.remove(self.engine.sync_engine, "before_cursor_execute", capture)
                 self.assertEqual(response.status_code, 200, response.text[:300])
@@ -757,12 +757,12 @@ class AgentOutputListScaleTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(resolver.await_count, 1)
                 self.assertEqual(len(set(actor_ids)), min(count, 25))
                 self.assertEqual(len(statements), 1, statements)
-                self.assertEqual({row["id"]: row["allow_text_output"] for row in response.json()}, expected_flags)
-                self.assertEqual(sum(row["allow_text_output"] for row in response.json()), count // 3)
-                self.assertIn("agent_output_configs.allow_text_output", statements[0].lower())
-                for column in ("json_schema", "agent_output_configs.name", "agent_output_configs.description"):
+                self.assertEqual({row["id"] for row in response.json()}, {row["id"] for row in agents})
+                for column in ("agent_output_configs", "agents.prompt", "agents.structured_output_enabled"):
                     self.assertNotIn(column, statements[0].lower())
-                self.assertTrue(all("output_config" not in row and row["updated_by_user"]["username"].startswith("operator-") for row in response.json()))
+                for row in response.json():
+                    self.assertTrue({"prompt", "output_config", "allow_text_output", "structured_output_enabled"}.isdisjoint(row))
+                    self.assertTrue(row["updated_by_user"]["username"].startswith("operator-"))
                 self.assertLess(time.perf_counter() - started, 5, "bounded list fixture unexpectedly stalled")
 
 

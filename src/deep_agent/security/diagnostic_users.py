@@ -191,6 +191,7 @@ class PlatformDiagnosticUserFetcher:
         if not user_ids or len(user_ids) > _BATCH_SIZE:
             raise ValueError("account lookup batch must contain 1 to 100 user IDs")
         response = None
+        failure = None
         on_failure: Callable[[], None] | None = None
         started = time.monotonic()
         phase, reason, outcome = "discovery", "unavailable", "failed"
@@ -248,6 +249,7 @@ class PlatformDiagnosticUserFetcher:
             facts.pop("error_code", None)
             return result
         except DiagnosticUserAuthenticationError as exc:
+            failure = exc
             reason = "authentication_rejected"
             facts["error_type"] = type(exc).__name__
             raise
@@ -255,6 +257,7 @@ class PlatformDiagnosticUserFetcher:
             reason = "deadline_or_cancelled"
             raise
         except Exception as exc:
+            failure = exc
             cause = exc.__cause__ or exc
             facts["error_type"] = type(cause).__name__
             if phase == "discovery" and type(getattr(cause, "status", None)) is int:
@@ -274,6 +277,7 @@ class PlatformDiagnosticUserFetcher:
             if response is not None:
                 response.release()
             log_event(f"diagnostic_users_{outcome}", phase=phase, reason=reason,
+                      level="ERROR" if failure is not None else "DEBUG", exception=failure,
                       duration_ms=round((time.monotonic() - started) * 1000), **facts)
 
 
@@ -361,9 +365,12 @@ class DiagnosticUserProfileResolver:
                 if key[:3] == scope[:3]:
                     self._cache.pop(key, None)
             raise
+        except DiagnosticUserUnavailableError:
+            # The platform fetcher already reports the failed batch.
+            pass
         except Exception as exc:
             # Covers the overall deadline, including discovery and all batches.
-            log_event("diagnostic_users_fallback", phase="resolve",
+            log_event("diagnostic_users_fallback", level="WARNING", phase="resolve", exception=exc,
                       reason="deadline_exceeded" if isinstance(exc, TimeoutError) else "lookup_unavailable",
                       error_type=type(exc).__name__, requested_count=len(missing))
         return result

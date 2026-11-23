@@ -1,6 +1,6 @@
 """Real SQLite/API checks for consuming configuration and the shared API help."""
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -109,3 +109,35 @@ class IntegrationRuntimeApiTests(unittest.IsolatedAsyncioTestCase):
                 headers={**self.headers, "content-type": "application/json"})
             self.assertEqual(response.status_code, 422, response.text)
             self.assertEqual(response.headers["cache-control"], "no-store")
+
+
+    async def test_app_validation_requires_both_admin_and_app_authority(self):
+        path = "/api/v1/integrations/deeptable-assistant/app-configs/validate"
+        payload = {"app_id": "budget001"}
+
+        async def platform(_service, resource, *, space=None, app=None, params=None):
+            if resource == "api/enterprise/list":
+                return [{"enterpriseCode": "tenant-a", "id": "tenant-a-pk"}]
+            if resource == "user/permission":
+                return {"appAdmin": False, "developerRole": app == "budget001"}
+            if resource == "space/get-tenant-code":
+                return "tenant-a" if space == "budget" else "tenant-b"
+            return [{"id": "budget001", "appType": "DEEPFOS", "appName": "年度预算"}]
+
+        with patch(
+            "deep_agent.services.integration_app_access.IntegrationAppDirectory._get",
+            side_effect=platform,
+        ) as request:
+            allowed = await self.client.post(path, json=payload, headers=self.headers)
+            self.assertEqual(allowed.status_code, 200, allowed.text)
+            self.assertEqual(allowed.json()["tenant_id"], "tenant-a")
+            self.assertEqual(allowed.json()["space_id"], "budget")
+            self.assertEqual(allowed.headers["cache-control"], "no-store")
+            denied = await self.client.post(path, json={"app_id": "outside001"}, headers=self.headers)
+            self.assertEqual(denied.status_code, 404, denied.text)
+            self.assertNotIn("tenant-b", denied.text)
+            self.assertEqual(request.await_count, 6)
+            self.assertEqual((await self.client.post(path, json=payload)).status_code, 401)
+            self.assertEqual((await self.client.post(path.replace("deeptable", "deepcube"),
+                             json=payload, headers=self.headers)).status_code, 404)
+        self.assertEqual(await self.stores.integration_settings.list_all(), [])

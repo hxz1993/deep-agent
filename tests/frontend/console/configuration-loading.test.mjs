@@ -52,9 +52,11 @@ test("配置 classic 脚本一起发起下载，按插入顺序执行，完成�
   });
   vm.runInContext(moduleSource(configuration), sandbox);
   const loading = sandbox.loadAdminScripts();
-  assert.equal(scripts.length, 23, "下载不能等前一个 onload 才开始");
+  assert.equal(scripts.length, 25, "下载不能等前一个 onload 才开始");
   assert.ok(scripts.every(script => script.async === false));
   assert.match(scripts[0].src, /\/proxy\/console\/configuration\/core\.js\?v=/);
+  assert.match(scripts.at(-3).src, /app-picker\.js\?v=/);
+  assert.match(scripts.at(-2).src, /agent-service\.js\?v=/);
   assert.match(scripts.at(-1).src, /integrations\.js\?v=/);
   assert.deepEqual(events, []);
   for (const script of scripts) script.onload();
@@ -92,14 +94,14 @@ test("快速重复进入共用配置初始化 Promise，DOM 和绑定均只有�
   h.resolveTemplates(h.requests);
   await tick();
   assert.equal(h.counts.structure, 1);
-  assert.equal(h.scripts.length, 23);
+  assert.equal(h.scripts.length, 25);
   h.scripts.forEach(script => script.onload());
   await one;
   assert.equal(h.counts.decorated, 1);
   assert.deepEqual(h.events, ["DOMContentLoaded"]);
   await h.sandbox.initConfiguration();
   assert.equal(h.requests.length, 2);
-  assert.equal(h.scripts.length, 23);
+  assert.equal(h.scripts.length, 25);
 });
 
 test("模板下载失败可安全重试，部分脚本失败只提供重载且不能重复绑定", async () => {
@@ -113,7 +115,7 @@ test("模板下载失败可安全重试，部分脚本失败只提供重载且�
   const retry = h.sandbox.initConfiguration();
   h.resolveTemplates(h.requests.slice(2));
   await tick();
-  assert.equal(h.scripts.length, 23);
+  assert.equal(h.scripts.length, 25);
   h.scripts[5].onerror();
   await assert.rejects(retry, /脚本加载失败/);
   assert.equal(h.loading.children[1].textContent, "重新加载页面");
@@ -124,7 +126,7 @@ test("模板下载失败可安全重试，部分脚本失败只提供重载且�
   await tick();
   assert.deepEqual(h.events, []);
   assert.equal(h.counts.structure, 1);
-  assert.equal(h.scripts.length, 23);
+  assert.equal(h.scripts.length, 25);
 });
 
 test("配置脚本运行时异常进入重载状态，不误报加载成功，也不拦截无关脚本错误", async () => {
@@ -166,6 +168,36 @@ test("恢复配置标签等待目标刷新，已激活标签和未激活标签�
   pending.resolve();
   await restoring;
   assert.equal(restored, true);
+});
+
+test("刷新调试应用后，MCP 原行等待列表加载并且只检测一次", async () => {
+  const h = configurationLoaderHarness();
+  const calls = [];
+  const pending = deferred();
+  const tab = node();
+  tab.dataset.tab = "mcp";
+  tab.click = () => {
+    tab.classList.add("active");
+    h.sandbox.window.configurationTabsAdmin = { pending: pending.promise };
+  };
+  h.sandbox.window.history = {
+    state: { debugContextResume: { tab: "mcp", app: "test001", inspectMcp: "deepfos" } },
+    replaceState(next) { this.state = next; },
+  };
+  h.sandbox.window.DeepAgentConsoleAPI = { loadContext: () => ({ app: "test001" }) };
+  h.sandbox.document.querySelector = () => tab;
+  h.sandbox.document.querySelectorAll = () => [
+    { dataset: { inspectMcp: "other" }, click: () => assert.fail("不能检测其他行") },
+    { dataset: { inspectMcp: "deepfos" }, click: () => calls.push("deepfos") },
+  ];
+  const restoring = h.sandbox.restoreConfigurationTab();
+  await tick();
+  assert.deepEqual(calls, []);
+  assert.equal(h.sandbox.window.history.state.debugContextResume, undefined);
+  pending.resolve();
+  await restoring;
+  await h.sandbox.restoreConfigurationTab();
+  assert.deepEqual(calls, ["deepfos"]);
 });
 
 test("配置绑定阶段不查询隐藏页目录、数据库或 Agent，模型目录绑定不请求模型", () => {
@@ -251,7 +283,7 @@ test("Agent 列表先展示，渠道晚到补充；过时请求不能覆盖新�
   admin.setChannelAccounts = accounts => channels.push(accounts);
   const first = admin.refresh();
   const second = admin.refresh();
-  const lists = requests.filter(request => request.path === "/api/v1/agents");
+  const lists = requests.filter(request => request.path === "/api/v1/agents?include_updater=true");
   const annotations = requests.filter(request => request.path === "/api/v1/channel-accounts");
   lists.at(-1).resolve([{ id: "new" }]);
   await second;
@@ -404,7 +436,7 @@ test("General 刷新仅更新摘要，不重绘已开编辑草稿和保存中的
   h.get("documentParsingSettingsDialog").open = true;
   h.get("webSearchApiKey").value = "unsaved search key";
   h.get("documentParsingApiKey").value = "unsaved document key";
-  const savedSearch = { value: { mode: "provider", provider: "kimi" } };
+  const savedSearch = { value: { mode: "provider", provider: "deepseek" } };
   const savedDocument = { value: { mode: "provider", provider: "paddle" }, providers: [] };
   admin.webSearch = savedSearch;
   admin.documentParsing = savedDocument;

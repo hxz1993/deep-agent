@@ -167,7 +167,6 @@ class CatalogNormalizationTests(unittest.TestCase):
                 "anthropic",
                 "deepseek",
                 "google",
-                "minimax",
                 "minimax-cn",
                 "moonshotai",
                 "openai",
@@ -180,11 +179,11 @@ class CatalogNormalizationTests(unittest.TestCase):
     def test_domestic_minimax_and_stepfun_preserve_runtime_metadata(self) -> None:
         rows, stats = normalize_models_dev_bundle({}, ADDITIONAL_PROVIDERS, [])
 
-        self.assertEqual(stats.row_count, 3)
+        self.assertEqual(stats.row_count, 2)
         self.assertEqual(stats.model_count, 2)
         self.assertEqual(stats.lab_count, 2)
         minimax = [row for row in rows if row["lab_id"] == "minimax"]
-        self.assertEqual({row["provider_id"] for row in minimax}, {"minimax", "minimax-cn"})
+        self.assertEqual({row["provider_id"] for row in minimax}, {"minimax-cn"})
         for row in minimax:
             self.assertEqual(row["canonical_model_id"], "minimax/MiniMax-M2.5")
             self.assertEqual(row["lab_label"], "MiniMax")
@@ -195,8 +194,7 @@ class CatalogNormalizationTests(unittest.TestCase):
         self.assertEqual(stepfun["provider_metadata"]["adapter"], "openai_compatible")
         self.assertEqual(stepfun["provider_api_url"], "https://api.stepfun.com/v1")
 
-        # Export/import must retain both regional endpoints, without duplicating
-        # the canonical MiniMax model or losing either provider's model entry.
+        # A round trip retains the domestic endpoint and canonical MiniMax ID.
         exported = export_models_dev_catalog([ModelCatalog(**row) for row in rows])
         imported, _ = normalize_models_dev_bundle(
             exported["models"], exported["providers"], exported["labs"]

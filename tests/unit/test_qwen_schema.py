@@ -260,8 +260,8 @@ class QwenSchemaWireTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(executions, [["a"]])
         self.assertEqual(len(requests), 3)
         retry_messages = requests[1]["messages"]
-        self.assertTrue(any(m.get("role") == "tool" and "validation" in str(m.get("content")).lower()
-                            for m in retry_messages))
+        retry = next(m for m in retry_messages if m.get("role") == "tool" and m.get("tool_call_id") == "call-1")
+        self.assertEqual(json.loads(retry["content"])["error"][0]["loc"], ["labels"])
         for request in requests:
             self.assertIn("anyOf", request["tools"][0]["function"]["parameters"]["properties"]["labels"])
 

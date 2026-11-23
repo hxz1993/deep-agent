@@ -1,3 +1,4 @@
+import { eventEffort } from '../../../console/reasoning-ui.js';
 import { cacheTrajectorySummary } from "../../../console/cache-usage.js";
 import { savedSessionCounts, savedRunFacts, savedRunState } from "../../../console/session-presentation.js";
 import assert from "node:assert/strict";
@@ -7,6 +8,8 @@ import vm from "node:vm";
 import { createHistoryFollower } from "../../../console/history-follower.js";
 import { boundedStreamRequest } from "../../../console/stop-recovery.js";
 import { historyThroughRun } from "../../../console/session-observer.js";
+import { sameHistoryValue } from "../../../console/history-comparison.js";
+import { normalizeConversationHistory } from "../../../console/conversation-items.js";
 
 const turn = () => new Promise(setImmediate);
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
@@ -48,6 +51,84 @@ test("running history follows at one second without starting another model run",
   } finally { h.follower.stop(); }
 });
 
+test("fallback history is bounded to three seconds while status still updates each second", async () => {
+  let clock = 0;
+  let statusReads = 0;
+  let historyReads = 0;
+  const h = fixture({ historyIntervalMs: 3000, now: () => clock,
+    readStatus: async () => { statusReads += 1; return { status: "running", run_id: "run" }; },
+    readHistory: async () => ({ items: [++historyReads] }),
+  });
+  try {
+    await h.follower.start();
+    for (clock = 1000; clock <= 5000; clock += 1000) await h.tick();
+    assert.equal(statusReads, 6);
+    assert.equal(historyReads, 2, "same-status checkpoint updates remain visible every three seconds");
+    clock = 6000;
+    await h.tick();
+    assert.equal(historyReads, 3);
+  } finally { h.follower.stop(); }
+});
+
+test("fallback explicit refresh and status or Run changes bypass the history interval", async () => {
+  let clock = 0;
+  let status = { status: "running", run_id: "first" };
+  let reads = 0;
+  const h = fixture({ historyIntervalMs: 3000, now: () => clock,
+    readStatus: async () => status,
+    readHistory: async () => ({ items: [++reads] }),
+  });
+  try {
+    await h.follower.start();
+    clock = 1000; await h.tick(); assert.equal(reads, 1);
+    await h.follower.refresh(); assert.equal(reads, 2);
+    status = { status: "running", run_id: "second" };
+    clock = 1500; await h.tick(); assert.equal(reads, 3);
+    status = { status: "cancel_requested", run_id: "second" };
+    clock = 1700; await h.tick(); assert.equal(reads, 4);
+    status = { status: "idle" };
+    clock = 1800; await h.tick(); assert.equal(reads, 5);
+    assert.equal(h.timers.size, 0);
+  } finally { h.follower.stop(); }
+});
+
+test("fallback failed history reads retry instead of extending the successful-read window", async () => {
+  let clock = 0;
+  let reads = 0;
+  const h = fixture({ historyIntervalMs: 3000, now: () => clock,
+    readHistory: async () => { if (++reads === 2) throw new Error("HTTP 503"); return { items: [] }; },
+  });
+  try {
+    await h.follower.start();
+    clock = 3000; await h.tick();
+    clock = 4000; await h.tick();
+    assert.equal(reads, 3);
+    assert.equal(h.calls.filter(([kind]) => kind === "error").length, 1);
+  } finally { h.follower.stop(); }
+});
+
+test("explicit refresh queued during a throttled History read remains forced and serialized", async () => {
+  const gate = deferred();
+  let clock = 0;
+  let reads = 0;
+  const h = fixture({ historyIntervalMs: 3000, now: () => clock,
+    readHistory: async () => ++reads === 2 ? gate.promise : { items: [] },
+  });
+  try {
+    await h.follower.start();
+    clock = 1000;
+    const pending = h.follower.refresh();
+    await turn();
+    const queued = h.follower.refresh();
+    assert.equal(reads, 2);
+    gate.resolve({ items: [] });
+    await Promise.all([pending, queued]);
+    assert.equal([...h.timers.values()][0].delay, 0);
+    await h.tick();
+    assert.equal(reads, 3, "queued refresh is not swallowed by the successful-read timestamp");
+  } finally { h.follower.stop(); }
+});
+
 test("idle does not unlock until the final history request resolves", async () => {
   const gate = deferred();
   const h = fixture({ readStatus: async () => ({ status: "idle" }), readHistory: () => gate.promise });
@@ -63,7 +144,7 @@ test("idle does not unlock until the final history request resolves", async () =
 
 test("a failed final history read never reports idle and retries", async () => {
   let fail = true;
-  const h = fixture({ readStatus: async () => ({ status: "idle" }), readHistory: async () => {
+  const h = fixture({ historyIntervalMs: 3000, readStatus: async () => ({ status: "idle" }), readHistory: async () => {
     if (fail) throw new Error("HTTP 503");
     return { items: ["completed"] };
   } });
@@ -192,6 +273,7 @@ const presenterSource = readFileSync(new URL("../../../console/conversation-pres
 test("Console checks the selected session identity after asynchronous UI tool loading", async () => {
   const gates = { a: deferred(), b: deferred() };
   const observed = [];
+  const watched = [];
   const loading = [];
   const state = { sessionId: "a", agentId: "agent", historyController: null };
   const context = {
@@ -203,10 +285,11 @@ test("Console checks the selected session identity after asynchronous UI tool lo
     trajectory: { setHistory() {} },
     loadUiTools: async () => gates[state.sessionId].promise,
     observeSessionHistory: async (session) => { observed.push(session.id); state.historyReady = true; },
+    watchSessionActivity: (session) => { watched.push(session.id); },
     loadContextStatus() {}, addSystemNote() {},
   };
   vm.createContext(context);
-  const fn = source.slice(source.indexOf("async function loadSessionHistory("), source.indexOf("\nfunction stopHistoryObservation("));
+  const fn = source.slice(source.indexOf("async function loadSessionHistory("), source.indexOf("\nfunction watchSessionActivity("));
   vm.runInContext(`${fn}\nthis.load = loadSessionHistory;`, context);
   const first = context.load({ id: "a", agentId: "agent" });
   await turn();
@@ -217,6 +300,7 @@ test("Console checks the selected session identity after asynchronous UI tool lo
   gates.a.resolve();
   await first;
   assert.deepEqual(observed, ["b"]);
+  assert.deepEqual(watched, ["b"]);
   assert.deepEqual(loading, [["a", true], ["b", true], ["b", false]], "late old requests never unlock another session");
 });
 
@@ -281,7 +365,7 @@ test("running History is presentation-only even when the tool catalog can restor
   assert.match(source, /autoAttachDeferred: false/);
   assert.match(presenterSource, /if \(autoAttachDeferred\) maybeAttachHitlWidget\(existing, merged\)/);
   assert.match(presenterSource, /if \(autoAttachDeferred\) maybeAttachHitlWidget\(block, merged\)/);
-  assert.match(presenterSource, /attachHitlWidget\(call\) \{\s*if \(!allowDeferred\) \{[\s\S]*?return;/);
+  assert.match(presenterSource, /attachHitlWidget\(call\) \{\s*streamRender\.flush\(\);\s*if \(!allowDeferred\) \{[\s\S]*?return;/);
   assert.match(source, /state\.awaitingHitl = !running && latestPendingDeferredTool/);
 });
 
@@ -311,9 +395,14 @@ async function observedMetricsFixture(options = {}) {
   let trajectoryUpdates = 0;
   let trajectoryItems = [];
   let editingTitle = false;
+  let responseHistory = { items: [] };
   const controller = new AbortController();
   const context = {
-    state, cacheTrajectorySummary, boundedStreamRequest, historyThroughRun, savedSessionCounts, savedRunFacts, savedRunState, prepareSessionRender: async () => {},
+    state, eventEffort, cacheTrajectorySummary, boundedStreamRequest, historyThroughRun, savedSessionCounts, savedRunFacts, savedRunState, prepareSessionRender: async () => {},
+    sameHistoryValue, normalizeConversationHistory,
+    JSON: { stringify() { throw new Error("History polling must not serialize a full snapshot"); } },
+    sessionApiUrl: (_session, path) => path,
+    daFetch: async () => ({ ok: true, json: async () => responseHistory }),
     createHistoryFollower(options) { callbacks = options; return { start: async () => {}, stop() {} }; },
     loadAllSessionEvents() { const gate = deferred(); requests.push(gate); return gate.promise; },
     trajectory: { events: () => trajectoryItems, setHistory(history) { trajectoryUpdates += 1; trajectoryItems = history.items; } },
@@ -328,12 +417,33 @@ async function observedMetricsFixture(options = {}) {
   return {
     selected, state, requests, controller,
     history(status) { callbacks.onHistory({ history: { items: [] }, signature: status, changed: true }, { status }); },
+    async read(history, status = "running") {
+      responseHistory = history;
+      const result = await callbacks.readHistory(controller.signal, { status });
+      await callbacks.onHistory(result, { status });
+      return result;
+    },
+    get historyIntervalMs() { return callbacks.historyIntervalMs; },
     finish(index, items) { requests[index].resolve({ response: { ok: true }, data: { items: items.map((item, index) => ({ event_id: `event-${index}`, ...item })) } }); },
     get renders() { return renders; }, get trajectoryUpdates() { return trajectoryUpdates; },
     get trajectoryItems() { return trajectoryItems; },
     editTitle() { editingTitle = true; },
   };
 }
+
+test("fallback compares actual same-sequence checkpoints and enables bounded history reads", async () => {
+  const h = await observedMetricsFixture();
+  const first = { items: [{ item_id: "same", kind: "assistant_message", text: "正文", status: "running", order: { sequence: 1 } }] };
+  try {
+    assert.equal(h.historyIntervalMs, 3000);
+    assert.equal((await h.read(first)).changed, true);
+    assert.equal((await h.read(structuredClone(first))).changed, false);
+    const updated = structuredClone(first);
+    updated.items[0].text += "追加";
+    assert.equal((await h.read(updated)).changed, true, "Sequence is not a History version");
+    assert.equal((await h.read(structuredClone(updated), "idle")).changed, true, "terminal forces a read-only transition");
+  } finally { h.controller.abort(); }
+});
 
 test("observed terminal reuses serialized event reads to refresh canonical Session metrics once", async () => {
   const h = await observedMetricsFixture();

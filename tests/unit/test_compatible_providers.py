@@ -9,6 +9,10 @@ import httpx2
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelMessagesTypeAdapter, ThinkingPart
+from pydantic_ai.messages import BinaryContent
+from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.providers.openai_compatible import OpenAICompatibleProvider
+from pydantic import BaseModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
 
 from deep_agent.models.compatible_providers import MiniMaxProvider, StepFunProvider
@@ -92,15 +96,174 @@ def _openai_reply(*, tools: bool, stream: bool) -> httpx2.Response:
     events = [{
         "id": response["id"], "object": "chat.completion.chunk", "created": 1,
         "model": response["model"], "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+        "usage": {"prompt_tokens": 12, "completion_tokens": 2, "total_tokens": 14},
     }, {
         "id": response["id"], "object": "chat.completion.chunk", "created": 1,
         "model": response["model"], "choices": [{"index": 0, "delta": {},
         "finish_reason": "tool_calls" if tools else "stop"}], "usage": response["usage"],
     }]
+    events.append(dict(events[-1]))  # StepFun may repeat its final cumulative totals.
+    events.append({**events[-1], "usage": None, "choices": []})
     return _sse(events)
 
 
+def _responses_reply(*, tools: bool, stream: bool, structured: bool = False) -> httpx2.Response:
+    reasoning = {"id": "rs-fixture", "type": "reasoning", "summary": [
+        {"type": "summary_text", "text": "Use the addition tool."},
+    ]}
+    output = ({"id": "fc-fixture", "type": "function_call", "call_id": "call-add",
+               "name": "add", "arguments": '{"left":97,"right":163}', "status": "completed"}
+              if tools else {"id": "msg-fixture", "type": "message", "role": "assistant", "status": "completed",
+                             "content": [{"type": "output_text", "text": '{"value":260}' if structured else "260", "annotations": []}]})
+    response = {"id": "resp-fixture", "object": "response", "created_at": 1, "status": "completed",
+                "model": "gpt-6-luna", "output": [reasoning, output], "error": None,
+                "usage": {"input_tokens": 20, "output_tokens": 10, "total_tokens": 30,
+                          "input_tokens_details": {"cached_tokens": 0}, "output_tokens_details": {"reasoning_tokens": 4}}}
+    if not stream:
+        return httpx2.Response(200, json=response)
+    events = [
+        {"type": "response.created", "response": {**response, "output": [], "status": "in_progress"}},
+        {"type": "response.output_item.added", "output_index": 0, "item": {**reasoning, "summary": []}},
+        {"type": "response.reasoning_summary_text.delta", "item_id": reasoning['id'], "output_index": 0,
+         "summary_index": 0, "delta": "Use the addition tool."},
+        {"type": "response.output_item.added", "output_index": 1,
+         "item": {**output, "arguments": ""} if tools else {**output, "content": []}},
+    ]
+    if tools:
+        events.append({"type": "response.function_call_arguments.delta", "item_id": output['id'],
+                       "output_index": 1, "delta": output['arguments']})
+    else:
+        events.append({"type": "response.output_text.delta", "item_id": output['id'], "output_index": 1,
+                       "content_index": 0, "delta": output['content'][0]['text'], "logprobs": []})
+    events.extend([{"type": "response.output_item.done", "output_index": 1, "item": output},
+                   {"type": "response.completed", "response": response}])
+    for index, event in enumerate(events):
+        event['sequence_number'] = index
+    return _sse(events, named=True)
+
+
 class CompatibleProviderWireTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stepfun_cumulative_usage_replaces_duplicates_and_preserves_missing_chunks(self):
+        for video in (False, True):
+            with self.subTest(video=video):
+                def respond(request):
+                    body = json.loads(request.content)
+                    self.assertEqual(body['stream_options'], {'include_usage': True, 'continuous_usage_stats': True})
+                    chunk = {'id': 'step-usage', 'object': 'chat.completion.chunk', 'created': 1,
+                             'model': 'step-5-preview', 'choices': [{'index': 0, 'delta': {}, 'finish_reason': None}]}
+                    events = []
+                    for output in (1, None, 2, 2, 'empty', None):
+                        event = {**chunk, 'choices': [{'index': 0, 'delta': {'content': 'ok' if not events else ''}, 'finish_reason': None}]}
+                        if output == 'empty':
+                            event['usage'] = {}
+                        elif output is not None:
+                            event['usage'] = {'prompt_tokens': 20, 'completion_tokens': output, 'total_tokens': 20 + output}
+                        events.append(event)
+                    events.append({**chunk, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]})
+                    return _sse(events)
+                async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as client:
+                    with patch('deep_agent.models.provider_registry.StepFunProvider', side_effect=lambda **kw: StepFunProvider(http_client=client, **kw)):
+                        model = resolve_provider_model(model_name='step-5-preview', provider=_config('stepfun'), input_modalities=['text', 'video'] if video else ['text'])
+                    async with Agent(model).run_stream('reply') as result:
+                        self.assertEqual(await result.get_output(), 'ok')
+                        self.assertEqual(result.usage.input_tokens, 20)
+                        self.assertEqual(result.usage.output_tokens, 2)
+
+    async def test_explicit_responses_reasoning_tools_history_and_native_output(self):
+        for provider_type in ('openai', 'openai_compatible'):
+            for stream in (False, True):
+                with self.subTest(provider=provider_type, stream=stream):
+                    requests, executions = [], []
+                    def respond(request):
+                        body = json.loads(request.content)
+                        requests.append(body)
+                        self.assertEqual(request.url.path, '/v1/responses')
+                        self.assertEqual(body['reasoning'].get('summary'), 'auto')
+                        self.assertNotIn('effort', body['reasoning'])
+                        return _responses_reply(tools=len(requests) == 1, stream=body.get('stream', False))
+                    async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as client:
+                        provider = OpenAIProvider(api_key='fixture-only', base_url='https://gateway.example/v1', http_client=client)
+                        with patch('deep_agent.models.provider_registry._openai_style_provider', return_value=provider):
+                            model = resolve_provider_model(model_name='gpt-6-luna', provider=_config(provider_type, custom='https://gateway.example/v1'), tags=['reasoning', 'openai_responses'])
+                        agent = Agent(model)
+                        @agent.tool_plain
+                        def add(left: int, right: int) -> int:
+                            executions.append((left, right))
+                            return left + right
+                        if stream:
+                            async with agent.run_stream('add') as result:
+                                self.assertEqual(await result.get_output(), '260')
+                                history = result.all_messages()
+                        else:
+                            result = await agent.run('add')
+                            self.assertEqual(result.output, '260')
+                            history = result.all_messages()
+                        restored = ModelMessagesTypeAdapter.validate_json(ModelMessagesTypeAdapter.dump_json(history))
+                        self.assertEqual((await agent.run('repeat', message_history=restored)).output, '260')
+                    self.assertEqual(executions, [(97, 163)])
+                    self.assertTrue(any(isinstance(p, ThinkingPart) and p.content for m in restored for p in m.parts))
+                    self.assertTrue(any(item.get('type') == 'function_call_output' and item.get('call_id') == 'call-add' for item in requests[1]['input']))
+
+    async def test_responses_native_structured_output_and_image_wire(self):
+        class Answer(BaseModel):
+            value: int
+        for stream in (False, True):
+            with self.subTest(stream=stream):
+                requests = []
+                def respond(request):
+                    body = json.loads(request.content)
+                    requests.append(body)
+                    return _responses_reply(tools=False, stream=body.get('stream', False), structured=True)
+                async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as client:
+                    provider = OpenAIProvider(api_key='fixture-only', http_client=client)
+                    with patch('deep_agent.models.provider_registry._openai_style_provider', return_value=provider):
+                        model = resolve_provider_model(model_name='gpt-6-luna', provider=_config('openai'), tags=['reasoning', 'openai_responses'])
+                    from pydantic_ai import NativeOutput
+                    agent = Agent(model, output_type=NativeOutput(Answer))
+                    prompt = ['return value', BinaryContent(data=b'fixture-image', media_type='image/png')]
+                    if stream:
+                        async with agent.run_stream(prompt) as result:
+                            self.assertEqual((await result.get_output()).value, 260)
+                    else:
+                        self.assertEqual((await agent.run(prompt)).output.value, 260)
+                self.assertEqual(requests[0]['text']['format']['type'], 'json_schema')
+                self.assertTrue(requests[0]['text']['format']['strict'])
+                self.assertTrue(any(item.get('type') == 'input_image' for message in requests[0]['input'] for item in message.get('content', []) if isinstance(item, dict)))
+
+    async def test_xai_responses_stream_sends_effort_and_replays_tool_result(self):
+        requests = []
+
+        def respond(request):
+            body = json.loads(request.content)
+            requests.append(body)
+            self.assertEqual(str(request.url), "https://api.x.ai/v1/responses")
+            self.assertEqual(body["model"], "grok-4.7")
+            self.assertEqual(body["reasoning"], {"effort": "medium"})
+            self.assertFalse(body["store"])
+            self.assertNotIn("previous_response_id", body)
+            return _responses_reply(tools=len(requests) == 1, stream=body.get("stream", False))
+
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as client:
+            with patch("deep_agent.models.provider_registry.OpenAICompatibleProvider",
+                       side_effect=lambda name, **kw: OpenAICompatibleProvider(name, http_client=client, **kw)):
+                model = resolve_provider_model(model_name="grok-4.7", provider=_config("xai"))
+            agent = Agent(model, model_settings={"openai_reasoning_effort": "medium"})
+
+            @agent.tool_plain
+            def add(left: int, right: int) -> int:
+                return left + right
+
+            async with agent.run_stream("add") as result:
+                self.assertEqual(await result.get_output(), "260")
+                restored = ModelMessagesTypeAdapter.validate_json(result.all_messages_json())
+            self.assertEqual((await agent.run("repeat", message_history=restored)).output, "260")
+        self.assertEqual(len(requests), 3)
+        for body in requests[1:]:
+            self.assertTrue(any(
+                item.get("type") == "function_call_output" and item.get("call_id") == "call-add"
+                for item in body["input"]
+            ))
+
     async def _tool_round_trip(self, code: str, stream: bool) -> list:
         calls, executions = [], []
 
@@ -130,6 +293,9 @@ class CompatibleProviderWireTests(unittest.IsolatedAsyncioTestCase):
                 async with agent.run_stream("Add 97 and 163 using the tool") as result:
                     self.assertEqual(await result.get_output(), "260")
                     history = result.all_messages()
+                    if code == 'stepfun':
+                        self.assertEqual(result.usage.input_tokens, 24)
+                        self.assertEqual(result.usage.output_tokens, 8)
             else:
                 result = await agent.run("Add 97 and 163 using the tool")
                 self.assertEqual(result.output, "260")

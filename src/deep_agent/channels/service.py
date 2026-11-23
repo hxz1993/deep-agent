@@ -10,7 +10,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
-from loguru import logger
+from deepfos_platform.log import safe_logger as logger
 from deep_agent.agent.observability import log_event
 from deep_agent.core.exceptions import AgentModelNotConfiguredError
 
@@ -301,7 +301,7 @@ class ChannelService:
                             session_id=None,
                         )
                 except Exception as exc:
-                    _log_job("channel_identity_unavailable", job, error_type=type(exc).__name__,
+                    _log_job("channel_identity_unavailable", job, exception=exc,
                              reason="timeout" if isinstance(exc, TimeoutError) else "lookup_error")
                     # Identity is optional; auth/network/permission failures
                     # must not turn an otherwise valid chat into a failed Run.
@@ -519,11 +519,11 @@ class ChannelService:
                         notice = "已停止。" if job.stopped else "服务已停止，请稍后重试。"
                         await self._deliver(job, f"{preview}\n\n{notice}".strip())
                 except TimeoutError:
-                    logger.warning("Channel loading completion timed out during cancellation")
+                    logger.opt(exception=True).warning("Channel loading completion timed out during cancellation")
             raise
         except Exception as exc:
             await self._cancel_outbound(job)
-            _log_job("channel_processing_failed", job, error_type=type(exc).__name__)
+            _log_job("channel_processing_failed", job, exception=exc)
             from .adapters.wecom_app import WecomVoiceError
             voice_error = isinstance(exc, WecomVoiceError)
             missing_model = isinstance(exc, AgentModelNotConfiguredError)
@@ -539,8 +539,8 @@ class ChannelService:
                 try:
                     async with asyncio.timeout(2):
                         await stream.aclose()
-                except Exception as exc:
-                    logger.warning("Channel stream cleanup failed error_type={}", type(exc).__name__)
+                except Exception:
+                    logger.opt(exception=True).warning("Channel stream cleanup failed run_id={}", job.run_id)
 
     async def _preview(self, job: MessageJob, content: str = "", *, loading: bool = False) -> bool:
         """Best-effort progress; a failed preview must not abort/replay a Run."""
@@ -552,7 +552,7 @@ class ChannelService:
         except Exception as exc:
             # Stop preview attempts for this Run rather than waiting for an SDK
             # timeout on every delta. Still attempt the final delivery once.
-            _log_job("channel_preview_failed", job, error_type=type(exc).__name__)
+            _log_job("channel_preview_failed", job, exception=exc)
             return False
         return True
 
@@ -560,7 +560,7 @@ class ChannelService:
         try:
             await job.adapter.reply(job.message, job.reply_id, text, True)
         except Exception as exc:
-            _log_job("channel_delivery_failed", job, error_type=type(exc).__name__)
+            _log_job("channel_delivery_failed", job, exception=exc)
             # Never turn a completed /new into a retryable operation because
             # the network lost its acknowledgement.
             await self.store.update_run(job.run_id, delivery_status="failed", error_code="delivery_failed", error_message="Channel reply delivery failed")
@@ -606,7 +606,7 @@ class ChannelService:
                                                          reply_to_current=False)
                 hashes.add(hashlib.sha256(part.strip().encode()).hexdigest())
         except Exception as exc:
-            _log_job("channel_delivery_failed", job, error_type=type(exc).__name__)
+            _log_job("channel_delivery_failed", job, exception=exc)
             await self.store.update_run(job.run_id, delivery_status="failed", error_code="delivery_failed",
                                         error_message="Channel structured output delivery failed")
             return
@@ -618,10 +618,10 @@ class ChannelService:
         try:
             binding = await self.store.get_binding(job.account.id, job.message.peer_type, job.message.peer_id)
             session_id = binding.session_id if binding else None
-            if command == "/help":
-                text = help_text()
-            elif command == "unknown":
-                text = "未知命令或参数。请单独发送以下命令：\n\n" + help_text()
+            if command in {"/help", "unknown"}:
+                text = help_text(channel_type=job.account.channel_type)
+                if command == "unknown":
+                    text = "未知命令或参数。请单独发送以下命令：\n\n" + text
             elif command == "/whoami":
                 text = f"User ID：{job.message.sender_id}"
                 if job.message.peer_type == "group":
@@ -640,8 +640,8 @@ class ChannelService:
                 text = f"Agent：{facts['agent_name']}\n默认模型：{facts['model_name']}\n会话：{session_id or '尚未创建'}\n任务：{label}\n等待消息：{len(peer.pending)}"
             await self.store.update_run(job.run_id, processing_status="completed", session_id=session_id)
             await self._deliver(job, text)
-        except Exception as exc:
-            logger.warning("Channel command failed error_type={}", type(exc).__name__)
+        except Exception:
+            logger.opt(exception=True).warning("Channel command failed run_id={}", job.run_id)
             await self.store.update_run(job.run_id, processing_status="failed", error_code="command_failed", error_message="Channel command failed")
             await self._deliver(job, "命令执行失败，请稍后重试。")
 
@@ -691,8 +691,8 @@ class ChannelService:
                 if discarded:
                     text += f"已取消 {len(discarded)} 条等待消息。"
                 await self._deliver(job, text)
-        except Exception as exc:
-            logger.warning("Channel control failed error_type={}", type(exc).__name__)
+        except Exception:
+            logger.opt(exception=True).warning("Channel control failed run_id={}", job.run_id)
             await self.store.update_run(job.run_id, processing_status="failed", error_code="command_failed", error_message="Channel control failed")
             await self._deliver(job, "无法确认任务停止，未切换会话，请稍后重试。")
             # Do not release a potentially still-running peer on an API error.
@@ -736,7 +736,8 @@ class ChannelService:
                     self._kick(peer)
                     return
             except Exception as exc:
-                logger.warning("Channel cancellation confirmation failed error_type={}", type(exc).__name__)
+                logger.debug("Channel cancellation confirmation retry session_id={} error_type={}",
+                             session_id, type(exc).__name__)
             await asyncio.sleep(1)
 
     async def close_account(self, account_id: str) -> None:

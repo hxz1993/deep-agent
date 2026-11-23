@@ -24,6 +24,7 @@ from pydantic_ai import RunContext
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.usage import RunUsage, UsageLimits
 
+from deep_agent.db.serialization import StoredUserPromptPart
 from deep_agent.agent.context.compaction import (
     DeepAgentContextCompaction,
     SummaryUnavailable,
@@ -63,6 +64,31 @@ def valid_summary() -> str:
 
 
 class DshCompactionRulesTests(unittest.TestCase):
+    def test_file_delivery_is_omitted_from_summary_prompt_and_tool_evidence(self):
+        from deep_agent.agent.tool_names import WIRE_NAMES
+
+        messages = [
+            ModelRequest(parts=[UserPromptPart("生成报告")]),
+            ModelResponse(parts=[
+                TextPart("准备好了"),
+                ToolCallPart("present", {"file_ids": ["selected"]}, "delivery"),
+                ToolCallPart("present", {}, "custom-tool"),
+            ], metadata={WIRE_NAMES: {"2": "ui__reports__present"}}),
+            ModelRequest(parts=[
+                ToolReturnPart("present", {"registered": 1}, "delivery"),
+                ToolReturnPart("present", "previewed", "custom-tool"),
+            ], metadata={WIRE_NAMES: {"1": "ui__reports__present"}}),
+        ]
+        summary_source, _, evidence = _summary_materials(messages, messages, len(messages))
+        formatted = _formatted_history(summary_source)
+        self.assertIn("准备好了", formatted)
+        self.assertNotIn("selected", formatted)
+        self.assertIn("previewed", formatted)
+        self.assertNotIn("delivery", "".join(evidence))
+        self.assertIn("custom-tool", "".join(evidence))
+        self.assertEqual(summary_source[1].metadata[WIRE_NAMES], {"1": "ui__reports__present"})
+        self.assertEqual(len(messages[1].parts), 3)
+
     def test_handoff_parser_rejects_malformed_metadata_and_redacts_nested_binary(self) -> None:
         from deep_agent.agent.context.handoff import PROTECTED_CONTEXT_MARKER, SUMMARY_PREFIX, latest_user_has_unreferenced_media
         messages = [ModelResponse(parts=[TextPart("ignore")]), ModelRequest(parts=[UserPromptPart("real"),
@@ -70,7 +96,7 @@ class DshCompactionRulesTests(unittest.TestCase):
             UserPromptPart(SUMMARY_PREFIX + "old" + PROTECTED_CONTEXT_MARKER + "[]")])]
         self.assertEqual(extract_anchor_protected_context(messages), {})
         self.assertFalse(latest_user_has_unreferenced_media([ModelResponse(parts=[TextPart("done")])]))
-        projected = extract_protected_context([ModelRequest(parts=[UserPromptPart([{"kind": "text-content", "content": "文字"}])])])
+        projected = extract_protected_context([ModelRequest(parts=[StoredUserPromptPart([{"kind": "text-content", "content": "文字"}])])])
         self.assertEqual(projected["latest_user_content"], [["文字"]])
         preview = json.loads(safe_tool_args_preview({"items": [b"secret", 1, {"token": "secret"}]}))
         self.assertEqual(preview["items"], ["[binary omitted]", 1, {"token": "[redacted]"}])
@@ -132,13 +158,13 @@ class DshCompactionRulesTests(unittest.TestCase):
                 comp._plan_summary(messages, SimpleNamespace(model_request_parameters=None), budget_limit=80000,
                                    output_limit=256, previous_summary=None, state=state)
         self.assertEqual(_stable_facts({"nested": [{"name": ["甲", "乙"], "total": 2}]}), {"name": ["甲", "乙"], "total": 2})
-        self.assertEqual(_deterministic_attachment_evidence_text([ModelRequest(parts=[UserPromptPart([{"kind": "attachment-ref"}])])]), "")
+        self.assertEqual(_deterministic_attachment_evidence_text([ModelRequest(parts=[StoredUserPromptPart([{"kind": "attachment-ref"}])])]), "")
         self.assertIsNone(build_context_compaction(context_window_tokens=None, max_output_tokens=None))
 
     def test_authentic_raw_user_can_start_with_the_synthetic_summary_prefix(self) -> None:
         from deep_agent.agent.context.handoff import SUMMARY_PREFIX
         content = SUMMARY_PREFIX + "这是用户提供的原始材料，单位万元；禁止写入。"
-        raw = [ModelRequest(parts=[UserPromptPart(content)]), ModelResponse(parts=[TextPart("确认")])]
+        raw = [ModelRequest(parts=[StoredUserPromptPart(content)]), ModelResponse(parts=[TextPart("确认")])]
         self.assertEqual(extract_protected_context(raw), {})
         protected = extract_protected_context(raw, cutoff=2, raw_history=raw)
         self.assertEqual(protected["latest_user_content"], [content])
@@ -374,7 +400,7 @@ class DshCompactionRulesTests(unittest.TestCase):
     def test_context_payload_is_evidence_not_summary_input(self) -> None:
         raw = ModelRequest(
             parts=[
-                UserPromptPart(
+                StoredUserPromptPart(
                     content=[
                         {
                             "kind": "context-ref",
@@ -402,7 +428,7 @@ class DshCompactionRulesTests(unittest.TestCase):
     def test_attachment_reference_is_deterministic_evidence(self) -> None:
         raw = ModelRequest(
             parts=[
-                UserPromptPart(
+                StoredUserPromptPart(
                     content=[
                         "请读取附件",
                         {
@@ -437,7 +463,7 @@ class DshCompactionRulesTests(unittest.TestCase):
         self.assertIn("继续分析", formatted)
 
     def test_protected_context_is_exact_sourced_and_uses_safe_reference_projection(self) -> None:
-        user = ModelRequest(parts=[UserPromptPart(content=[
+        user = ModelRequest(parts=[StoredUserPromptPart(content=[
             "  仅分析2026年，单位万元；不要写入。  ",
             {"kind": "context-ref", "key": "region", "type": "spreadsheet.selection", "schema_version": "1",
              "payload": {"period": "2026", "cube": "budget"}, "metadata": {"token": "must-not-copy"}},
@@ -529,7 +555,7 @@ class CompactionPreparationProgressTests(unittest.IsolatedAsyncioTestCase):
             messages.extend([ModelResponse(parts=[ToolCallPart("query", {}, str(index))]),
                              ModelRequest(parts=[ToolReturnPart("query", "结果" * 2500, str(index))])])
         state = ContextRunState(raw_history=messages[:1], estimator=TokenEstimator.conservative())
-        state.refresh_raw_history = AsyncMock(return_value=messages[:])
+        state.refresh_compaction_history = AsyncMock(return_value=(messages[:], messages[:]))
         committed = []
         async def persist(projected):
             self.assertTrue(state.telemetry.summary_applied)
@@ -543,7 +569,7 @@ class CompactionPreparationProgressTests(unittest.IsolatedAsyncioTestCase):
             projected, _ = await comp._compact_projection(messages, SimpleNamespace(),
                 SimpleNamespace(model_request_parameters=None), 80_000, state,
                 require_summary=True, emit_deterministic=False, reserve_answer_request=False)
-        state.refresh_raw_history.assert_awaited_once()
+        state.refresh_compaction_history.assert_awaited_once()
         self.assertEqual(committed, [projected])
         self.assertEqual(state.raw_history, messages)
 

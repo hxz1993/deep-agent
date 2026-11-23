@@ -12,7 +12,7 @@ from deep_agent.web.settings import WebSearchRuntimeConfig, resolve_web_search_c
 
 class SearchProbeTests(unittest.IsolatedAsyncioTestCase):
     async def test_probe_uses_same_retrieval_without_model(self):
-        for provider in ('deepseek', 'kimi', 'duckduckgo'):
+        for provider in ('deepseek', 'tavily', 'exa', 'you', 'duckduckgo'):
             config = WebSearchRuntimeConfig(mode='provider', provider=provider, api_key='fixture')
             with patch('deep_agent.web.runtime.execute_provider_search', new=AsyncMock()) as search:
                 await probe_web_search_config(config)
@@ -43,4 +43,4 @@ class SearchProbeTests(unittest.IsolatedAsyncioTestCase):
     async def test_probe_failure_preserves_reason(self):
         with patch('deep_agent.web.runtime.execute_provider_search', new=AsyncMock(side_effect=ToolFailed('upstream 401'))):
             with self.assertRaisesRegex(ToolFailed, 'upstream 401'):
-                await probe_web_search_config(WebSearchRuntimeConfig(mode='provider', provider='kimi', api_key='fixture'))
+                await probe_web_search_config(WebSearchRuntimeConfig(mode='provider', provider='deepseek', api_key='fixture'))

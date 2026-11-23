@@ -6,10 +6,16 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
-from loguru import logger
+from deepfos_platform.log import safe_logger as logger
 
 from deep_agent.agent.headers import extract_forward_headers
+from deep_agent.agent_service.service import task_store
+from deep_agent.agent_service.tasks import TERMINAL
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
+from deep_agent.api.v1.integration_apps import verify_app_scope_rows
+from deep_agent.api.v1.mcp import validate_bound_mcp_import
+from deep_agent.api.v1.request_identity import require_request_user
+from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE
 from deep_agent.core.context import AppContextDep
 from deep_agent.schemas.configuration_import import (
     ConfigurationImportResponse,
@@ -18,6 +24,7 @@ from deep_agent.schemas.configuration_import import (
 from deep_agent.services.configuration_import import (
     MAX_CONFIGURATION_BACKUP_BYTES,
     MAX_SKILLS_BUNDLE_BYTES,
+    ConfigurationImportBusyError,
     ConfigurationImportConflictError,
     ConfigurationImportError,
     ConfigurationImportFileStoreError,
@@ -178,13 +185,27 @@ async def import_configuration(
                 skills_bundle_path=skills_path,
                 active_run_count=ctx.active_runs.active_count(),
             )
+            app_rows = plan.rows.get("integration_scoped_settings", ())
+            skill_scopes = [
+                row["scope_ref"] for row in plan.rows.get("skill_packages", ())
+                if row.get("scope_ref") not in (None, GENERAL_SKILL_SCOPE)
+            ]
+            if app_rows or skill_scopes:
+                await verify_app_scope_rows(
+                    request, require_request_user(request.headers.get("user")), app_rows, skill_scopes=skill_scopes,
+                )
+            await validate_bound_mcp_import(request, plan.rows.get("mcp_servers", ()))
             if not apply:
                 return _response(plan, imported=False)
 
             request_headers = skill_platform_file_headers(
                 extract_forward_headers(request)
             )
-            async with _pause_wecom_runtime(ctx):
+            tasks = task_store(ctx)
+            async with tasks.admission, _pause_wecom_runtime(ctx):
+                tasks.prune()
+                if any(entry.state not in TERMINAL for entry in tasks.entries.values()):
+                    raise ConfigurationImportBusyError("存在未结束的 A2A 任务，请结束后再恢复配置")
                 result = await apply_configuration_import(
                     plan,
                     target_engine=ctx.db_engine,
@@ -196,8 +217,10 @@ async def import_configuration(
             if result.plan.skills:
                 try:
                     await ctx.skill_runtime.reconcile(ctx.stores)
+                    scopes = {row["code"]: row.get("scope_ref") or GENERAL_SKILL_SCOPE
+                              for row in result.plan.rows["skill_packages"]}
                     for payload in result.plan.skills:
-                        row = await ctx.stores.skill_package.get_by_code(payload.code)
+                        row = await ctx.stores.skill_package.get_by_code(payload.code, scope_ref=scopes[payload.code])
                         if (
                             row is None
                             or ctx.skill_runtime.state_for(row).status != RUNTIME_READY
@@ -206,12 +229,8 @@ async def import_configuration(
                                 "Skill runtime requires retry after restart: "
                                 f"{payload.code}"
                             )
-                except Exception as exc:
-                    logger.warning(
-                        "Configuration import runtime reconciliation failed "
-                        "error_type={}",
-                        type(exc).__name__,
-                    )
+                except Exception:
+                    logger.opt(exception=True).warning("Configuration import runtime reconciliation failed")
                     for payload in result.plan.skills:
                         warnings.append(
                             f"Skill runtime requires retry after restart: {payload.code}"
@@ -237,10 +256,7 @@ async def import_configuration(
                 detail=str(exc),
             ) from exc
         except ConfigurationImportFileStoreError as exc:
-            logger.warning(
-                "Configuration import Skill upload failed error_type={}",
-                type(exc.__cause__).__name__ if exc.__cause__ else type(exc).__name__,
-            )
+            logger.opt(exception=True).warning("Configuration import Skill upload failed")
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=str(exc),

@@ -15,6 +15,27 @@ const conflict = (token) => Object.assign(new Error('confirm'), { status: 409, d
 } });
 const options = { title: '确认', describeImpact: impact => String(impact.session_count), confirmLabel: '删除' };
 
+test('删除等待遮罩在请求结束及异常时关闭，旧调用未配置遮罩时行为不变', async () => {
+  const ui = load(), label = {};
+  let opened = 0, closed = 0, release;
+  ui.document.getElementById = () => ({
+    querySelector: () => label,
+    showModal() { opened++; },
+    close() { closed++; },
+  });
+  const pending = ui.withDeletionProgress('正在处理', () => new Promise(resolve => { release = resolve; }));
+  assert.equal(opened, 1);
+  assert.equal(closed, 0);
+  assert.equal(label.textContent, '正在处理');
+  release('完成');
+  assert.equal(await pending, '完成');
+  assert.equal(closed, 1);
+  await assert.rejects(ui.withDeletionProgress('正在处理', () => { throw new Error('失败'); }), /失败/);
+  assert.equal(closed, 2);
+  assert.equal(await ui.withDeletionProgress(undefined, async () => '原流程'), '原流程');
+  assert.equal(opened, 2);
+});
+
 test('删除范围变化必须重新确认，取消后不再发送 DELETE', async () => {
   const ui = load(), calls = [], dialogs = [];
   ui.apiFetch = async (_, request) => {

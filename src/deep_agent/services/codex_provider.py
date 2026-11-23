@@ -13,7 +13,9 @@ import os
 import secrets
 import time
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
+from typing import TextIO
 from urllib.parse import parse_qs, urlsplit
 from weakref import WeakKeyDictionary
 
@@ -152,15 +154,28 @@ class CodexFlowStore:
 
 
 FLOWS = CodexFlowStore()
-_owner_file = None
+_owner_files: dict[Path, TextIO] = {}
 _models: WeakKeyDictionary[asyncio.AbstractEventLoop, dict[str, dict]] = WeakKeyDictionary()
 
 
+def _owner_lock_path() -> Path:
+    from deep_agent.core.context import get_context
+
+    directory = Path.home() / ".config" / "deep-agent"
+    url = get_context().db_engine.url
+    if url.get_backend_name() == "sqlite" and url.database not in (None, "", ":memory:"):
+        # Distinct local databases have independently authorized credentials.
+        # Resolve the path so two profiles pointing to the same file share the lock.
+        database = Path(url.database).resolve()
+        digest = sha256(os.fsencode(database)).hexdigest()
+        return directory / f"codex-provider-owner-{digest}.lock"
+    return directory / "codex-provider-owner.lock"
+
+
 def _claim_single_owner() -> None:
-    global _owner_file
-    if _owner_file is not None:
+    path = _owner_lock_path()
+    if path in _owner_files:
         return
-    path = Path.home() / ".config" / "deep-agent" / "codex-provider-owner.lock"
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     file = path.open("a+")
     os.chmod(path, 0o600)
@@ -168,8 +183,8 @@ def _claim_single_owner() -> None:
         fcntl.flock(file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError as exc:
         file.close()
-        raise CodexUnavailable("Codex 订阅已由本机另一运行进程使用") from exc
-    _owner_file = file
+        raise CodexUnavailable("当前数据库的 Codex 订阅已由本机另一运行进程使用") from exc
+    _owner_files[path] = file
 
 
 class DatabaseCodexCredentialSource:
@@ -222,7 +237,9 @@ def codex_model(model_name: str, provider_id: str, revision: int) -> OpenAICodex
     key = (provider_id, model_name)
     model = bucket["models"].get(key)
     if model is None:
-        model = OpenAICodexModel(model_name, provider=provider, settings=model_http_settings())
+        model = OpenAICodexModel(model_name, provider=provider, settings=model_http_settings({
+            "openai_reasoning_summary": "auto",
+        }))
         bucket["models"][key] = model
     return model
 

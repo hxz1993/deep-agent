@@ -1,5 +1,10 @@
 # AGENTS.md — 项目索引
 
+## Console 配置限制：新增前单独确认
+
+- Agent 发布像 IM 和组件场景一样绑定现有 Agent。保存检查名称、编码、必填字段和引用有效性。模型可用性、工具权限和未适配的交互交给正常运行链路处理。调用入口负责验证调用人及 App/Space，再按 Agent 配置执行模型、Skill 和工具。MCP 的固定凭据、会话透传和绑定应用沿用其自身配置。
+- 新增或加严配置保存、启停、编辑、删除或导入的拦截规则，实施前必须单独明确确认。用一两句话单列要拦什么、理由和影响，取得答复再落地。
+
 ## 数据库结构变更：必须单独明确确认
 
 - 将表结构变更视为重大生产发布事项，不能按本地 JSONL 或临时文件的修改成本决策。生产环境可能需要单独申请数据库权限、等待专门发版窗口；大数据量下改索引、删列等操作可能耗时很长，并带来锁表、资源占用和恢复成本。
@@ -31,9 +36,9 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；`0.15.4`（同会话可信文件回读），数据库Head为`013`（012输出配置及更新人，013允许文本策略；历史迁移保持不变） |
+| **产品版本** | `deep_agent.__version__` 为唯一来源；当前为 `0.17.8`，数据库 Head 为 `016` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
-| **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
+| **测试** | 按影响面运行定向测试；可先用 `scripts/run_tests.py --suite affected --base HEAD --list` 查看选测范围 |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
 
 平台接入基础见[服务地址与账号链路](docs/guides/platform-integration.md)：
@@ -43,9 +48,16 @@
 
 Skill 运行规则以[Skill指南](docs/guides/skills.md)为准：0.15.0保留原入口于每次调用的`skill/`副本，自动携带同Skill Python模块，工作目录仍含`inputs.json`与`outputs/`。不保留临时`main.py`旧布局；普通Python仍直接执行代码。两工具共用文件授权、`input_path`、`publish_path`及FileStore上传，PTC使用同一工具并收集可信文件事实。旧会话和结果不重写。`.env`显式携带并由脚本读取，随原包导出，不做秘密注入或独立配置存储。
 
-附件上传大小和数量统一读取 `global_settings.attachment_upload` 一行 JSON（格式版本 1），不写初始化行；无记录或缺字段分别使用 20 MB、10 个。大小可配 1～200 MB，数量可配 1～20 个；旧 `UPLOAD_MAX_SIZE_MB` / `UPLOAD_MAX_COUNT` 环境变量停止使用，MIME 环境策略保留。每个新增上传、产物发布批次或数量校验操作读取一次，不做启动缓存，不存入会话事件。已上传授权文件不按后来调低的大小再次拒绝；读取安全上界为 200 MB，解析器与 Python 的独立资源限制仍生效。正式入口见[附件上传限制](docs/guides/attachment-upload.md)，位于全局配置常规页的“附件上传”，管理员接口 `/api/v1/global-settings/attachment-upload`；运维只保留允许类型。
+Python／Skill 的 `include_context=False` 默认不查用户、不注入身份；显式开启后仅通过 `DEEP_AGENT_CONTEXT` 提供非凭据用户资料及本次 app/space/language。Run 内 single-flight 复用并在结束清理，Console 与执行链路共用短期账号资料缓存。失败只保留 User ID，不阻止脚本执行；不得把模型传入的用户资料当鉴权身份。没有 Skill metadata 开关、get_current_context 工具或平台凭据透传。
+客户账号映射、Token 兑换及 MCP／Skill 共用的可更新适配器另归[42 企业集成课题](docs/design/42-enterprise-auth-adapters/README.md)，尚未实施；后续鉴权不以模型选择的 include_context 为授权依据。
+
+中间业务草稿另归[43 中间产物管理与报告流水线](docs/design/43-budget-report-pipeline/README.md)：Dot 原文已归档，原生 JSON＋服务端受控 patch 为设计方向；拟做可选模块，未启用不改变聊天／结构化输出／文件链路。当前未实施，不把既有 File ID 产物、历史回放或沙箱目录当作该业务内容库；具体 DDL 仍须单独批准。
+
+附件上传大小和数量统一读取 `global_settings.attachment_upload` 一行 JSON（格式版本 1），不写初始化行；无记录或缺字段分别使用 20 MB、10 个。大小可配 1～200 MB，数量可配 1～20 个；旧 `UPLOAD_MAX_SIZE_MB` / `UPLOAD_MAX_COUNT` 环境变量停止使用，MIME 环境策略保留。每批上传、每次 Python／Skill 执行及其他文件发布批次读取一次配置。Python／Skill 沙箱读取已有授权文件时遵循 200 MiB 总量上限，上传限额调低后仍可使用。新产物按当前单文件上限发布，每批也受 200 MiB 总量限制。正式入口见[附件上传限制](docs/guides/attachment-upload.md)，位于全局配置常规页的“附件上传”，管理员接口 `/api/v1/global-settings/attachment-upload`；运维只保留允许类型。
 
 Console 加载和资源缓存见[加载说明](docs/guides/console-loading.md)：身份／权限校验后仅初始化当前页；配置脚本并行下载、有序执行。静态 UI 资源使用内容 ETag 每次校验，入口／错误／下载不缓存；不要恢复无条件预热或长期 immutable。数据库摘要可用 `include_charset=false` 跳过字符集 SQL，完整字符集检查由运维页按钮主动触发。此处属于当前本地实现，部署状态仍以目标环境核验为准。
+
+会话应用筛选见[应用筛选](docs/guides/session-app-filtering.md)：普通`/sessions`默认按有效App Header查询本人会话，Console显式`app_scope=all`，指定App只能与`all`同用。`/sessions/filter-options`使用本人主表分组统计，不读取全部历史；App筛选与调试上下文独立。展示名称由当前环境System的`POST /space-app-list`（JSON空数组）批量读取；不要沿用旧日志中的`/role-info`前缀或省略JSON格式。短期按身份隔离缓存，失败退避10秒，缺失时保留编码，不回填历史范围。
 
 诊断中心依次为「会话 / 用量 / 日志」：见[会话指南](docs/guides/diagnostic-sessions.md)、[用量指南](docs/guides/diagnostic-usage.md)和[日志指南](docs/guides/diagnostic-logs.md)。
 会话概览、列表和跨用户只读详情统一使用管理员 `/diagnostics/sessions` 接口；统计只读取现有会话与真实事件，
@@ -54,9 +66,11 @@ Console 加载和资源缓存见[加载说明](docs/guides/console-loading.md)�
 日志查询限当前实例 API/网关；所有诊断接口均校验管理员，普通 Session 权限保持不变。
 日志消息在后端写入时生成，格式为 `时间 | 进程 | 等级 | request-id | 来源 - 消息 | key=value`，管道、换行和反斜杠统一转义；查询返回真实 `raw`。旧行只保留原文，不增加 JSON 兼容解析。新增日志仍只提交安全白名单字段，禁止业务正文、完整参数、结果、凭据和异常原文。消息从已校验的工具名、模型名、Agent名称、状态和耗时生成；查询的message/summary只返回实际写入正文，附加字段独立返回。
 
-集成入口见[集成配置](docs/guides/integrations.md)：固定目录由后端定义，`004`新增`integration_settings`但不插入初始记录。仅保存非空配置才落库；清空删除配置记录。普通组件按集成编码读取JSON，未配置返回409；管理操作仍需企业管理员。
+控制台「组件场景」见[场景配置](docs/guides/integrations.md)：固定目录由后端定义，`004` 新增 `integration_settings`，仅保存非空配置时写入，清空删除记录。组件按 `/api/v1/integrations/{code}` 读取 JSON，未配置返回 409。共用配置管理需企业管理员。015 新增电子表格助手的 App 专用配置；进入 Console 后，目标企业或空间管理员、应用管理员和应用开发者均可配置对应 App，配置备份仍按原企业管理员范围校验。平台权限按当前身份验证，Harness 按会话 App/Space 追加专用提示词与 Skill。通用 Skill 读取兼容 `NULL`／`general`，新写入使用 `general`。
 
-Agent 安装包见[安装包说明](docs/guides/agent-packages.md)。自带包唯一位置为 `src/deep_agent/agent_packages/builtin/<code>.zip`，每个完整 ZIP 集中保存 Agent、上传 Skill 和自定义 UI 工具，与导出/上传格式相同；当前电子表格包基于 Alpha 正式 V91 导出包合入已冻结的 V92 提示词与工作流 Skill 1.4.6（不会自动更新已安装 Agent），DeepCube 保留 2026-09-14 Test 官方导出包，来源及哈希见自带包 README。服务从安装功能模块相对路径读取，不保留散文件副本；测试包使用隔离目录。安装可新建或显式覆盖指定 Agent；共享 Skill/UI 同编码同内容复用、内容不同更新并提示影响，UI 多余工具保留供其他 Agent 使用。旧 Agent.ui_tool_selection 列仅为历史数据库兼容保留，运行与安装只按 capabilities 启用整包；旧 ZIP 名单忽略，新保存清空旧列，新导出不携带名单。MCP 同编码自动关联，缺失只提示；模型同名优先、其次首个可用模型、无则留空。005 支持空模型；运行需请求模型或 Agent 模型，禁止环境默认回退。预检只读，安装用配置独占屏障二次校验摘要，文件补偿先核对数据库引用，避免提交确认失败后误删已落库资源。
+控制台「发布 Agent」见[Agent 接入指南](docs/guides/agent-service.md)。`016` 的 `agent_publications` 保存发布编码、关联 Agent、应用范围和启停配置。A2A 接入由 `/api/v1/agent-service` 提供，平台凭据和应用权限按请求校验。Task 与 Context 由单 API 进程保存，生成文件沿用 FileStore。0.17.0a4 启用 A2A 和 MCP，两者共用发布配置、授权及任务服务。CLI、SDK 和通用 HTTP 草案不注册为产品入口，设计见[45 号课题](docs/design/45-a2a-access/README.md)。
+
+Agent 安装包见[安装包说明](docs/guides/agent-packages.md)。自带包唯一位置为 `src/deep_agent/agent_packages/builtin/<code>.zip`，每个完整 ZIP 集中保存 Agent、上传 Skill 和自定义 UI 工具，与导出/上传格式相同；当前电子表格包同步独立电子表格前端已提交的 V124 提示词、工作流 Skill 1.4.18、智能分析 2.18.5 与财务图表 2.0.6 等交付资产（不会自动更新已安装 Agent），DeepCube 保留 2026-09-14 Test 官方导出包，来源及哈希见自带包 README。服务从安装功能模块相对路径读取，不保留散文件副本；测试包使用隔离目录。安装可新建或显式覆盖指定 Agent；共享 Skill/UI 同编码同内容复用、内容不同更新并提示影响，UI 多余工具保留供其他 Agent 使用。旧 Agent.ui_tool_selection 列仅为历史数据库兼容保留，运行与安装只按 capabilities 启用整包；旧 ZIP 名单忽略，新保存清空旧列，新导出不携带名单。MCP 同编码自动关联，缺失只提示；模型同名优先、其次首个可用模型、无则留空。005 支持空模型；运行需请求模型或 Agent 模型，禁止环境默认回退。预检只读，安装用配置独占屏障二次校验摘要，文件补偿先核对数据库引用，避免提交确认失败后误删已落库资源。
 
 
 企微应用与成员资料见[使用指南](docs/guides/wecom-applications.md)及[渠道接入](docs/guides/wecom-channel.md)。本次 v0.10.1 功能增量 `006` 新增企业应用配置和可重建成员缓存，保留已发布 `005`。渠道页面在标题同行切换账户与应用；应用采用左侧列表、右侧应用标题及合并企业信息的配置卡、缓存统计与按需加载的只读成员分页表。渠道 `settings.wecom.user_details_enabled` 默认为关闭，开启必须引用有效应用；查询开关独立于渠道启停，关闭时不访问资料接口。
@@ -94,6 +108,10 @@ PYTHONPATH=src python3.12 -m deep_agent.local_dev \
   `platform`。文件正文保存为私有Blob，独立`metadata.sqlite3`只存索引；业务API与线上保持一致。
 
 ### 稳定 SQLite 本地开发基线
+
+本地普通聊天、断线续跑和双端同步的真模型验收统一使用 GPT 订阅 Provider（`openai_codex`）。
+
+本机 8002 新建联调 Agent 时，默认从订阅 Provider（`openai_codex`）选用 `gpt-6.1-sol`，备选 `gpt-6.1-terra`。按 Provider 类型核对同名模型。
 
 v0.10.16 本地升级验证使用仓库 `.venv/bin/python`，依赖按 `requirements.txt` 安装；
 不要用仍装旧依赖的全局解释器启动。该环境可复用已安装的内部 DeepCube wheel。
@@ -188,7 +206,7 @@ v0.8.3 完成目录收敛，本地与线上都从同一份 `src/` 加载 Python 
 详见 [`项目结构指南`](docs/guides/project-structure.md)。
 
 目录按职责命名，不为外观一致移动公开 CLI、协议名或持久化字段。共享模型支持在
-`src/deep_agent/models/`，程序编排在 `ptc/`，通用工具在 `capabilities/general/`；
+`src/deep_agent/models/`，程序编排在 `ptc/`，运行环境工具在 `capabilities/environment.py`；
 Gateway 不保留指向企微 Adapter 的旧转发模块。Alpha 制品流水线仍按根目录 `ls` 分词后搬移打包；根目录受 Git 管理的名称不得包含空白或 Shell 通配符。
 设计原型统一放到 `docs/design/`，报告放到 `docs/reports/`，带空格的主题目录只能出现在这些子目录中。
 新增根目录条目前运行 `tests.unit.test_release_packaging`，不通过修改流水线绕过该约束。
@@ -209,7 +227,9 @@ HTTP → src/deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolset
                                       └→ SessionStore (postgres/mysql/sqlite)
 ```
 
-工具包来源：`builtin:general` | `builtin:sandbox` | `builtin:ptc` | `builtin:web` | `mcp:*`
+工具包来源：`builtin:sandbox` | `builtin:ptc` | `builtin:web` | `builtin:document` | `mcp:*`
+
+`get_current_time(timezone="UTC")` 属于 `runtime:environment`（运行环境），业务 Agent 构建时固定注入一份，不属于可配置能力或 PTC 函数。旧 `builtin:general` 仅在能力规范化入口过滤，旧记录不批量迁移；读写、Agent 包与配置恢复复用该入口，不为旧版补回关联。时区取显式 IANA 名称，不能按语言、Header 或服务器 TZ 猜测；默认 UTC 保持原字符串结果。部署镜像须检查时区数据，见[指南](docs/guides/runtime-environment.md)。
 （DB + `mcp_servers/` 兜底）| `ui:builtin` | `ui:<package>`。Skill 与 ToolPackage 分离，Agent 通过
 `agents.skills` 显式选择，上传包元数据位于 `skill_packages`。
 
@@ -230,8 +250,8 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 - 不生成`run/progress`或`run/terminal`。正常完成、主动停止不追加辅助回执；真正终止执行的异常
   幂等保存一条脱敏`execution/error`，不进入模型正文。半段只经SSE展示，取消/异常收尾尽量保存一次。
   保留控制台轮询、渠道投递和压缩生命周期；旧RUN行不清理、不迁移、不加解析或恢复兼容。
-- 控制台切入活动会话仅订阅指定`run_id`的只读SSE，空闲不连接、结束不跟随下一轮；有界内存回放
-  与数据库History校准分离，失败退回该轮轮询。观察断开不取消执行，不增加持久化快照或成功回执。
+- 控制台通过指定`run_id`的只读SSE观察一轮。普通聊天额外监听会话活动，在另一客户端发起时自动接入新一轮。
+  有界内存回放与数据库History校准分离，失败退回该轮轮询。观察断开不取消执行，不增加持久化快照或成功回执。
 - v0.6.0增加显式FileStore适配层：Platform仍是默认实现；仅`local_dev + SQLite`可启用本地Blob。
   上传、附件读取、原生图片、Tool Spill、上传Skill和导出共用同一注入接口，业务层不得自行判断
   环境。Compaction增加确定性Attachment Evidence，但文件授权仍只从原始Event恢复。
@@ -289,7 +309,7 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 - v0.6.0压缩吸收Harness/DSH的确定性整理与结构化摘要，但Event生命周期、来源Hash、证据索引、SSE
   和目标复检仍由DeepAgent管理。
 - v0.3.17 通过 Pydantic AI 官方 `conversation_id/run_id` 参数贯通 SSE、History 和运行日志；同一 Session 共用 Conversation ID，每次发送或 Deferred 续跑生成新 Run ID。Provider 未提供缓存计数时必须显示未知，不能把框架归一化的零伪装成缓存未命中。
-- v0.3.18 使用 Harness `Skills` 渐进披露 `SKILL.md`；初始只公开名称和描述，正文由 `load_capability` 按需加载。References/Assets 通过只读分页工具访问；`scripts/` 不向模型披露源码，Agent同时选择含脚本Skill和 `builtin:sandbox` 时可通过统一沙箱执行。Skill 本身不授予工具权限。
+- v0.3.18 使用 Harness `Skills` 渐进披露 `SKILL.md`；初始只公开名称和描述，正文由 `load_capability` 按需加载。References/Assets 和已关联 Skill 的文本脚本源码通过 `list_skill_resources`／`read_file` 按需读取，不自动加载整包。只读源码不要求沙箱；Agent同时选择含脚本Skill和 `builtin:sandbox` 时才可执行。Skill 本身不授予工具权限。
 - v0.3.19 起 URL MCP 只在显式检测时执行 initialize/tools-list 并保存无敏感信息的工具快照；聊天 Run 用快照完成工具披露，真实调用时才按当前请求 Header 建连。同一 Run 复用连接，缺少或配置失效的快照不进入模型工具列表，必须重新“检测并更新”。Builtin MCP 和 Resource 代理保持原链路。
 - v0.4.11补齐URL MCP实际工具调用超时的错误分类：Pydantic AI将协议超时包装为`ModelRetry`时，DeepAgent识别其MCP超时、连接中断或5xx原因并转成脱敏`ToolFailed`，让模型改用其他工具或解释失败；参数、对象选择等可纠正错误仍保持`ModelRetry`，正式取消不受影响。
 - v0.4.12增加Console企业管理员兜底鉴权：`systemAdmin=true`按平台综合权限语义映射为内部`enterprise_admin`；固定`admin`账号不特殊放行。管理Router统一依赖同一授权器，聊天、会话、附件和固定Agent读取等运行接口不受影响。
@@ -334,7 +354,7 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 
 ### 框架能力说明方式
 
-2026-10-16增量研究入口：`docs/design/38-pydantic-ai-harness-upgrade/upstream-review-20261016.md`。Harness独立仓库已归档，新源码随Core主仓库维护；研究快照2.57/0.57不等于产品已升级（实装仍2.46/0.32/Monty0.0.23）。升级先核验Skills Workspace/异步校验、PTC自定义包装与Hook生命周期，不将`repl_store`或`Conversation`误称为自动获得会话级业务草稿。
+2026-10-16增量研究入口：`docs/design/38-pydantic-ai-harness-upgrade/upstream-review-20261016.md`。Harness独立仓库已归档，新源码随Core主仓库维护；研究快照2.57/0.57不等于产品已升级。2026-11-06实装仍为Core 2.46/Harness 0.32，Monty单独升为1.5.0，异步桥及执行限额变化见`docs/reports/2026-11-06-monty-1.5-upgrade.md`。后续框架升级先核验Skills Workspace/异步校验、PTC自定义包装与Hook生命周期，不将`repl_store`或`Conversation`误称为自动获得会话级业务草稿。
 
 向产品或客户端解释 Pydantic AI、Harness、Provider 能力时，不能只给类名和抽象结论。至少按以下顺序说明：
 
@@ -356,6 +376,18 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 因此它解决“模型调用前不知道返回字段”的问题；真实结果本身过大、空字段过多则属于分页、投影或 Artifact 治理，不能混为同一需求。
 
 ---
+
+## 测试选择与执行效率
+
+日常和发布均按改动影响面运行定向测试、静态检查及必要冒烟，不再每次发布强制全量。
+已通过测试的相关源码未变化时复用其结果，不因提交、推送或升小版本重复执行；有新失败或未解风险再扩大范围。
+`scripts/run_tests.py --suite affected --base HEAD --list` 可先查看选择；该入口对未知影响面仍会保守回退全量，需审阅原因后决定运行相关模块还是完整套件。
+全量保留为手动入口 `--suite all`（脚本无参数仍为 all），仅在用户要求或明确需要时执行；不得把定向结果称为全量通过。
+`--suite quick` 只运行显式纯逻辑组及 Console 全量。领域映射与测试清单由
+`tests/helpers/test_selection.py`、`test_groups.json` 明确维护，相关测试新增／移动要同步。
+原 unittest 命令统一加 `-t .`；复用初始化请提取非 TestCase helper，不直接导入测试类造成重复收集。
+本轮不引入并行执行或共享可变数据库。耗时摘要与逐例清单可写忽略的 `output/TMP to delete.../`，
+正式结论与去重依据见测试报告；指南入口为 `tests/README.md`。
 
 ## 其他文档
 

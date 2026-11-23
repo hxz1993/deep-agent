@@ -36,7 +36,8 @@ test("展开箭头仅悬停、键盘焦点或触屏显示，状态保持可见",
 test("点击展开与等待操作自动展开同步 aria-expanded", () => {
   const helper = chatSource.match(/function setToolBlockExpanded\(block, expanded\) \{[\s\S]*?\n\}/)?.[0];
   assert.ok(helper);
-  const setExpanded = vm.runInNewContext(`(${helper})`);
+  const toolDetailRenderers = new WeakMap();
+  const setExpanded = vm.runInNewContext(`(${helper})`, { toolDetailRenderers });
   const attrs = new Map();
   let isOpen = false;
   const block = {
@@ -46,12 +47,15 @@ test("点击展开与等待操作自动展开同步 aria-expanded", () => {
       return { setAttribute: (key, value) => attrs.set(key, value) };
     },
   };
+  let hydrations = 0;
+  toolDetailRenderers.set(block, () => { hydrations += 1; });
   setExpanded(block, true);
   assert.equal(isOpen, true);
   assert.equal(attrs.get("aria-expanded"), "true");
   setExpanded(block, false);
   assert.equal(isOpen, false);
   assert.equal(attrs.get("aria-expanded"), "false");
+  assert.equal(hydrations, 1, "展开时按需填充工具内容，收起不重复解析");
   assert.match(chatSource, /setToolBlockExpanded\(block, !block\.classList\.contains\("open"\)\)/);
   assert.match(chatSource, /function syncPendingToolPresentation\([\s\S]*?wrap\.insertBefore\(block, finalContent \|\| finalActions \|\| null\);\s*setToolBlockExpanded\(block, true\)/);
 });

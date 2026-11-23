@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from loguru import logger
+from deepfos_platform.log import safe_logger as logger
 from sqlalchemy import Boolean, Column, DateTime, Float, Integer, MetaData, Table, func, inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
@@ -23,6 +23,8 @@ from deep_agent.db.configuration_transfer import (
     validate_table_classification,
 )
 from deep_agent.db.models import Base
+from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE
+from deep_agent.integrations.app_skill_data import AppSkillDataError, app_skill_data_updates
 from deep_agent.integrations.catalog import get_integration_definition
 from deep_agent.schemas.integration import validate_integration_settings
 from deep_agent.files.storage import FileStore, StoredFile
@@ -38,12 +40,26 @@ _MYSQL_LOCK_NAME = "deep-agent-configuration-import"
 _POSTGRES_LOCK_KEY = 2_024_070_230_001
 
 # Historical backups use their actual table shapes, never the latest ORM defaults.
-# Same-011/012 restores must not select or insert the new 013 column.
+# Read historical backups using the columns available in each revision.
+_REASONING_014_COLUMNS = {'agents': 'reasoning_effort', 'llm_models': 'reasoning_options'}
+_BEFORE_014 = {
+    name: Table(name, MetaData(), *(
+        Column(column.name, column.type, nullable=column.nullable, primary_key=column.primary_key)
+        for column in Base.metadata.tables[name].columns if column.name != excluded
+    ))
+    for name, excluded in _REASONING_014_COLUMNS.items()
+}
+_SKILL_BEFORE_015 = Table("skill_packages", MetaData(), *(
+    Column(column.name, column.type, nullable=column.nullable, primary_key=column.primary_key)
+    for column in Base.metadata.tables["skill_packages"].columns if column.name != "scope_ref"
+))
+_BEFORE_015 = {"011", "012", "013", "014"}
+_ADDED_IN_016 = {"agent_publications", "remote_agent_connections"}
 # This does not perform cross-revision import or alter an Alembic revision.
 _AGENT_011 = Table("agents", MetaData(), *(
     Column(column.name, column.type, nullable=column.nullable, primary_key=column.primary_key)
     for column in Base.metadata.tables["agents"].columns
-    if column.name not in {"structured_output_enabled", "updated_by"}
+    if column.name not in {"structured_output_enabled", "updated_by", "reasoning_effort"}
 ))
 _OUTPUT_CONFIG_012 = Table("agent_output_configs", MetaData(), *(
     Column(column.name, column.type, nullable=column.nullable, primary_key=column.primary_key)
@@ -54,14 +70,20 @@ _OUTPUT_CONFIG_012 = Table("agent_output_configs", MetaData(), *(
 
 def _configuration_tables(revision: str) -> tuple[str, ...]:
     return tuple(name for name in configuration_table_names()
-                 if revision != "011" or name != "agent_output_configs")
+                 if (revision == "016" or name not in _ADDED_IN_016)
+                 and (revision != "011" or name != "agent_output_configs")
+                 and (revision not in _BEFORE_015 or name != "integration_scoped_settings"))
 
 
 def _contract_table(table_name: str, revision: str):
+    if table_name == "skill_packages" and revision in _BEFORE_015:
+        return _SKILL_BEFORE_015
     if table_name == "agents" and revision == "011":
         return _AGENT_011
     if table_name == "agent_output_configs" and revision == "012":
         return _OUTPUT_CONFIG_012
+    if revision in {"011", "012", "013"} and table_name in _BEFORE_014:
+        return _BEFORE_014[table_name]
     return Base.metadata.tables[table_name]
 
 
@@ -220,8 +242,12 @@ def _validate_schema_sync(sync_connection: Any, *, backup: bool) -> None:
         raise ConfigurationImportError("Database is missing alembic_version")
     revision = str(sync_connection.scalar(text("SELECT version_num FROM alembic_version")) or "")
     tables = set(Base.metadata.tables)
+    if revision != "016":
+        tables.difference_update(_ADDED_IN_016)
     if revision == "011":
         tables.discard("agent_output_configs")
+    if revision in _BEFORE_015:
+        tables.discard("integration_scoped_settings")
     expected = tables | {"alembic_version"}
     if backup:
         expected.add("_backup_info")
@@ -300,6 +326,22 @@ def _validate_channel_rows(rows: Sequence[Mapping[str, Any]]) -> None:
             raise ConfigurationImportError("channel_accounts contains an invalid channel configuration") from exc
 
 
+def _validate_publication_rows(rows: Sequence[Mapping[str, Any]]) -> None:
+    from deep_agent.agent_service.publications import PublicationCreate
+    from pydantic import ValidationError
+
+    fields = PublicationCreate.model_fields.keys() - {"agent_code"}
+    try:
+        for row in rows:
+            PublicationCreate.model_validate({
+                "agent_code": row["code"], **{key: row[key] for key in fields},
+            })
+            if type(row.get("revision")) is not int or row["revision"] < 1:
+                raise ValueError("invalid revision")
+    except (ValidationError, KeyError, ValueError) as exc:
+        raise ConfigurationImportError("Invalid Agent publication in backup") from exc
+
+
 def _validate_integration_rows(rows: Sequence[Mapping[str, Any]]) -> None:
     for row in rows:
         if get_integration_definition(row.get("code")) is None:
@@ -310,6 +352,17 @@ def _validate_integration_rows(rows: Sequence[Mapping[str, Any]]) -> None:
             raise ConfigurationImportError("integration_settings contains an invalid JSON configuration") from exc
         if not value:
             raise ConfigurationImportError("integration_settings must not contain empty configurations")
+
+
+def _validate_app_scope_rows(rows):
+    try:
+        return app_skill_data_updates(
+            rows.get("integration_scoped_settings", ()),
+            rows.get("skill_packages", ()),
+            (row.get("skills") for row in rows.get("agents", ())),
+        )
+    except AppSkillDataError as exc:
+        raise ConfigurationImportError(f"Backup application Skill data is invalid: {exc}") from exc
 
 
 async def _validate_empty_sessions(connection: AsyncConnection, *, target: bool) -> None:
@@ -418,6 +471,8 @@ async def inspect_configuration_backup(
                     row["auth_status"] = "unconfigured"
                     row["auth_revision"] = 0
             _validate_integration_rows(rows.get("integration_settings", []))
+            _validate_publication_rows(rows.get("agent_publications", []))
+            _validate_app_scope_rows(rows)
             _validate_channel_rows(rows.get("channel_accounts", []))
             for row in rows.get("agents", []):
                 row["capabilities"] = canonical_tool_package_codes(
@@ -497,8 +552,9 @@ def inspect_skills_bundle(
             except (KeyError, UnicodeError, ValueError) as exc:
                 raise ConfigurationImportError("Invalid Skills bundle manifest") from exc
             if (
-                manifest.get("format") != "deepagent-skill-export"
-                or manifest.get("schema_version") != "1.0"
+                not isinstance(manifest, dict)
+                or manifest.get("format") != "deepagent-skill-export"
+                or manifest.get("schema_version") not in {"1.0", "1.1"}
                 or not isinstance(manifest.get("skills"), list)
             ):
                 raise ConfigurationImportError("Unsupported Skills bundle format")
@@ -544,12 +600,16 @@ def inspect_skills_bundle(
                         f"Invalid Skill package in bundle: {code}"
                     ) from exc
                 parsed_roots.append(parsed.package_root.parent)
+                scope = row.get("scope_ref")
+                scoped = scope not in (None, GENERAL_SKILL_SCOPE)
                 if (
-                    parsed.code != code
+                    (scoped and (manifest["schema_version"] != "1.1" or item.get("scope_ref") != scope))
+                    or (not scoped and item.get("scope_ref") not in (None, GENERAL_SKILL_SCOPE))
+                    or parsed.code != (row["manifest"]["code"] if scoped else code)
                     or parsed.content_hash != str(row["content_hash"])
                     or parsed.content_hash != str(item.get("content_hash") or "")
                     or parsed.schema_version != str(row["schema_version"])
-                    or parsed.manifest != row["manifest"]
+                    or ({**parsed.manifest, "code": parsed.code} if scoped else parsed.manifest) != row["manifest"]
                     or parsed.resource_index != row["resource_index"]
                     or parsed.contains_scripts != bool(row["contains_scripts"])
                 ):
@@ -602,6 +662,15 @@ async def build_configuration_import_plan(
         )
     source, rows = await inspect_configuration_backup(backup_path)
     skills = await asyncio.to_thread(inspect_skills_bundle, skills_bundle_path, rows)
+    # The source ZIP manifest still contains the original ownership values.
+    # Convert only after it has been checked against the original backup rows.
+    scopes, settings = _validate_app_scope_rows(rows)
+    for row in rows.get("skill_packages", ()):
+        if row["code"] in scopes:
+            row["scope_ref"] = scopes[row["code"]]
+    for row in rows.get("integration_scoped_settings", ()):
+        if row["id"] in settings:
+            row["settings"] = settings[row["id"]]
     async with target_engine.connect() as connection:
         target_revision = await _validate_target(
             connection,
@@ -666,12 +735,8 @@ async def _delete_uploaded_skills(
     for item in reversed(uploaded):
         try:
             await file_store.delete(item.stored.id, request_headers)
-        except Exception as exc:
-            logger.warning(
-                "Configuration import Skill cleanup failed code={} error_type={}",
-                item.code,
-                type(exc).__name__,
-            )
+        except Exception:
+            logger.opt(exception=True).warning("Configuration import Skill cleanup failed code={}", item.code)
             continue
 
 
@@ -791,6 +856,9 @@ async def apply_configuration_import(
     active_run_count: int = 0,
 ) -> ConfigurationImportResult:
     _validate_integration_rows(plan.rows.get("integration_settings", []))
+    _validate_publication_rows(plan.rows.get("agent_publications", []))
+    if any(_validate_app_scope_rows(plan.rows)):
+        raise ConfigurationImportError("Application Skill data must be converted before import")
     _validate_channel_rows(plan.rows.get("channel_accounts", []))
     if active_run_count:
         raise ConfigurationImportConflictError("Target DeepAgent has active runs")

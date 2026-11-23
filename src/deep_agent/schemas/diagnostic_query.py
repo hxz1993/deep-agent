@@ -31,6 +31,10 @@ class DiagnosticSessionQuery(DiagnosticUsageQuery):
     offset: int = Field(default=0, ge=0)
 
 
+class DiagnosticSessionOverviewQuery(DiagnosticSessionQuery):
+    section: Literal["all", "metrics", "trend", "agents", "activity"] = "all"
+
+
 class DiagnosticUsersQuery(DiagnosticSessionQuery):
     after: str | None = Field(default=None, max_length=128)
 

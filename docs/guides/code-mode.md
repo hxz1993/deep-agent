@@ -56,6 +56,8 @@ computed["result"]
   不为逐步查看中间值拆开依赖链；成功、截断和完整性检查可在程序内完成。无需在Agent或Skill中
   固定完整代码、唯一PTC次数或内外层发布位置。需要模型理解或选择的阶段返回少量候选，再继续执行。
 - 字符串／JSON提取、列表去重和简单汇总直接用PTC的Python语法处理，不必再调用`execute_python`。
+  汇总前按工具返回约定检查是否成功、结果是否完整，再检查数组和字段类型。对可空或混合类型字段，
+  用普通循环将有效值累加到同一数值类型，并保留有效值计数。缺失值按任务口径处理。
   内置`web_fetch`读取HTML/文本时返回`url/title/content`，可在PTC中从Markdown提取图片链接或相关行，
   再将少量候选交模型判断；需要查看图片时仍在外层使用`view_image`。单张已知URL直接渠道发送即可。
 - pandas/numpy计算或固定Skill脚本：使用已关联Sandbox的`execute_python` / `execute_skill_script`；可原生调用，也可在PTC里直接传代码字符串和JSON inputs。Skill仍只接受原有参数与已索引脚本，不新增文件输入或发布参数。
@@ -103,6 +105,23 @@ sorted({row["id"]: row for group in items for row in group}.values(), key=lambda
 不要打印或返回`payload["content"]`，不要让大中间结果重新进入模型上下文，不要为简单调用编写代码，
 也不要在不确定写入失败后重放同一副作用操作。
 
+## Python 子集兼容
+
+`run_code` 使用 Monty 1.5.0 的 Python 子集。普通字符串格式化、JSON `default`、CSV 与 Decimal
+已可直接使用，不需要为这些已支持操作转到 Python 沙箱。仍需注意：
+
+- `asyncio.gather` 不接受关键字参数，包括 `return_exceptions=True`；需要分别处理错误时在只读
+  协程内显式 `try/except`。没有 `create_task`、`wait_for` 或 `as_completed`。
+- 不支持 `yield`/`yield from`；生成器表达式实际生成列表，不能当成惰性流或直接传给 `next`。
+- JSON 自定义编码类 `cls` 与解码器 `object_hook`/`object_pairs_hook` 不支持；按需显式转换，
+  或交给已授权的 Python／Skill。第三方包及标准库的完整 API 仍以实际环境为准。
+- 调试优先返回行数、项数等小摘要，不为估算大小序列化整份中间数据；`len(str(value))`
+  不等于 JSON 的 UTF-8 字节数。
+
+已知子集错误返回具体纠正提示，仍保留 `failed` 与已完成调用记录，不自动改写或重试代码。
+普通代码错误后可继续使用仍有效的变量；执行时间／内存超限则销毁不可靠的 REPL 状态。
+此前外部操作不因错误回滚，继续或重试前须检查已完成／结果未知的调用。
+
 ## 数据交接与限额
 
 当前实现：PTC内部开放函数拿到完整返回，绕过面向模型的Token外置、截断和
@@ -118,7 +137,7 @@ Python成功发布和下载中心登记后的真实文件引用汇总到外层`g
 | --- | --- |
 | Monty内存 | 256MiB |
 | 单个内部返回 | 32MiB，超过明确失败，不返回假全量 |
-| 同Run REPL Session执行预算 | 120秒 |
+| 每段 Monty 执行预算 | 120秒；新版不跨段累计，REPL 变量仍可复用 |
 | 每段run_code总截止 | 120秒，包含工具等待 |
 | 每段内部调用 | 100次，失败同样计数 |
 | Python/Skill inputs | 16MiB紧凑UTF-8 JSON，含JSON包装 |

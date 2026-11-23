@@ -1,3 +1,5 @@
+import * as reasoning from "../../../console/reasoning-ui.js";
+import * as providerCatalog from "../../../console/provider-catalog.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -26,7 +28,7 @@ function harness(tags = [], providerId = "private") {
         setAttribute(name, value) { this.attributes[name] = value; },
         addEventListener(name, handler) { handlers.set(name, handler); },
         async fire(name) { await handlers.get(name)?.({ preventDefault() {}, currentTarget: this }); },
-        showModal() { this.open = true; }, close() { this.open = false; },
+        focus() {}, showModal() { this.open = true; }, close() { this.open = false; },
       });
     }
     return elements.get(id);
@@ -46,7 +48,7 @@ function harness(tags = [], providerId = "private") {
   };
   let loaded;
   const context = {
-    state, window: {}, URLSearchParams,
+    state, window: { DeepAgentReasoning: reasoning, DeepAgentProviderCatalog: providerCatalog }, AbortController, URLSearchParams,
     escapeHtml: (value) => String(value || ""), providerTypeLabel: (provider) => provider.provider_type,
     document: {
       getElementById: element,
@@ -63,6 +65,7 @@ function harness(tags = [], providerId = "private") {
     apiFetch: async (path, options) => {
       requests.push({ path, ...options });
       if (context.failSave && options?.body) throw new Error("保存失败");
+      if (path.includes("/catalog?") && context.catalogResponse) return context.catalogResponse();
       if (path.includes("/catalog?")) return { items: [{ model_label: "目录模型", providers: [{
         runtime_model: row.model, context_window_tokens: 256000, max_output_tokens: 16384,
         input_modalities: ["text", "image"], tags: ["structured_output"],
@@ -125,6 +128,61 @@ test("目录刷新只替换能力，不丢兼容设置与其他已有标签", as
   assert.equal(payload.context_window_tokens, 256000);
 });
 
+test("MiniMax 能力刷新仅查询国内目录，国内未命中时保留现有配置", async () => {
+  const h = harness([], "minimax-provider");
+  h.state.llmProviders.push({ id: "minimax-provider", provider_type: "minimax" });
+  h.state.llmProviderTypes.push({ code: "minimax", model_protocol: "anthropic" });
+  h.row.model = "MiniMax-M2.5";
+  h.row.reasoning_catalog = { provider_id: "minimax", provider_model_id: h.row.model };
+  h.context.catalogResponse = () => {
+    const query = h.requests.at(-1).path.split("?")[1];
+    assert.equal(new URLSearchParams(query).get("provider_id"), "minimax-cn");
+    return { items: [] };
+  };
+  await h.admin.openEdit("saved");
+  await h.admin.updateFromCatalog();
+  assert.equal(h.element("llmModelContextWindow").value, String(h.row.context_window_tokens));
+  assert.equal(h.admin.reasoningPayload.reasoning_catalog, undefined);
+  assert.match(h.element("llmModelCatalogFeedback").textContent, /没有找到/);
+  h.context.catalogResponse = () => ({ items: [{ model_label: h.row.model, providers: [{
+    provider_id: "minimax-cn", provider_model_id: h.row.model,
+    context_window_tokens: 204800, max_output_tokens: 32768, input_modalities: ["text"], tags: [],
+    reasoning_options: [{ type: "effort", values: ["high"] }],
+  }] }] });
+  await h.admin.updateFromCatalog();
+  assert.equal(h.element("llmModelContextWindow").value, "204800");
+  assert.equal(h.admin.reasoningPayload.reasoning_catalog.provider_id, "minimax-cn");
+});
+
+test("目录恢复匹配原生模型名，只恢复档位并忽略已离开的弹框请求", async () => {
+  const h = harness([], "qwen");
+  const catalog = { items: [{ model_label: "Qwen", providers: [{
+    provider_id: "alibaba", provider_model_id: h.row.model, runtime_model: `openai:${h.row.model}`,
+    context_window_tokens: 256000, max_output_tokens: 16384,
+    input_modalities: ["text", "image"], tags: ["structured_output"],
+    reasoning_options: [{ type: "effort", values: ["low", "high"] }],
+  }] }] };
+  await h.admin.openEdit("saved");
+  h.element("llmModelContextWindow").value = "777777";
+  h.context.catalogResponse = async () => catalog;
+  await h.admin.updateFromCatalog(true);
+  assert.equal(h.element("llmModelContextWindow").value, "777777");
+  assert.deepEqual({ ...h.admin.reasoningPayload.reasoning_catalog }, {
+    provider_id: "alibaba", provider_model_id: h.row.model,
+  });
+
+  let reply;
+  h.context.catalogResponse = () => new Promise(resolve => { reply = resolve; });
+  const refresh = h.admin.updateFromCatalog();
+  await h.admin.openEdit("saved");
+  const request = h.requests.findLast(r => r.path.includes("/catalog?"));
+  assert.equal(request.signal.aborted, true);
+  reply(catalog);
+  await refresh;
+  assert.equal(h.element("llmModelContextWindow").value, String(h.row.context_window_tokens));
+  assert.equal(h.admin.reasoningPayload.reasoning_catalog, undefined);
+});
+
 test("开启和关闭保存都保留未知标签，保存失败保留弹框及草稿", async () => {
   const h = harness(["tool_call", "custom:existing"]);
   await h.admin.openEdit("saved");
@@ -166,6 +224,61 @@ test("高级开关与说明可访问，兼容标记不加入能力复选框", ()
   assert.doesNotMatch(template, /name="llmModelTag" value="single_system_message"/);
   assert.match(template, /role="switch"[^>]*aria-checked="false"[^>]*aria-labelledby="llmModelInlineToolRefsLabel"/);
   assert.doesNotMatch(template, /name="llmModelTag" value="inline_tool_schema_refs"/);
+});
+
+test("切换协议保留高级区展开状态，Responses 下禁用 Chat 兼容开关", async () => {
+  const h = harness([marker, inlineMarker, 'reasoning'], 'private');
+  h.row.reasoning_options = [{ type: "effort", values: ["low", "high"] }];
+  h.row.reasoning_source = "manual";
+  h.state.llmProviders.push({ id: 'gpt', provider_type: 'openai' });
+  h.state.llmProviderTypes.push({ code: 'openai', model_protocol: 'openai_responses' });
+  await h.admin.openEdit('saved');
+  assert.equal(h.element('llmModelProtocolChat').checked, true);
+  const details = h.element('llmModelAdvancedSettings');
+  const mergeSystem = h.element('llmModelMergeSystem');
+  const inlineRefs = h.element('llmModelInlineToolRefs');
+  const reset = h.element('restoreLlmModelAdvanced');
+  details.open = true;
+  await details.fire('toggle');
+  assert.equal(reset.classList.contains('hidden'), false);
+  h.element('llmModelProtocolResponses').checked = true;
+  await h.element('llmModelProtocolResponses').fire('change');
+  assert.equal(h.element('llmModelAdvancedSection').classList.contains('hidden'), false);
+  assert.equal(details.open, true);
+  assert.equal(mergeSystem.disabled, true);
+  assert.equal(inlineRefs.disabled, true);
+  assert.equal(reset.classList.contains('hidden'), true);
+  assert.equal(h.admin.modelTags().includes('openai_responses'), true);
+  assert.equal(h.admin.modelTags().includes(marker), true);
+  assert.deepEqual(h.admin.reasoningOptions, h.row.reasoning_options);
+  h.element('llmModelProtocolChat').checked = true;
+  await h.element('llmModelProtocolChat').fire('change');
+  assert.equal(details.open, true);
+  assert.equal(mergeSystem.disabled, false);
+  assert.equal(inlineRefs.disabled, false);
+  assert.equal(reset.classList.contains('hidden'), false);
+  h.element('llmModelProtocolResponses').checked = true;
+  await h.element('llmModelProtocolResponses').fire('change');
+  await h.admin.updateFromCatalog();
+  await h.admin.save({ preventDefault() {}, currentTarget: h.element('llmModelForm') });
+  assert.equal(JSON.parse(h.requests.at(-1).body).tags.includes('openai_responses'), true);
+  h.row.tags.push('openai_responses');
+  await h.admin.openCopy('saved');
+  assert.equal(h.element('llmModelProtocolResponses').checked, true);
+  h.element('llmModelProviderId').value = 'qwen';
+  await h.element('llmModelProviderId').fire('change');
+  assert.equal(h.element('llmModelProtocolField').classList.contains('hidden'), true);
+  h.element('llmModelProviderId').value = 'gpt';
+  await h.element('llmModelProviderId').fire('change');
+  assert.equal(h.element('llmModelProtocolField').classList.contains('hidden'), true);
+  h.element('llmModelProviderId').value = 'private';
+  await h.element('llmModelProviderId').fire('change');
+  assert.equal(h.element('llmModelProtocolResponses').checked, true);
+  h.element('llmModelProtocolChat').checked = true;
+  await h.element('llmModelProtocolChat').fire('change');
+  assert.equal(h.element('llmModelAdvancedSection').classList.contains('hidden'), false);
+  assert.equal(h.admin.modelTags().includes('openai_responses'), false);
+  assert.equal(h.admin.modelTags().includes(marker), true);
 });
 
 test("展开引用默认关闭，两个标记独立保存，复制和目录刷新继承", async () => {

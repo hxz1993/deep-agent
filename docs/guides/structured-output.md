@@ -52,7 +52,7 @@ Console 中，说明与完整 JSON Schema 向下撑满并对齐底边；无结�
 
 `{}`、只有 text、只有合法 contract、contract 加 clarification 均可通过；`{"contract":{}}` 不合法。平台只检查定义中的静态规则，已有合同基线、版本/Hash、业务写入权限继续由客户端检查。
 
-`GET /api/v1/agents/{id}/output-config` 为管理员只读接口，返回 `structured_output_enabled`、`allow_text_output` 和完整 `output_config`（没有定义为 null）。普通 Agent 详情不带管理 Schema；列表不逐项加载定义。
+`GET /api/v1/agents/{id}/output-config` 为管理员只读接口，返回 `structured_output_enabled`、`allow_text_output` 和完整 `output_config`（没有定义为 null）。普通 Agent 详情不带管理 Schema；Agent 候选列表和管理摘要均不读取输出配置。
 
 创建及 PATCH 的 allow_text_output 必须是 JSON boolean，显式 null 拒绝。PATCH 省略字段保持原值；关掉开关不删除草稿。显式 `output_config:null` 仅在合并后的最终状态关闭时删除定义。开启但没有定义会拒绝整个事务。无效 Schema 的编辑内容保留在页面，页头保存前必须修正；详情无第二个独立保存动作。
 
@@ -64,6 +64,8 @@ Agent 的更新账号由可信登录身份写入，与开关、定义和更新�
 - Schema UTF-8 最多 64 KiB、深度 16、节点 2048、属性总数 512、枚举总数 1024；引用展开后同样检查。支持本地无环 `$defs` 引用，根 `$id` 可作注解；不允许嵌套 `$id`、远端/file/循环/dynamic/recursive 引用，校验不访问网络。pattern/patternProperties 的单个正则最多 512 字符。支持 date、date-time、time、uuid 四类 format，未知 format 拒绝。最终结果最多 1 MiB。
 - 完整模型响应进入工具分发前检查。输出与普通/MCP/UI 工具混在同一响应、或一次多个输出均被拒绝，宿主不会先执行其中的业务工具。Provider 已在远端执行的原生工具无法回滚，不能据此宣称其未执行。
 - 每个 Turn 最多两次格式修正；混调、严格模式下纯文字、JSON/Schema 错误共用额度；允许的文本正常结束不消耗纠错额度，也不清除此前失败。UI 恢复不重置；总模型请求上限优先，最后一次请求仍保留输出工具。DeepSeek/Kimi 思考模式使用模型能力配置允许的工具选择方式，严格模式仍拒绝文字绕过；混合模式保留输出工具并允许正常文字结束。
+- 格式纠正反馈保留既有错误编码，补充具体路径、约束和修正指引：例如数组最多 4 项但实际 5 项、缺少哪个必填字段、JSON 的出错行列或重复字段。anyOf/oneOf 同时提供相关分支的具体错误，避免只收到“未通过组合校验”。不会转换类型、丢弃多余字段或放宽 Schema；模型仍须重新提交完整结果。
+- 反馈不复制候选业务值；动态字典键在路径中显示为 `<key>`，静态字段和数组索引保留。校验错误最多 20 条，各字段有长度限制；模型纠正消息最多 6000 字符，只按整条错误裁减并标记数量，始终保留完整可解析 JSON。模型修正指令只用于当前运行，不改写既有历史、输出标识或重试次数。
 - Schema 校验运行于现有 Python/jsonschema 子进程。每 Worker 最多两个运行、16 个排队，排队和执行各最多 2 秒。超时/取消 kill 并回收，容量及系统错误直接停止，不让模型反复改内容；缓存最多 128 项。
 - 每个 Run（含 UI Deferred 续跑）从 Agent 配置读取定义和允许文本策略，在内存中构造输出类型；同一对话约定配置保持一致，修改配置后应新建对话。事件不再保存完整 Schema 或配置引用，不从历史快照恢复配置；续跑只恢复真实执行次数、格式失败和尝试序号。历史快照保留原样，但不参与当前运行。
 
@@ -99,7 +101,7 @@ Console 只提供通用正文/JSON，“完整 JSON／按结构分组”位于�
 
 ## 数据库 013
 
-两张表保持逻辑1:1：agents仅存structured_output_enabled总开关；agent_output_configs以agent_id为主键，name、description、allow_text_output各是独立列，字段定义仍整体放json_schema JSON列，不新增逐字段明细表，也不把整份输出配置再包装成config JSON。不存在配置记录时文本策略为false；没有合法定义时不能单独保存true。删除定义同时清除该策略，关闭总开关则保留完整配置草稿。对外API的allow_text_output仍为顶层字段，不改变Console或安装包格式。
+两张表保持逻辑1:1：agents仅存structured_output_enabled总开关；agent_output_configs以agent_id为主键，name、description、allow_text_output各是独立列，字段定义仍整体放json_schema JSON列，不新增逐字段明细表，也不把整份输出配置再包装成config JSON。不存在配置记录时文本策略为false；没有合法定义时不能单独保存true。删除定义同时清除该策略，关闭总开关则保留完整配置草稿。Agent 详情和输出配置的 `allow_text_output` 为顶层字段，安装包沿用原格式。
 
 
 保留012，新增013→012：agent_output_configs.allow_text_output Boolean NOT NULL，应用和数据库默认均为 false，现有 Agent 继续严格 JSON。与开关、定义、更新时间及可信更新人同事务保存。配置备份保留关闭草稿，仅同 Revision 恢复；历史011/012导出使用其真实物理字段，不能读取新列或改标冒充013。

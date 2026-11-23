@@ -1,0 +1,411 @@
+{
+  "tools": [
+    {
+      "name": "list_agents",
+      "description": "Discover enabled published Agents and their agent_code values.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "PublicInput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "send_message",
+      "description": "Start a task with agentCode and an A2A message. To continue an input-required task, send a new message containing the original taskId and a new messageId. Use contextId alone to start a new task in the same conversation. Waits up to configuration.waitSeconds (default 120, 0 for immediate return). If still running when the wait expires, returns the current task with its original id and contextId. File parts include an authenticated download URL when available. For downloadable reports, ask the published Agent to register the file in the caller's DeepFOS Download Center. See deepagent://guides/mcp for report delivery and authenticated direct downloads.",
+      "inputSchema": {
+        "$defs": {
+          "JsonValue": {},
+          "Message": {
+            "additionalProperties": false,
+            "properties": {
+              "messageId": {
+                "maxLength": 128,
+                "minLength": 1,
+                "title": "Messageid",
+                "type": "string"
+              },
+              "role": {
+                "const": "ROLE_USER",
+                "title": "Role",
+                "type": "string"
+              },
+              "parts": {
+                "items": {
+                  "$ref": "#/$defs/MessagePart"
+                },
+                "maxItems": 20,
+                "minItems": 1,
+                "title": "Parts",
+                "type": "array"
+              },
+              "taskId": {
+                "anyOf": [
+                  {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Taskid"
+              },
+              "contextId": {
+                "anyOf": [
+                  {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Contextid"
+              },
+              "referenceTaskIds": {
+                "items": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 10,
+                "title": "Referencetaskids",
+                "type": "array"
+              },
+              "metadata": {
+                "anyOf": [
+                  {
+                    "additionalProperties": {
+                      "$ref": "#/$defs/JsonValue"
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Metadata"
+              }
+            },
+            "required": [
+              "messageId",
+              "role",
+              "parts"
+            ],
+            "title": "Message",
+            "type": "object"
+          },
+          "MessagePart": {
+            "additionalProperties": false,
+            "properties": {
+              "text": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Text"
+              },
+              "data": {
+                "$ref": "#/$defs/JsonValue",
+                "default": null
+              },
+              "raw": {
+                "anyOf": [
+                  {
+                    "maxLength": 11184812,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Raw"
+              },
+              "filename": {
+                "anyOf": [
+                  {
+                    "maxLength": 255,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Filename"
+              },
+              "mediaType": {
+                "anyOf": [
+                  {
+                    "maxLength": 255,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Mediatype"
+              }
+            },
+            "title": "MessagePart",
+            "type": "object"
+          },
+          "SendConfiguration": {
+            "additionalProperties": false,
+            "properties": {
+              "historyLength": {
+                "anyOf": [
+                  {
+                    "maximum": 50,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Historylength"
+              },
+              "waitSeconds": {
+                "default": 120,
+                "description": "Maximum seconds to wait for the task. Use 0 for an immediate snapshot.",
+                "minimum": 0,
+                "title": "Waitseconds",
+                "type": "number"
+              }
+            },
+            "title": "SendConfiguration",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "agentCode": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Agentcode"
+          },
+          "message": {
+            "$ref": "#/$defs/Message"
+          },
+          "configuration": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SendConfiguration"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "SendTool",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_task",
+      "description": "Read an A2A Task by id. Waits up to waitSeconds (default 120, 0 for immediate return). Check status.state, status.message for questions, and artifacts for results. File parts include an authenticated download URL when available. For downloadable reports, ask the published Agent to register the file in the caller's DeepFOS Download Center. See deepagent://guides/mcp for report delivery and authenticated direct downloads.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "historyLength": {
+            "anyOf": [
+              {
+                "maximum": 50,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Historylength"
+          },
+          "waitSeconds": {
+            "default": 120,
+            "description": "Maximum seconds to wait for the task. Use 0 for an immediate snapshot.",
+            "minimum": 0,
+            "title": "Waitseconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "GetTool",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_tasks",
+      "description": "List tasks for agentCode in this App with A2A filters and paging. Use nextPageToken as pageToken and includeArtifacts to include results.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "agentCode": {
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "title": "Agentcode",
+            "type": "string"
+          },
+          "contextId": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Contextid"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "TASK_STATE_SUBMITTED",
+                  "TASK_STATE_WORKING",
+                  "TASK_STATE_INPUT_REQUIRED",
+                  "TASK_STATE_AUTH_REQUIRED",
+                  "TASK_STATE_COMPLETED",
+                  "TASK_STATE_FAILED",
+                  "TASK_STATE_CANCELED",
+                  "TASK_STATE_REJECTED"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "pageSize": {
+            "anyOf": [
+              {
+                "maximum": 100,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pagesize"
+          },
+          "pageToken": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pagetoken"
+          },
+          "historyLength": {
+            "anyOf": [
+              {
+                "maximum": 50,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Historylength"
+          },
+          "statusTimestampAfter": {
+            "anyOf": [
+              {
+                "maxLength": 35,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "format": "date-time",
+            "title": "Statustimestampafter"
+          },
+          "includeArtifacts": {
+            "default": false,
+            "title": "Includeartifacts",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "agentCode"
+        ],
+        "title": "ListTool",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cancel_task",
+      "description": "Cancel a task by id and return its current task state.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "CancelTool",
+        "type": "object"
+      }
+    }
+  ]
+}

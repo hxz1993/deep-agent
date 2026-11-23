@@ -7,13 +7,30 @@ __all__ = ["list_system_tool_domains"]
 
 _SYSTEM_TOOL_DOMAINS = (
     SystemToolDomain(
-        code="runtime:channel", label="渠道消息",
-        description="向本轮来源群聊或私聊发送消息和附件，无需配置MCP。",
+        code="runtime:environment",
+        label="运行环境",
+        description="所有业务 Agent 默认可用的运行环境工具，无需关联工具包。",
         tools=(SystemToolDescription(
-            name="channel_message", display_name="渠道消息", source="DeepAgent",
-            injection_condition="来自已启用飞书或企微渠道的可信当前会话Run",
-            description="按顺序发送文字、图片、文件和已有音视频；媒体使用授权File ID或公开URL，飞书支持引用当前消息。",
+            name="get_current_time", display_name="获取当前时间", source="DeepAgent",
+            injection_condition="所有业务 Agent Run 自动注入，不依赖能力关联",
+            description="获取实际当前时间，默认 UTC；可指定 Asia/Shanghai 等 IANA 时区，返回包含 UTC 偏移的 ISO 8601 字符串。",
         ),),
+    ),
+    SystemToolDomain(
+        code="runtime:channel", label="渠道消息",
+        description="向当前渠道聊天发送消息和附件，并按渠道查询使用说明。",
+        tools=(
+            SystemToolDescription(
+                name="channel_message", display_name="渠道消息", source="DeepAgent",
+                injection_condition="来自已启用渠道的可信会话 Run",
+                description="按顺序发送文字、图片、文件和已有音视频。媒体使用授权 File ID 或公开 URL，飞书支持引用当前消息。",
+            ),
+            SystemToolDescription(
+                name="channel_doc", display_name="渠道说明", source="DeepAgent",
+                injection_condition="来自已启用渠道的可信会话 Run",
+                description="查询当前渠道的快捷命令、收发限制及引用和转发支持情况。",
+            ),
+        ),
     ),
     SystemToolDomain(
         code="runtime:planning",
@@ -98,6 +115,13 @@ _SYSTEM_TOOL_DOMAINS = (
                 description="查看授权图片或PDF物理页，支持多来源、多图比较；公网来源需Web授权。通过主模型原生视觉核验，不进入PTC。",
             ),
             SystemToolDescription(
+                name="present",
+                display_name="交付文件",
+                source="DeepAgent",
+                injection_condition="普通聊天固定注入",
+                description="完成工作后、最终回复前，选择要交付的附件或会话文件。每次完成的 Run 最多交付 10 份文件。",
+            ),
+            SystemToolDescription(
                 name="export_file_to_download_center",
                 display_name="发布到下载中心",
                 source="DeepAgent",
@@ -137,7 +161,7 @@ _SYSTEM_TOOL_DOMAINS = (
     SystemToolDomain(
         code="runtime:mcp-resource",
         label="MCP Resource",
-        description="按需访问已授权 URL MCP 提供的 Resource 和 Resource Template。",
+        description="按需列出和读取已授权 URL MCP 提供的资源。",
         tools=(
             SystemToolDescription(
                 name="list_mcp_resources",
@@ -147,19 +171,34 @@ _SYSTEM_TOOL_DOMAINS = (
                 description="列出指定 MCP Server 当前提供的 Resource。",
             ),
             SystemToolDescription(
-                name="list_mcp_resource_templates",
-                display_name="查看 MCP 资源模板",
-                source="DeepAgent",
-                injection_condition="Agent 已选择检测到 Resource 能力的可用 URL MCP",
-                description="列出指定 MCP Server 当前提供的 Resource Template。",
-            ),
-            SystemToolDescription(
                 name="read_mcp_resource",
                 display_name="读取 MCP 资源",
                 source="DeepAgent",
                 injection_condition="Agent 已选择检测到 Resource 能力的可用 URL MCP",
                 description="读取指定 MCP Server 中的 Resource 内容。",
             ),
+        ),
+    ),
+    SystemToolDomain(
+        code="runtime:remote-agent",
+        label="远程 Agent",
+        description="委派给已绑定的远程 Agent，按次发送选定附件，并接收任务结果和文件。",
+        tools=tuple(
+            SystemToolDescription(
+                name=name,
+                display_name=label,
+                source="DeepAgent" if name == "remote_task_result" else "Pydantic AI Harness",
+                injection_condition="Agent 已绑定至少一个本轮可用的远程连接",
+                description=description,
+            )
+            for name, label, description in (
+                ("delegate_task", "委派远程任务", "发起或续跑远程任务，可选择本次发送的附件。"),
+                ("list_tasks", "查看委派任务", "查看当前委派任务的 ID、状态和待答提示。"),
+                ("message_task", "追加任务指令", "Harness 的运行中指令入口，当前远程接入暂不接受追加指令。"),
+                ("answer_task", "补答远程任务", "回复远端的待答问题，可选择本次发送的附件。"),
+                ("cancel_task", "取消委派任务", "请求取消任务，以执行端确认的状态为准。"),
+                ("remote_task_result", "补查远程结果", "按任务 ID 补查结果、文件和警告，可请求回查远端。"),
+            )
         ),
     ),
 )

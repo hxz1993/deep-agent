@@ -92,8 +92,8 @@ class PTCRulePlacementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["native_calls"], ["alpha", "beta", "beta", "alpha"])
         self.assertEqual([part["outcome"] for part in captured["ptc"]], ["success", "failed"])
         self.assertEqual(captured["ptc"][0]["content"], 6)
-        self.assertIn("Inspect the error and completed calls", str(captured["ptc"][1]["content"]))
-        self.assertIn("repeat an uncertain write", str(captured["ptc"][1]["content"]))
+        self.assertIn("Check the error and each call's outcome", str(captured["ptc"][1]["content"]))
+        self.assertNotIn("Earlier nested writes", str(captured["ptc"][1]["content"]))
         self.assertEqual(captured["notices"], ["New tool schemas are available: `demo_alpha`.",
                                               "New tool schemas are available: `demo_beta`."])
         for request in captured["requests"]:
@@ -108,11 +108,20 @@ class PTCRulePlacementTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(run_code.count("DeepAgent PTC rules:"), 1)
                 for marker in ("Use `run_code` for bounded tool orchestration", "fresh model interpretation or semantic judgment",
                     "Python syntax alone does not require execute_python", "Never use `run_code` to discover",
+                    "Monty runs a Python subset", "return_exceptions=True", "not lazy iterators",
                     "only inside `run_code`", "authorized session file", "does not roll back earlier nested side effects",
                     "Execute side-effecting tools sequentially", "instead of blindly repeating the write",
                     "Never inspect, measure, print, or return", "cannot directly access host files",
-                    "Generic authorized-file relay shape", "Generic public-file relay shape", "Common media-message relay shape"):
+                    "Generic numeric summary shape", "Generic authorized-file relay shape",
+                    "pass `url` instead of `file_id`"):
                     self.assertIn(marker, run_code)
+                for obsolete in ("`default=str` is unsupported", "str.format() is also unsupported",
+                                 "not string `%`", "csv and decimal are unavailable",
+                                 "wecom-doc", "wecom-chat", "WeCom", "target_chat_id", "WebP",
+                                 "Importable standard library modules", "timing primitives", "asyncio.sleep"):
+                    self.assertNotIn(obsolete, run_code)
+                self.assertIn('restart: true', run_code)
+                self.assertIn('last expression', run_code)
                 search = descriptions.get("search_tools", "")
                 self.assertIn("native", search)
                 self.assertIn("does not require", search)

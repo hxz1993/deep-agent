@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile } from 'node:fs/promises';
 import { findViewImageResult, renderViewImageResult, bindViewImagePreviews } from '../../../console/view-image.js';
 
 const image = (resource, rest = {}) => ({ resource, name: '图 A', format: 'png', status: 'ready', width: 100, height: 60, bytes: 99, ...rest });
@@ -100,14 +99,6 @@ test('closing or leaving a Skill preview aborts fetch and ignores late responses
   await pending;
   assert.equal(h.opened.length, 0);
   assert.deepEqual(h.revoked, []);
-});
-
-test('conversation and trajectory share batch presentation and skip first-file fallback only for view_image', async () => {
-  const [conversation, trajectory] = await Promise.all(['conversation-presenter.js', 'trajectory.js'].map((name) => readFile(new URL(`../../../console/${name}`, import.meta.url), 'utf8')));
-  for (const source of [conversation, trajectory]) {
-    assert.match(source, /renderViewImageResult\(/);
-    assert.match(source, /findViewImageResult\(/);
-  }
 });
 
 test('authorized source links keep diagnostic ownership and gateway prefixes', () => {

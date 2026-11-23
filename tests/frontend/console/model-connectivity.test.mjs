@@ -102,5 +102,20 @@ test("测试按钮位于供应商操作区，模型开关在名称左侧且结�
   assert.ok(source.indexOf("data-provider-test-models title=") < source.indexOf("data-provider-catalog>"));
   assert.match(source, /class="model-enabled-switch[\s\S]*?provider-related-model-main[\s\S]*?data-model-test-result=/);
   assert.match(source, /element\.textContent = result/);
-  assert.match(source, /element\.title = result\?\.message/);
+  assert.match(source, /element\.title = ""/);
+});
+
+test("测试失败只显示原因，重试和成功时清除旧原因", () => {
+  const h = harness();
+  const element = { dataset: { modelTestResult: "a" }, title: "旧原因", setAttribute() {} };
+  h.context.document.getElementById = () => ({ querySelectorAll: () => [element], querySelector: () => null });
+  vm.runInContext('providerAdminState.modelTests.set("a", {status:"error", elapsed_ms:200, message:"认证失败（401）<script>"})', h.context);
+  h.render();
+  assert.equal(element.textContent, "认证失败（401）<script>");
+  assert.equal(element.title, "");
+  for (const status of ["testing", "success"]) {
+    vm.runInContext(`providerAdminState.modelTests.set("a", {status:${JSON.stringify(status)}})`, h.context);
+    h.render();
+    assert.doesNotMatch(element.textContent, /认证失败|\n/);
+  }
 });

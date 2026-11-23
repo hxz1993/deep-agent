@@ -65,6 +65,7 @@ class SessionLiveHub:
         self.max_subscribers = max_subscribers
         self._runs: dict[SessionKey, _LiveRun] = {}
         self._subscribers: dict[SessionKey, set[LiveSubscription]] = {}
+        self._activity: dict[SessionKey, set[asyncio.Queue[LiveFrame | None]]] = {}
         self._replay_bytes = 0
         self._closed = False
 
@@ -75,6 +76,7 @@ class SessionLiveHub:
         if old is not None:
             self.end(key, old.run_id)
         self._runs[key] = _LiveRun(run_id, baseline_sequence=baseline_sequence)
+        self._notify_activity(key, run_id, "running")
 
     def publish(self, key: SessionKey, run_id: str, event: str, data: dict[str, Any]) -> None:
         run = self._runs.get(key)
@@ -105,6 +107,7 @@ class SessionLiveHub:
         # A subscription belongs to this Run only, even if the next request
         # begins before its client consumes the terminal queue entry.
         self._subscribers.pop(key, None)
+        self._notify_activity(key, run_id, "idle")
 
     def subscribe(self, key: SessionKey, run_id: str) -> LiveSubscription:
         run = self._runs.get(key)
@@ -124,6 +127,35 @@ class SessionLiveHub:
         subscription = LiveSubscription(key=key, initial=tuple(initial))
         self._subscribers.setdefault(key, set()).add(subscription)
         return subscription
+
+    def has_activity_capacity(self) -> bool:
+        return not self._closed and sum(map(len, self._activity.values())) < self.max_subscribers
+
+    def watch_activity(self, key: SessionKey) -> asyncio.Queue[LiveFrame | None]:
+        if not self.has_activity_capacity():
+            raise RuntimeError("Session activity capacity unavailable")
+        queue = asyncio.Queue(maxsize=1)
+        self._activity.setdefault(key, set()).add(queue)
+        active = self._runs.get(key)
+        queue.put_nowait(LiveFrame.make("session_activity", {
+            "run_id": active.run_id if active else None, "status": "running" if active else "idle",
+        }))
+        return queue
+
+    def unwatch_activity(self, key: SessionKey, queue: asyncio.Queue[LiveFrame | None]) -> None:
+        watchers = self._activity.get(key)
+        if watchers is not None:
+            watchers.discard(queue)
+            if not watchers:
+                self._activity.pop(key)
+
+    def _notify_activity(self, key: SessionKey, run_id: str, status: str) -> None:
+        if watchers := self._activity.get(key):
+            frame = LiveFrame.make("session_activity", {"run_id": run_id, "status": status})
+            for queue in watchers:
+                if queue.full():
+                    queue.get_nowait()
+                queue.put_nowait(frame)
 
     def unsubscribe(self, subscription: LiveSubscription) -> None:
         subscribers = self._subscribers.get(subscription.key)
@@ -159,6 +191,12 @@ class SessionLiveHub:
 
     def close(self) -> None:
         self._closed = True
+        for queues in self._activity.values():
+            for queue in queues:
+                if queue.full():
+                    queue.get_nowait()
+                queue.put_nowait(None)
+        self._activity.clear()
         for subscriptions in tuple(self._subscribers.values()):
             for subscription in tuple(subscriptions):
                 self._reset(subscription, "server_shutdown")

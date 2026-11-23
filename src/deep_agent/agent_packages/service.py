@@ -14,17 +14,21 @@ from deep_agent.agent_packages.archive import (
     PackageUi, build_zip, canonical, digest, parse_package,
 )
 from deep_agent.agent_packages.runtime_transaction import RuntimeCheckpoint
+from deep_agent.capabilities.codes import canonical_tool_package_codes
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.db.ids import new_agent_id
+from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE, skill_scope_condition
 from deep_agent.db.models import (
-    Agent, AgentOutputConfig, LlmModel, LlmProvider, McpServer, SkillPackage, UiToolDefinition, UiToolPackage,
+    Agent, AgentOutputConfig, LlmModel, LlmProvider, McpServer, RemoteAgentConnection, SkillPackage, UiToolDefinition, UiToolPackage,
 )
 from deep_agent.db.reference_integrity import is_unique_conflict
 from deep_agent.db.stores.agent.base import save_output_config, trusted_updater
 from deep_agent.models.provider_registry import model_unavailable_reason
+from deep_agent.models.reasoning import available_efforts, bound_agent_effort, effective_agent_effort, reasoning_protocol
+from deep_agent.remote_agents.contracts import CONNECTION_PREFIX, REMOTE_AGENT_PROTOCOLS
 from deep_agent.schemas.agent import AgentResponse
 from deep_agent.schemas.ui_tools import UiToolCreate
-from deep_agent.skills.catalog import get_builtin_skill, list_builtin_skills
+from deep_agent.skills.catalog import RETIRED_DIAGNOSTICS_SKILL_CODE, active_skill_codes, get_builtin_skill, list_builtin_skills
 from deep_agent.skills.runtime import RUNTIME_READY, skill_platform_file_headers
 from deepfos_platform.client.platform import FILE_TYPE_SKILL_PACKAGE
 
@@ -42,8 +46,11 @@ def ui_payload(package, tools):
 
 async def snapshot(db):
     result = {}
-    for cls in (Agent, AgentOutputConfig, LlmModel, LlmProvider, McpServer, SkillPackage, UiToolPackage, UiToolDefinition):
-        result[cls] = list((await db.execute(select(cls).options(lazyload('*')).execution_options(populate_existing=True))).scalars())
+    for cls in (Agent, AgentOutputConfig, LlmModel, LlmProvider, McpServer, RemoteAgentConnection, SkillPackage, UiToolPackage, UiToolDefinition):
+        statement = select(cls).options(lazyload('*')).execution_options(populate_existing=True)
+        if cls is SkillPackage:
+            statement = statement.where(skill_scope_condition(SkillPackage.scope_ref, GENERAL_SKILL_SCOPE))
+        result[cls] = list((await db.execute(statement)).scalars())
     return result
 
 
@@ -58,6 +65,17 @@ def snapshot_hash(data):
     return digest(tables)
 
 
+def _package_effort(agent, model, provider):
+    reference = agent.model_reference
+    effort = agent.reasoning_effort
+    if not effort or not reference or model is None or provider is None:
+        return None
+    if (reference.model != model.model or reference.provider_type != provider.provider_type
+            or reference.protocol != reasoning_protocol(model, provider)):
+        return None
+    return effort if effort in available_efforts(model, provider) else None
+
+
 def preview_from_snapshot(ctx, package: Package, data, mode='create', target_agent_id=None):
     if mode not in ('create', 'overwrite') or (mode == 'overwrite') != bool(target_agent_id):
         raise PackageError('请选择新建，或选择要覆盖的 Agent')
@@ -66,7 +84,9 @@ def preview_from_snapshot(ctx, package: Package, data, mode='create', target_age
         raise PackageConflict('目标 Agent 已不存在，请重新选择并预检')
     providers = {p.id: p for p in data[LlmProvider]}
     models = sorted([
-        {'id': m.id, 'name': m.name, 'provider_type': providers[m.provider_id].provider_type}
+        {'id': m.id, 'name': m.name, 'provider_type': providers[m.provider_id].provider_type,
+         **({'reasoning_effort': _package_effort(package.agent, m, providers[m.provider_id])}
+            if package.agent.reasoning_effort else {})}
         for m in data[LlmModel] if not model_unavailable_reason(m, providers.get(m.provider_id))
     ], key=lambda m: (m['name'], m['id']))
     mcps = sorted([{'code': f'mcp:{m.name}', 'name': m.name} for m in data[McpServer]], key=lambda m: m['code'])
@@ -79,19 +99,11 @@ def preview_from_snapshot(ctx, package: Package, data, mode='create', target_age
     builtin_ui = {t.package_code for t in builtin_ui_records()}
     builtin_names = {t.name for t in builtin_ui_records()}
     available = set(ctx.registry.codes()) | builtin_ui
+    remote_agents = {
+        CONNECTION_PREFIX + row.id: row.name for row in data.get(RemoteAgentConnection, ())
+        if row.config.get("protocol") in REMOTE_AGENT_PROTOCOLS
+    }
     resources, blocked = [], []
-    if package.agent.output_config is not None:
-        output_name = package.agent.output_config.name
-        known_names = {tool.name for incoming in package.ui for tool in incoming.tools}
-        known_names.update(tool.name for tool in builtin_ui_records()
-                           if tool.package_code in package.agent.capabilities)
-        known_names.update(tool.name for tool in data[UiToolDefinition]
-                           if tool.package_code in package.agent.capabilities)
-        selected = getattr(ctx.registry, 'selected', None)
-        if selected is not None:
-            known_names.update(tool.name for resource in selected(package.agent.capabilities) for tool in resource.tools)
-        if output_name in known_names:
-            blocked.append('输出编码与已关联工具名称冲突')
     def add(kind, code, label, status, **extra):
         refs = []
         if status == 'update':
@@ -105,14 +117,20 @@ def preview_from_snapshot(ctx, package: Package, data, mode='create', target_age
         if code in package.skills:
             _, incoming = package.skills[code]
             existing = uploaded.get(code)
-            if code in builtin_skills:
+            if code == RETIRED_DIAGNOSTICS_SKILL_CODE:
+                add('skill', code, incoming['label'], 'blocked')
+                blocked.append(f'Skill {code} 的内置编码已退役，不能用于上传包')
+            elif code in builtin_skills:
                 add('skill', code, incoming['label'], 'blocked')
                 blocked.append(f'Skill {code} 是内置资源，不能覆盖')
             else:
                 same = existing and existing.content_hash == incoming['content_hash']
                 add('skill', code, incoming['label'], 'reuse' if same else 'update' if existing else 'new')
         else:
-            add('builtin_skill', code, code, 'reuse' if code in builtin_skills else 'missing')
+            if code == RETIRED_DIAGNOSTICS_SKILL_CODE:
+                add('builtin_skill', code, '智能体诊断', 'missing', reason='retired_builtin_skill')
+            else:
+                add('builtin_skill', code, code, 'reuse' if code in builtin_skills else 'missing')
     for incoming in package.ui:
         existing = packages.get(incoming.code)
         tools = [t for t in data[UiToolDefinition] if t.package_code == incoming.code]
@@ -139,7 +157,9 @@ def preview_from_snapshot(ctx, package: Package, data, mode='create', target_age
             retained_tools=sorted(set(local_tools) - incoming_names))
     packed_ui = {p.code for p in package.ui}
     for code in package.agent.capabilities:
-        if not code.startswith('mcp:') and code not in packed_ui:
+        if code.startswith('agent_connection:'):
+            add('builtin_tool', code, remote_agents.get(code, code), 'reuse' if code in remote_agents else 'missing')
+        elif not code.startswith('mcp:') and code not in packed_ui:
             add('builtin_tool', code, code, 'reuse' if code in available else 'missing')
     reference = package.agent.model_reference
     matches = [m for m in models if reference and m['name'] == reference.name]
@@ -154,8 +174,8 @@ def preview_from_snapshot(ctx, package: Package, data, mode='create', target_age
     resulting_skills = {r['code'] for r in resources if r['kind'] in ('skill', 'builtin_skill') and r['status'] not in ('missing', 'blocked')}
     removed = []
     if target:
-        removed.extend({'kind': 'capability', 'code': c, 'label': c, 'status': 'unlinked'} for c in target.capabilities or [] if c not in resulting_caps)
-        removed.extend({'kind': 'skill', 'code': c, 'label': c, 'status': 'unlinked'} for c in target.skills or [] if c not in resulting_skills)
+        removed.extend({'kind': 'capability', 'code': c, 'label': c, 'status': 'unlinked'} for c in canonical_tool_package_codes(target.capabilities) if c not in resulting_caps)
+        removed.extend({'kind': 'skill', 'code': c, 'label': c, 'status': 'unlinked'} for c in active_skill_codes(target.skills) if c not in resulting_skills)
     return {'digest': digest({'package': package.digest, 'target': snapshot_hash(data),
                              'builtin': sorted(available | builtin_skills), 'mode': mode, 'target_agent_id': target_agent_id}),
             'manifest': package.manifest.model_dump(), 'agent': package.agent.model_dump(),
@@ -202,9 +222,13 @@ async def export_package(ctx, agent_id, headers):
         if row.model_id and (not model or not provider):
             raise PackageError('Agent 引用的模型或 Provider 已缺失')
         output_config = next((c for c in data[AgentOutputConfig] if c.agent_id == row.id), None)
+        effort = effective_agent_effort(row, model, provider) if model and provider else None
+        reference = {'name': model.name, 'provider_type': provider.provider_type} if model else None
+        if effort and reference is not None:
+            reference.update(model=model.model, protocol=reasoning_protocol(model, provider))
         agent = PackageAgent(name=row.name, prompt=row.prompt,
-                             capabilities=row.capabilities, skills=row.skills,
-                             model_reference={'name': model.name, 'provider_type': provider.provider_type} if model else None,
+                             capabilities=row.capabilities, skills=active_skill_codes(row.skills),
+                             model_reference=reference, reasoning_effort=effort,
                              structured_output_enabled=bool(row.structured_output_enabled),
                              allow_text_output=bool(output_config.allow_text_output) if row.structured_output_enabled and output_config is not None else False,
                              output_config=(next(({
@@ -235,7 +259,10 @@ async def export_package(ctx, agent_id, headers):
     excluded_output_fields = ({'structured_output_enabled', 'output_config', 'allow_text_output'}
                               if not agent.structured_output_enabled else
                               ({'allow_text_output'} if not agent.allow_text_output else set()))
-    exported_agent = agent.model_dump(exclude=excluded_output_fields)
+    excluded = {field: True for field in excluded_output_fields}
+    if not agent.reasoning_effort:
+        excluded.update({'reasoning_effort': True, 'model_reference': {'model', 'protocol'}})
+    exported_agent = agent.model_dump(exclude=excluded)
     files = {'manifest.json': canonical({'format': 'deepagent-agent-package', 'schema_version': 1, 'exported_from': __version__}),
              'agent.json': canonical(exported_agent), 'ui-tools.json': canonical(custom_ui)}
     for skill in needed:
@@ -264,7 +291,7 @@ def agent_state(row):
     if row is None:
         return None
     return digest({k: getattr(row, k) for k in
-                   ('id', 'name', 'prompt', 'model_id', 'capabilities', 'skills', 'structured_output_enabled', 'allow_text_output', 'updated_by')})
+                   ('id', 'name', 'prompt', 'model_id', 'reasoning_effort', 'capabilities', 'skills', 'structured_output_enabled', 'allow_text_output', 'updated_by')})
 
 
 def installation_results(preview, agent):
@@ -291,7 +318,7 @@ async def _install(ctx, package, options, headers, *, user_id=None):
     agent_id = options.target_agent_id or new_agent_id()
     try:
         async with ctx.stores.agent._read() as db:
-            existing = {s.code: s for s in (await db.execute(select(SkillPackage))).scalars()}
+            existing = {s.code: s for s in (await db.execute(select(SkillPackage).where(skill_scope_condition(SkillPackage.scope_ref, GENERAL_SKILL_SCOPE)))).scalars()}
             original_skills = {c: (r.platform_file_id, r.content_hash) for c, r in existing.items()}
             original_agent = agent_state(await db.get(Agent, agent_id))
         # External file I/O precedes the configuration transaction.
@@ -334,7 +361,7 @@ async def _install(ctx, package, options, headers, *, user_id=None):
                         if code in prepared:
                             row = await db.get(SkillPackage, code)
                             if row is None:
-                                row = SkillPackage(**prepared[code]); db.add(row)
+                                row = SkillPackage(**prepared[code], scope_ref=GENERAL_SKILL_SCOPE); db.add(row)
                             else:
                                 for key, value in prepared[code].items():
                                     setattr(row, key, value)
@@ -367,6 +394,10 @@ async def _install(ctx, package, options, headers, *, user_id=None):
                 caps.extend(r['matched_code'] for r in current['references']['mcps'] if r['matched_code'])
                 row = await db.get(Agent, agent_id) if options.mode == 'overwrite' else Agent(id=agent_id)
                 row.name, row.prompt, row.model_id = options.name, package.agent.prompt, model_id
+                model = await db.get(LlmModel, model_id) if model_id else None
+                provider = await db.get(LlmProvider, model.provider_id) if model and package.agent.reasoning_effort else None
+                effort = _package_effort(package.agent, model, provider)
+                row.reasoning_effort = bound_agent_effort(effort, model, provider)
                 row.capabilities, row.skills = list(dict.fromkeys(caps)), list(dict.fromkeys(skills))
                 row.ui_tool_selection = {}
                 row.structured_output_enabled = package.agent.structured_output_enabled

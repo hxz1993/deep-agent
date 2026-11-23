@@ -143,6 +143,7 @@ class Step:
     input: dict[str, Any] | None = None
     output: dict[str, Any] | None = None
     error: dict[str, Any] | None = None
+    source_location: dict[str, Any] | None = None
 
 
 @dataclass
@@ -159,6 +160,18 @@ class Collector:
     ended: float | None = None
     capture_error: bool = False
     generated_files: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def locate(self, call_id: str, tool_name: str, location: dict[str, Any]) -> None:
+        """Add only a bounded reference to existing source, never its body."""
+        try:
+            step = self.steps.setdefault(call_id, Step(call_id, tool_name))
+            step.source_location = {
+                "call_id": _bounded_text(location["call_id"]),
+                "filename": _bounded_text(location["filename"]),
+                "start": location["start"], "end": location["end"],
+            }
+        except Exception:
+            self.capture_error = True
 
     def add_sensitive_text(self, value: str) -> None:
         if value:
@@ -210,8 +223,8 @@ class Collector:
                     step.output = summary(returned.content, sensitive_values=self.sensitive_values)
                 if step.status in {"denied", "failed", "interrupted"} and step.error is None:
                     step.error = summary(returned.content, sensitive_values=self.sensitive_values)
-            elif step.status == "unknown":
-                step.status = "interrupted" if self.final_status == "interrupted" else "failed"
+            elif step.status == "unknown" and self.final_status == "interrupted":
+                step.status = "interrupted"
 
     def finish(self, status: str) -> None:
         self.final_status = status
@@ -281,6 +294,7 @@ class Collector:
                 "start_offset_ms": round((step.started - self.started) * 1000, 3) if step.started is not None else None,
                 "duration_ms": round((step.ended - step.started) * 1000, 3) if step.started is not None and step.ended is not None else None,
                 "input": None, "output": None, "error": None,
+                **({"source_location": dict(step.source_location)} if step.source_location else {}),
             })
         # IDs/timing/status get first claim on the budget. Then distribute each
         # summary fairly rather than letting one huge early call consume it.

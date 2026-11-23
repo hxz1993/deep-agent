@@ -409,6 +409,62 @@ class UnifiedFileToolTests(unittest.IsolatedAsyncioTestCase):
         tool = await _tool(ctx=_context(ref))
         self.assertIsNotNone(tool)
 
+    async def test_text_attachments_are_read_without_suffix_or_mime_allowlist(self) -> None:
+        samples = (
+            ("report.py", "text/x-python", "print('你好')\n".encode()),
+            ("helper.js", "application/javascript", b"export const answer = 42;\n"),
+            ("icon.svg", "image/svg+xml", b'<svg xmlns="http://www.w3.org/2000/svg"/>\n'),
+            ("query.sql", "application/octet-stream", b"SELECT 42;\n"),
+            ("unknown.extension", "application/vendor-custom", b"custom text\n"),
+            ("no-extension", None, "中文配置=true\n".encode("gb18030")),
+            ("wide.data", "application/octet-stream", "Unicode 文本\n".encode("utf-16")),
+        )
+        for name, mime, data in samples:
+            with self.subTest(name=name):
+                context = _context(AttachmentRef(id="code", name=name, mime=mime))
+                tool = await _tool(ctx=context)
+                self.assertIsNotNone(tool)
+                with patch("deep_agent.files.toolset._download_file", AsyncMock(return_value=data)):
+                    result = await tool.call_func({"resource": {"type": "attachment", "file_id": "code"}}, context)
+                self.assertEqual(result.format, "text")
+                self.assertIn(data.decode("utf-16" if name == "wide.data" else "gb18030" if name == "no-extension" else "utf-8").strip(), result.content)
+
+    async def test_generated_code_and_unrecognized_skill_text_remain_readable(self) -> None:
+        data = b"export function run() { return 42; }\n"
+        context = _context()
+        context.deps.session_file_artifacts["generated-js"] = {
+            "file_id": "generated-js", "file_name": "result.js", "mime": "application/javascript",
+            "kind": "sandbox_output", "sha256": hashlib.sha256(data).hexdigest(),
+        }
+        context.deps.file_store = Mock(download=AsyncMock(return_value=data))
+        tool = await _tool(ctx=context)
+        self.assertIsNotNone(tool)
+        result = await tool.call_func({"resource": {"type": "attachment", "file_id": "generated-js"}}, context)
+        self.assertEqual(result.content, data.decode().strip())
+
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete-general-source-") as temporary:
+            root = Path(temporary)
+            for path, category in (("scripts/helper.js", "script"), ("scripts/query.sql", "script"),
+                                   ("assets/custom.data", "asset")):
+                target = root / path
+                target.parent.mkdir(exist_ok=True)
+                target.write_bytes(data)
+                entry = _entry(path, category=category)
+                entry["readable"] = False
+                skill = _resolved_skill(root, [entry])
+                context = _context()
+                tool = await _tool({"demo": skill}, ctx=context)
+                self.assertIsNotNone(tool)
+                result = await tool.call_func({"resource": {"type": "skill", "skill_code": "demo", "path": path}}, context)
+                self.assertEqual(result.content, data.decode().strip())
+
+    async def test_binary_content_is_not_returned_as_text_despite_text_metadata(self) -> None:
+        context = _context(AttachmentRef(id="binary", name="claimed.txt", mime="text/plain"))
+        tool = await _tool(ctx=context)
+        with patch("deep_agent.files.toolset._download_file", AsyncMock(return_value=b"\x00\xffcompiled")):
+            with self.assertRaisesRegex(ToolFailed, "二进制"):
+                await tool.call_func({"resource": {"type": "attachment", "file_id": "binary"}}, context)
+
     async def test_unknown_attachment_is_rejected_before_download(self) -> None:
         ref = AttachmentRef(id="known", name="note.txt", mime="text/plain")
         tool = await _tool(ctx=_context(ref))
@@ -697,6 +753,27 @@ class UnifiedFileToolTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(read_bytes.call_count, 1)
             parser.assert_called_once()
 
+    async def test_script_source_paging_does_not_allow_binary_or_unindexed_files(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete-script-read-") as temporary:
+            root = Path(temporary)
+            (root / "scripts").mkdir()
+            (root / "scripts/helper.py").write_text("# one\n# two\n# three\n", encoding="utf-8")
+            (root / "scripts/binary.pyc").write_bytes(b"\x00\xffcompiled")
+            binary = _entry("scripts/binary.pyc", category="script")
+            binary["readable"] = True  # A stale flag cannot turn compiled code into source.
+            item = _resolved_skill(root, [_entry("scripts/helper.py", category="script"), binary])
+            context = _context()
+            tool = await _tool({"demo": item}, ctx=context)
+            resource = {"type": "skill", "skill_code": "demo", "path": "scripts/helper.py"}
+            first = await tool.call_func({"resource": resource, "limit": 1}, context)
+            second = await tool.call_func({"resource": resource, "limit": 1,
+                                          "offset": first.next_offset, "char_offset": first.next_char_offset}, context)
+            self.assertEqual((first.content, second.content), ("# one", "# two"))
+            for path in ("scripts/binary.pyc", "scripts/missing.py", "../other.py"):
+                expected_error = ToolFailed if path.endswith(".pyc") else ModelRetry
+                with self.subTest(path=path), self.assertRaises(expected_error):
+                    await tool.call_func({"resource": {**resource, "path": path}}, context)
+
     async def test_skill_permission_script_and_hash_boundaries(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -705,8 +782,11 @@ class UnifiedFileToolTests(unittest.IsolatedAsyncioTestCase):
             script.write_text("print('x')", encoding="utf-8")
             item = _resolved_skill(root, [_entry("scripts/run.py", category="script")])
             context = _context()
-            tools = await build_file_toolset({"demo": item}).get_tools(context)
-            self.assertEqual(tools, {})
+            tool = await _tool({"demo": item}, ctx=context)
+            self.assertIsNotNone(tool)
+            source = await tool.call_func({"resource": {"type": "skill", "skill_code": "demo",
+                                                         "path": "scripts/run.py"}}, context)
+            self.assertEqual(source.content, "print('x')")
 
             readable = root / "references/guide.md"
             readable.parent.mkdir()
@@ -715,17 +795,24 @@ class UnifiedFileToolTests(unittest.IsolatedAsyncioTestCase):
             item = _resolved_skill(root, [entry, _entry("scripts/run.py", category="script")])
             tool = await _tool({"demo": item}, ctx=context)
             assert tool is not None
+            source = await tool.call_func({"resource": {"type": "skill", "skill_code": "demo",
+                                                         "path": "scripts/run.py"}}, context)
+            self.assertEqual(source.content, "print('x')")
             with self.assertRaises(ModelRetry):
                 await tool.call_func(
                     {
                         "resource": {
                             "type": "skill",
-                            "skill_code": "demo",
+                            "skill_code": "unassociated",
                             "path": "scripts/run.py",
                         }
                     },
                     context,
                 )
+            script.write_text("print('replaced')", encoding="utf-8")
+            with self.assertRaises(ToolFailed):
+                await tool.call_func({"resource": {"type": "skill", "skill_code": "demo",
+                                                     "path": "scripts/run.py"}}, _context())
             entry["content_hash"] = "0" * 64
             with self.assertRaises(ToolFailed):
                 await tool.call_func(

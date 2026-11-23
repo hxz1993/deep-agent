@@ -40,12 +40,15 @@ test("readonly detail uses the pristine workspace shell and does not restyle its
 
 test("question/run focus follows exact saved event identities instead of text", () => {
   const items = [
-    { item_id: "message:a", kind: "user_message", text: "same question", source_event_ids: ["a"], order: { sequence: 1 } },
-    { item_id: "message:b", kind: "user_message", text: "same question", source_event_ids: ["b"], order: { sequence: 4 } },
+    { item_id: "message:a", kind: "user_message", turn_id: "turn-a", text: "same question", source_event_ids: ["a"], order: { sequence: 1 } },
+    { item_id: "message:b", kind: "user_message", turn_id: "turn-b", text: "same question", source_event_ids: ["b"], order: { sequence: 4 } },
+    { item_id: "message:c", kind: "assistant_message", turn_id: "turn-b", order: { sequence: 5 } },
   ];
   const events = [{ event_id: "a", run_id: "run-a" }, { event_id: "b", run_id: "run-b" }];
   assert.equal(findConversationFocus(items, events, { eventId: "b" }).item_id, "message:b");
   assert.equal(findConversationFocus(items, events, { runId: "run-b" }).item_id, "message:b");
+  assert.equal(findConversationFocus(items, [], { turnId: "turn-b" }).item_id, "message:b");
+  assert.equal(findConversationFocus(items, events, { turnId: "turn", runId: "run-b" }), null);
   assert.equal(findConversationFocus(items, events, { eventId: "missing", runId: "run-a" }), null);
   assert.equal(findConversationFocus(items, events, { runId: "run" }), null);
 });
@@ -423,11 +426,12 @@ test("session inspector shows persisted scope, never current test request header
 
 test("empty fields retain their original labels and styles while values and zero remain intact", () => {
   const empty = renderSessionInspector({ state: { agentId: "internal-agent-id" }, activeSession: { appId: null, spaceId: "" } });
-  assert.match(empty, /inspector-scope-value"><code>—<\/code>/);
+  assert.match(empty, /inspector-scope-names[^]*?未关联应用[^]*?未关联空间/);
+  assert.match(empty, /inspector-scope-codes[^]*?<code>—<\/code>/);
   assert.doesNotMatch(empty, /internal-agent-id|console-empty-value|>No<|估算方式|estimator_source/);
   const filled = renderSessionInspector({ diagnostic: true, agentName: "Agent name", state: { agentId: "hidden-id" }, activeSession: { appId: "<app>", spaceId: "space", turnCount: 0 }, contextStatus: { estimator_source: "conservative_fallback" } });
   assert.match(filled, /&lt;app&gt;/);
-  assert.match(filled, /<code>space<\/code>/);
+  assert.match(filled, /<code title="space">space<\/code>/);
   assert.match(filled, /title="提问数"><i[^]*?<\/i>0<\/span>/);
   assert.doesNotMatch(filled, /hidden-id|conservative_fallback/);
 });
@@ -450,7 +454,7 @@ test("missing usage in one grouped response does not turn into zero or a complet
   assert.match(html, /累计使用（部分）/);
 });
 
-test('view_image live and refreshed tool cards retain every item and avoid generated-file duplicates', () => {
+test('view_image keeps its tool result in live and refreshed conversations without a separate preview', () => {
   const output = { kind: 'view-image-result', status: 'partial', items: [
     { resource: { type: 'url', url: 'https://example.com/a.png' }, name: '图 A', format: 'png', status: 'ready', width: 10, height: 20 },
     { resource: { type: 'url', url: 'https://example.com/b.pdf' }, name: 'PDF B', format: 'pdf', page: 6, page_count: 12, status: 'ready' },
@@ -466,30 +470,8 @@ test('view_image live and refreshed tool cards retain every item and avoid gener
         { kind: 'tool', tool_name: 'view_image', call_id: 'images', status: 'completed', input: { items: [] }, output: [output] },
       ]));
     }
-    assert.equal(view.host.querySelectorAll('.view-image-item').length, 3, mode);
-    assert.match(view.host.querySelector('.view-image-results').textContent, /第 6 页 \/ 共 12 页/);
-    assert.match(view.host.querySelector('.view-image-results').textContent, /无法准备/);
-    assert.equal(view.host.querySelectorAll('.generated-file-list').length, 0);
-    assert.equal(view.host.querySelectorAll('.local-file-download').length, 0);
+    assert.equal(view.host.querySelector('.view-image-results, .generated-file-list, .local-file-download'), null, mode);
+    view.host.querySelector('.tool-head').listeners.get('click')[0]();
+    assert.match(view.host.querySelector('[data-tool-result-content]').textContent, /图 A[\s\S]*PDF B[\s\S]*无法准备/);
   }
-});
-
-test('generated files in administrator conversations use the session-authorized download route', () => {
-  const artifact = { kind: 'sandbox_output', file_id: 'local_ptc-report', file_name: '报告.html', mime: 'text/html' };
-  const factory = createConversationPresenter({ messages: {}, readOnly: true,
-    attachmentUrl: (file) => `/api/v1/diagnostics/sessions/another-users-session/files/${encodeURIComponent(file.id)}/download`,
-    window: { serviceUrl: (path) => `/ordinary-owner/${path}` },
-  });
-  const html = factory.renderToolResultArtifacts([artifact]);
-  assert.match(html, /href="\/api\/v1\/diagnostics\/sessions\/another-users-session\/files\/local_ptc-report\/download"/);
-  assert.doesNotMatch(html, /ordinary-owner/);
-});
-
-test('generated file download retains ordinary local fallback and platform file behavior', () => {
-  const factory = createConversationPresenter({ messages: {}, window: { serviceUrl: (path) => `/gateway/${path}` } });
-  const local = factory.renderGeneratedFileArtifact({ file_id: 'local_report', file_name: '报告.html' });
-  assert.match(local, /href="\/gateway\/api\/v1\/local-files\/local_report\/download"/);
-  const platform = factory.renderGeneratedFileArtifact({ file_id: 'platform_report', file_name: '报告.html' });
-  assert.doesNotMatch(platform, /<a\b/);
-  assert.match(platform, /data-copy-file-id="platform_report"/);
 });

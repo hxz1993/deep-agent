@@ -16,6 +16,7 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 from pydantic_ai.messages import ModelRequest, ToolReturnPart, UserPromptPart
 
+from deep_agent.db.serialization import StoredUserPromptPart
 from deep_agent.agent.attachments import resolve_user_prompt
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.tool_output_limits import PlatformToolResultStore
@@ -162,7 +163,7 @@ class LocalFileApiTests(unittest.IsolatedAsyncioTestCase):
         refs = [AttachmentRef(id=item.id, name=item.file_name, mime="text/plain")
                 for item in (attachment, foreign, system)]
         await get_context().store.append(sid, [ModelRequest(parts=[
-            UserPromptPart(["fixture", *[attachment_ref_dict(ref) for ref in refs]]),
+            StoredUserPromptPart(["fixture", *[attachment_ref_dict(ref) for ref in refs]]),
             ToolReturnPart("execute_python", "done", tool_call_id="output-call", metadata={
                 "generated_files": [{"file_id": item.id, "file_name": item.file_name, "mime": item.mime}
                                     for item in (generated, generated_json, generated_png)],

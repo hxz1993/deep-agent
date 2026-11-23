@@ -1,9 +1,9 @@
 import { initDiagnosticLogs } from "./diagnostics.js?v=20261019-release0138";
-import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=20261103-trajectory-files";
+import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=diagnostic-run-observer";
 import { createDiagnosticNavigation, diagnosticHash, diagnosticTarget, parseDiagnosticRoute } from "./diagnostics-navigation.js?v=20261019-release0138";
 
-import { initDiagnosticChannels } from "./diagnostics-channels.js?v=20261103-trajectory-files";
-import { initDiagnosticUsage } from "./diagnostics-usage.js?v=20261027-usage-average1";
+import { initDiagnosticChannels } from "./diagnostics-channels.js?v=session-source-column";
+import { initDiagnosticUsage } from "./diagnostics-usage.js?v=20261105-v01511";
 
 let center = null;
 export function initDiagnostics() {
@@ -47,7 +47,14 @@ export function initDiagnostics() {
   }
   center = {
     setActive(value) {
-      if (!value) { if (active) navigation.remember(); active = false; logs.deactivate(); sessions.deactivate(); channels.deactivate(); usage.deactivate(); route = null; currentHash = ""; currentEntryKey = null; return; }
+      if (!value) {
+        if (active) navigation.remember();
+        active = false;
+        logs.deactivate(); sessions.deactivate(); channels.deactivate(); usage.deactivate();
+        for (const page of [logPage, sessionPage, channelPage, usagePage]) page.classList.add("hidden");
+        route = null; currentHash = ""; currentEntryKey = null;
+        return;
+      }
       active = true; showRoute();
     },
     async open(kind) {

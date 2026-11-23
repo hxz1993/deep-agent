@@ -47,12 +47,12 @@ class AllowTextOutputExtraBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 def respond(messages, info):
                     calls.append(info)
                     if len(calls) == 1:
-                        output = ToolCallPart("lease_result", {} if kind == "schema" else {"ok": True}, "rejected")
+                        output = ToolCallPart("output__lease_result", {} if kind == "schema" else {"ok": True}, "rejected")
                         parts = [TextPart("rejected-candidate-body"), output]
                         if kind == "mixed":
                             parts.append(ToolCallPart("lookup", {}, "never-dispatched"))
                         if kind == "multiple":
-                            parts.append(ToolCallPart("lease_result", {"ok": True}, "second-output"))
+                            parts.append(ToolCallPart("output__lease_result", {"ok": True}, "second-output"))
                         return ModelResponse(parts=parts)
                     return ModelResponse(parts=[TextPart("accepted-final-text")])
                 runner = self.runner(respond, loader=AsyncMock(return_value=deepcopy(fixture.BASE)), tools=[lookup])
@@ -91,7 +91,7 @@ class AllowTextOutputExtraBoundaryTests(unittest.IsolatedAsyncioTestCase):
                     requests = []
                     def respond(messages, info):
                         requests.append(info)
-                        return ModelResponse(parts=[ToolCallPart("lease_result", {}, f"bad-{len(requests)}")]
+                        return ModelResponse(parts=[ToolCallPart("output__lease_result", {}, f"bad-{len(requests)}")]
                             if len(requests) <= 2 else [ToolCallPart("confirm", {}, "resume-frozen")])
                     runner = self.runner(respond, loader=AsyncMock(return_value=contract), limit=5,
                         toolsets=[ExternalToolset([CONFIRM])])
@@ -142,7 +142,7 @@ async def _resume_extra(path, agent_id, sid, allow_text, invalid):
     requests = []
     def respond(messages, info):
         requests.append(info)
-        return ModelResponse(parts=[ToolCallPart("lease_result", {} if invalid else {"ok": True}, "after-restart")])
+        return ModelResponse(parts=[ToolCallPart("output__lease_result", {} if invalid else {"ok": True}, "after-restart")])
     async def ordinary_probe():
         raise AssertionError("the final budget request must not expose ordinary tools")
     runner = AgentRunner(Agent(FunctionModel(respond), deps_type=AgentDeps, tools=[ordinary_probe],

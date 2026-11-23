@@ -32,11 +32,19 @@ def tool_endpoint(base_url: str | None, *, default: str, tool: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, f"{path}/{tool}", "", ""))
 
 
-async def post_json(endpoint: str, api_key: str, body: dict[str, Any]) -> Any:
+async def post_json(
+    endpoint: str,
+    api_key: str,
+    body: dict[str, Any],
+    *,
+    api_key_header: str = "Authorization",
+    timeout: float = 30,
+) -> Any:
     # Redirects must not forward a provider credential to another origin.
-    async with httpx2.AsyncClient(timeout=30, follow_redirects=False) as client:
+    credential = f"Bearer {api_key}" if api_key_header == "Authorization" else api_key
+    async with httpx2.AsyncClient(timeout=timeout, follow_redirects=False) as client:
         response = await client.post(
-            endpoint, headers={"Authorization": f"Bearer {api_key}"}, json=body,
+            endpoint, headers={api_key_header: credential}, json=body,
         )
         response.raise_for_status()
         return response.json()
@@ -54,10 +62,10 @@ def valid_source_url(value: object) -> bool:
         return False
 
 
-def parse_fetch(payload: Any, provider: str) -> dict[str, str]:
+def parse_fetch(payload: Any, provider: str, *, content_field: str) -> dict[str, Any]:
     if (not isinstance(payload, dict) or not isinstance(payload.get("title"), str)
-            or not isinstance(payload.get("content"), str)):
+            or not isinstance(payload.get(content_field), str)):
         raise ToolFailed(f"{provider} Fetch 返回格式无效")
-    if not payload["content"].strip():
+    if not payload[content_field].strip():
         raise ToolFailed(f"{provider} Fetch 未返回可用网页正文")
-    return {"title": payload["title"], "content": payload["content"]}
+    return payload

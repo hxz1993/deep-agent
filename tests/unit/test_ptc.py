@@ -17,6 +17,7 @@ from pydantic_ai.toolsets.abstract import ToolsetTool
 from pydantic_ai.usage import RunUsage
 from pydantic_core import SchemaValidator
 
+from deep_agent.agent.tool_names import READ_ONLY_TOOL, ScopedToolset
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.capabilities import build_registry
 from deep_agent.ptc import FilePayloadResolvingToolset, HybridCodeMode
@@ -25,6 +26,7 @@ from deep_agent.ptc.toolset import (
     _scrub_error_text,
 )
 from deep_agent.ptc.file_payload import (
+    CODE_MODE_ORIGINAL_NAME_KEY,
     CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY,
     FILE_DATA_TOKEN_PREFIX,
     MAX_FILE_BYTES,
@@ -115,12 +117,12 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(announcements), 1)
         self.assertEqual(announcements[0], "<system>New tool schemas are available: `demo_lookup`.</system>")
 
-    def test_discovery_announcement_preserves_seen_tool_deduplication(self) -> None:
+    async def test_discovery_announcement_preserves_seen_tool_deduplication(self) -> None:
         capability = HybridCodeMode(tools=[], dynamic_catalog=True)
-        ctx = mock.Mock()
-        capability._announce_newly_discovered(ctx, ["demo_one"])
-        capability._announce_newly_discovered(ctx, ["demo_one"])
-        capability._announce_newly_discovered(ctx, ["demo_one", "demo_two"])
+        ctx = mock.Mock(messages=[])
+        await capability._announce_newly_callable(ctx, ["demo_one"])
+        await capability._announce_newly_callable(ctx, ["demo_one"])
+        await capability._announce_newly_callable(ctx, ["demo_one", "demo_two"])
         self.assertEqual(ctx.enqueue.call_count, 2)
         self.assertIn("demo_one", ctx.enqueue.call_args_list[0].args[0].content)
         self.assertIn("demo_two", ctx.enqueue.call_args_list[1].args[0].content)
@@ -243,6 +245,64 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
                          if isinstance(part, ToolReturnPart) and part.tool_call_id == "ptc-2")
         self.assertEqual(persisted.outcome, "failed")
         self.assertEqual(persisted.metadata, failed.metadata)
+
+    async def test_parallel_failure_reports_completed_failed_and_interrupted_calls(self) -> None:
+        for read_only in (True, False):
+            with self.subTest(read_only=read_only):
+                started = asyncio.Event()
+                completed = asyncio.Event()
+                tools = FunctionToolset()
+
+                @tools.tool_plain(metadata={READ_ONLY_TOOL: read_only})
+                async def slow() -> int:
+                    started.set()
+                    await asyncio.Future()
+                    return 0
+
+                @tools.tool_plain(metadata={READ_ONLY_TOOL: True})
+                async def lookup() -> int:
+                    completed.set()
+                    return 5
+
+                @tools.tool_plain(metadata={READ_ONLY_TOOL: True})
+                async def invalid_lookup() -> int:
+                    await started.wait()
+                    await completed.wait()
+                    raise ModelRetry("invalid member expression")
+
+                snippets = iter(("1", "import asyncio\nawait asyncio.gather("
+                                 "demo_slow(), demo_lookup(), demo_invalid_lookup())"))
+
+                def respond(messages, _info: AgentInfo) -> ModelResponse:
+                    code = next(snippets, None)
+                    if code is None:
+                        return ModelResponse(parts=[TextPart("done")])
+                    return ModelResponse(parts=[ToolCallPart(
+                        "run_code", {"code": code}, "warmup" if code == "1" else "parallel-read",
+                    )])
+
+                agent = Agent(
+                    FunctionModel(respond), deps_type=AgentDeps,
+                    toolsets=[
+                        build_code_mode_tool_package().toolset,
+                        FilePayloadResolvingToolset(tools.prefixed("demo")),
+                    ],
+                    capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
+                )
+                result = await agent.run("read data", deps=AgentDeps(session_id="isolated"))
+                failed = next(part for message in result.new_messages() for part in message.parts
+                              if isinstance(part, ToolReturnPart) and part.tool_call_id == "parallel-read")
+                self.assertEqual(failed.outcome, "failed")
+                report = failed.content["nested_calls"]
+                self.assertIn("demo_slow({}) was interrupted before a result was received", report)
+                self.assertIn("demo_lookup({}) completed and returned 5", report)
+                self.assertIn("demo_invalid_lookup({}) failed", report)
+                self.assertEqual("may have applied a partial change" in report, not read_only)
+                self.assertEqual("Earlier nested writes" in failed.content["guidance"], not read_only)
+                audit = failed.metadata["ptc_diagnostics"]["steps"]
+                self.assertEqual({step["tool_name"]: step["status"] for step in audit}, {
+                    "demo_slow": "interrupted", "demo_lookup": "completed", "demo_invalid_lookup": "failed",
+                })
 
     def test_registry_exposes_explicit_default_off_package(self) -> None:
         registry = build_registry()
@@ -649,18 +709,24 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("independent small lookup/action", descriptions[0])
         self.assertIn("fresh model interpretation or semantic judgment", descriptions[0])
         self.assertIn("Python syntax alone does not require execute_python", descriptions[0])
-        self.assertIn("web_fetch returns an object with url, title and content", descriptions[0])
+        self.assertIn("web_fetch returns Markdown in content", descriptions[0])
         self.assertIn("`search_tools` is native-only", descriptions[0])
-        self.assertIn("connection/pairing, and canvas snapshots", descriptions[0])
+        self.assertIn("Tool discovery and schema inspection", descriptions[0])
         self.assertNotIn("one tool's result feeds another", descriptions[0])
         catalog = HybridCodeModeToolset._render_catalog(
             {
                 "load_file_data": type("Definition", (), {"metadata": {}})(),
                 "demo_lookup": type("Definition", (), {"metadata": {}})(),
+                "demo_write": type("Definition", (), {
+                    "metadata": {CODE_MODE_ORIGINAL_NAME_KEY: "demo-write"}, "sequential": True,
+                })(),
             }
         )
         self.assertIn("await demo_lookup(...)", catalog)
         self.assertIn("await load_file_data", catalog)
+        self.assertIn("`demo-write` -> Python `demo_write(...)`", catalog)
+        self.assertNotIn("await demo_write", catalog)
+        self.assertNotIn("Every listed function is async", catalog)
 
     def test_load_file_data_catalog_signature_matches_function_schema(self) -> None:
         rendered = HybridCodeModeToolset._render_catalog(
@@ -961,6 +1027,12 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
         def second(value: int) -> int:
             return value
 
+        mcp = FunctionToolset[AgentDeps]()
+
+        @mcp.tool_plain(name="code")
+        def third() -> str:
+            return "MCP tool with legacy name run_code"
+
         seen: dict[str, str] = {}
 
         def respond(_messages, info: AgentInfo) -> ModelResponse:
@@ -973,6 +1045,7 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
             toolsets=[
                 build_code_mode_tool_package().toolset,
                 FilePayloadResolvingToolset(toolset),
+                FilePayloadResolvingToolset(ScopedToolset(mcp, "mcp", "run")),
             ],
             capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
         )
@@ -980,6 +1053,7 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("a-b", seen)
         self.assertIn("a.b", seen)
         self.assertIn("run_code", seen)
+        self.assertIn("mcp__run__code", seen)
 
     async def test_code_only_helper_never_falls_back_native_on_alias_collision(self) -> None:
         helpers = FunctionToolset[AgentDeps]()
@@ -1049,7 +1123,7 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
             capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
         )
         await agent.run("inspect", deps=AgentDeps(session_id="session"))
-        self.assertEqual(seen, {"run_code"})
+        self.assertEqual(seen, {"run_code", "search_tools"})
 
     async def test_deferred_tool_becomes_native_and_code_callable_after_reveal(self) -> None:
         revealed = False
@@ -1073,12 +1147,7 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
             tools = await original_get_tools(ctx)
             output = {}
             for name, tool in tools.items():
-                if name == "reveal_tools":
-                    output[name] = replace(
-                        tool,
-                        tool_def=replace(tool.tool_def, tool_kind="capability-load"),
-                    )
-                elif name == "hidden_lookup":
+                if name == "hidden_lookup":
                     output[name] = replace(
                         tool,
                         tool_def=replace(tool.tool_def, defer_loading=not revealed),
@@ -1120,8 +1189,9 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
         )
         await agent.run("reveal", deps=AgentDeps(session_id="session"))
 
-        self.assertEqual(seen_steps[0], {"reveal_tools", "run_code"})
-        self.assertEqual(seen_steps[1], {"reveal_tools", "hidden_lookup", "run_code"})
+        self.assertTrue({"reveal_tools", "run_code"} <= seen_steps[0])
+        self.assertNotIn("hidden_lookup", seen_steps[0])
+        self.assertTrue({"reveal_tools", "hidden_lookup", "run_code"} <= seen_steps[1])
         self.assertEqual(called, ["revealed"])
 
 

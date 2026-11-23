@@ -15,6 +15,8 @@ from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.file_delivery import FileDeliveryHistory, build_file_delivery_toolset
+from deep_agent.sandbox.context import ExecutionContextLifecycle
 from deep_agent.agent.context_references import context_reference_instructions
 from deep_agent.models import OpenAICompatibleVideoChatModel
 from deep_agent.models.http_transport import model_http_settings
@@ -33,6 +35,7 @@ from deep_agent.agent.tool_discovery import (
     search_deferred_tools,
 )
 from deep_agent.capabilities.codes import is_ptc_selected
+from deep_agent.capabilities.environment import build_environment_toolset
 from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
 from deep_agent.ptc import FilePayloadResolvingToolset, HybridCodeMode
 from deep_agent.ptc.builtin import BuiltinPtcToolset
@@ -204,7 +207,7 @@ def _toolsets_for_spec(
     image_view_toolset: Any | None = None,
 ) -> list[Any]:
     """Resolve selected product tool packages into Pydantic AI toolsets."""
-    toolsets: list[Any] = []
+    toolsets: list[Any] = [build_environment_toolset(), build_file_delivery_toolset()]
     ptc_enabled = is_ptc_selected(spec.capabilities)
 
     def builtin_ptc(toolset: Any, *names: str) -> Any:
@@ -291,6 +294,7 @@ def build_agent(
     image_view_toolset: Any | None = None,
     document_lifecycle: AbstractCapability[AgentDeps] | None = None,
     image_view_lifecycle: AbstractCapability[AgentDeps] | None = None,
+    remote_agent_capabilities: list[AbstractCapability[AgentDeps]] | None = None,
 ) -> Agent[AgentDeps, str]:
     """Construct a Pydantic AI agent from a spec + the tool package registry.
 
@@ -323,6 +327,10 @@ def build_agent(
         image_view_toolset=image_view_toolset,
     )
     capabilities: list[AbstractCapability[AgentDeps]] = [RuntimeDiagnostics()]
+    if remote_agent_capabilities:
+        capabilities.extend(remote_agent_capabilities)
+    if "builtin:sandbox" in spec.capabilities:
+        capabilities.append(ExecutionContextLifecycle())
     if document_lifecycle is not None and "builtin:document" in spec.capabilities:
         capabilities.append(document_lifecycle)
     if image_view_lifecycle is not None:
@@ -356,15 +364,24 @@ def build_agent(
                 dynamic_catalog=True,
                 max_tool_calls=PTC_MAX_TOOL_CALLS,
                 resource_limits={
-                    "max_duration_secs": PTC_EXECUTION_SECONDS,
+                    "max_duration_seconds": PTC_EXECUTION_SECONDS,
                     "max_memory": PTC_MAX_MEMORY_BYTES,
                 },
             )
         )
     capabilities.append(build_planning_capability())
+    capabilities.append(FileDeliveryHistory())
     instructions: list[Any] = []
     if spec.instructions:
         instructions.append(spec.instructions)
+    instructions.append(
+        "If the reply needs to deliver a FileStore file, copy its exact File ID from the tool result. "
+        "Use [label](attachment://<file_id>) for download or ![alt](attachment://<file_id>) for an inline image. "
+        "Use the original image File ID, including for SVG; inline display does not require conversion. "
+        "If the user asks for a particular file or image, reference only that file in the requested mode. "
+        "Do not add links for other generated files or duplicate an inline image as a download unless asked. "
+        "For a status-only reply or when the user declines files, omit file links, images, and File IDs."
+    )
     if skill_capability is not None:
         instructions.append(SKILL_SELECTION_INSTRUCTIONS)
     instructions.append(context_reference_instructions)

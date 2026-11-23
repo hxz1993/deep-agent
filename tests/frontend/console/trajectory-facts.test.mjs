@@ -1,3 +1,4 @@
+import { trajectoryDomHarness } from "./trajectory-dom-harness.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { attachmentDownloadUrl } from "../../../console/attachment-preview.js";
@@ -39,21 +40,86 @@ test("part facts preserve assistant loop identity and pair independently complet
 function withController(check, options = {}) {
   const oldDocument = globalThis.document;
   const oldWindow = globalThis.window;
-  const elements = new Map();
-  const element = (id) => {
-    if (!elements.has(id)) elements.set(id, {
-      innerHTML: "", value: "", scrollTop: 0,
-      classList: { toggle() {}, contains: () => true },
-      listeners: new Map(),
-      addEventListener(type, callback) { this.listeners.set(type, callback); }, setAttribute() {},
-    });
-    return elements.get(id);
-  };
-  globalThis.document = { getElementById: element, querySelector: element, querySelectorAll: () => [] };
-  globalThis.window = { requestAnimationFrame: (fn) => fn() };
-  try { check(createTrajectoryController({ state: {}, ...options }), elements); }
-  finally { globalThis.document = oldDocument; globalThis.window = oldWindow; }
+  const harness = trajectoryDomHarness({ immediate: true });
+  globalThis.document = harness.document;
+  globalThis.window = harness.window;
+  let controller;
+  try {
+    controller = createTrajectoryController({ state: {}, ...options });
+    controller.selectView("trajectory");
+    check(controller, harness.elements);
+  } finally {
+    controller?.destroy();
+    globalThis.document = oldDocument;
+    globalThis.window = oldWindow;
+  }
 }
+
+test("assistant previews reuse authorized History links by source event while Raw retains the original message", () => {
+  withController((controller, elements) => {
+    const original = "![图](attachment://local_image)";
+    const url = "https://deepagent.test/api/v1/local-files/local_image/download";
+    const html = () => elements.get("inspectorContent").innerHTML;
+    controller.setHistory({ session_id: "one", items: [
+      fact("thinking", 1, 0, 0, { part_kind: "thinking", content: "准备附件" }),
+      fact("final", 2, 0, 1, { part_kind: "text", content: original }),
+    ] });
+    controller.restore({ selectedId: "thinking" });
+    assert.match(html(), /attachment:\/\/local_image/);
+    controller.setConversationHistory([
+      { kind: "assistant_message", source_event_ids: ["other"], text: "另一个回复" },
+      { kind: "assistant_message", source_event_ids: ["thinking", "final"], text: "下载链接" },
+      { kind: "assistant_message", source_event_ids: ["thinking", "final"], text: "![图](<" + url + ">)" },
+    ]);
+    assert.ok(html().includes(url));
+    assert.doesNotMatch(html(), /attachment:\/\/|另一个回复/);
+    controller.restore({ selectedId: "thinking", detailTab: "preview" });
+    assert.ok(html().includes(url));
+    controller.restore({ selectedId: "thinking", detailTab: "raw" });
+    assert.match(html(), /attachment:\/\/local_image/);
+    assert.equal(controller.events()[0].payload.content, original);
+    controller.setHistory({ session_id: "two", items: [
+      fact("thinking", 1, 0, 0, { part_kind: "text", content: original }),
+    ] });
+    assert.doesNotMatch(html(), /deepagent\.test/);
+  });
+});
+
+test("live final Markdown upgrades only the latest assistant reply in its run", () => {
+  withController((controller, elements) => {
+    const original = "[下载](attachment://local_report)";
+    const url = "https://deepagent.test/api/v1/local-files/local_report/download";
+    const html = () => elements.get("inspectorContent").innerHTML;
+    for (const [id, sequence] of [["earlier", 1], ["last", 2]]) {
+      controller.ingest({ event: "session_event_appended", data: { event:
+        fact(id, sequence, sequence, 0, { part_kind: "text", content: original }) } });
+    }
+    controller.ingest({ event: "final", data: { run_id: "run-1", output: "[下载](<" + url + ">)" } });
+    controller.restore({ selectedId: "last", detailTab: "preview" });
+    assert.ok(html().includes(url));
+    controller.restore({ selectedId: "earlier", detailTab: "preview" });
+    assert.doesNotMatch(html(), /deepagent\.test/);
+  });
+});
+
+test("交付卡片只放进最终助手的详情，不改变轨迹行", () => {
+  withController((controller, elements) => {
+    const detail = () => elements.get("inspectorContent").innerHTML;
+    controller.setHistory({ session_id: "one", items: [
+      fact("earlier", 1, 0, 0, { part_kind: "text", content: "正在生成" }),
+      fact("final", 2, 1, 0, { part_kind: "text", content: "完成" }),
+    ] });
+    controller.setConversationHistory([{
+      kind: "structured_output", status: "completed", run_id: "run-1",
+      output_files: [{ id: "final-csv", name: "交付.csv" }],
+    }]);
+    controller.restore({ selectedId: "final" });
+    assert.match(detail(), /reply-file-card.*[\s\S]*交付\.csv/);
+    controller.restore({ selectedId: "earlier" });
+    assert.doesNotMatch(detail(), /reply-file-card/);
+    assert.equal(controller.events().length, 2);
+  });
+});
 
 const contextReferences = [
   { key: "budget.range", type: "deeptable.selection", schema_version: "1.0", label: "预算选区",
@@ -84,7 +150,8 @@ test("trajectory download retains distinct full contexts from persisted user fac
   let exported;
   withController((controller, elements) => {
     const create = URL.createObjectURL, revoke = URL.revokeObjectURL;
-    globalThis.document.createElement = () => ({ click() {} });
+    const createElement = globalThis.document.createElement;
+    globalThis.document.createElement = tag => tag === "a" ? { click() {} } : createElement(tag);
     URL.createObjectURL = blob => { exported = blob; return "blob:test"; };
     URL.revokeObjectURL = () => {};
     try {
@@ -119,6 +186,40 @@ const appendFact = (controller, event) => controller.ingest({ event: "session_ev
 const resultFrame = (controller, callId = "confirm-id") => controller.ingest({ event: "tool_result", data: {
   tool: "builtin__confirm", tool_call_id: callId, result: { confirmed: true },
 } });
+
+test("a persisted new turn closes old Deferred calls without a result in live and reopened trajectories", () => {
+  withController((controller, elements) => {
+    const answered = deferredCall("answered", 1, "old-run", "old-turn", "answered");
+    const skipped = deferredCall("skipped", 2, "old-run", "old-turn");
+    const result = deferredResult("answer", 3, "resume-run", "old-turn", "answered");
+    const next = {
+      event_id: "next-input", sequence: 4, event_type: "user/message", run_id: "new-run", turn_id: "new-turn",
+      payload: { message: { kind: "request", parts: [{ part_kind: "user-prompt", content: "换个问题" }] } },
+    };
+    const current = deferredCall("current", 5, "new-run", "new-turn");
+    controller.setHistory({ items: [answered, skipped, result] });
+    controller.ingest({ event: "session", data: { run_id: "new-run", turn_id: "new-turn" } });
+    assert.equal(controller.events().find(row => row.native?.call_event_id === "skipped").status, "pending");
+    appendFact(controller, next);
+    appendFact(controller, current);
+    const verify = () => {
+      const rows = controller.events();
+      const oldTool = rows.find(row => row.native?.call_event_id === "skipped");
+      assert.equal(oldTool.status, "interrupted");
+      assert.equal(oldTool.outcome, "skipped");
+      assert.equal(oldTool.result, null);
+      assert.equal(oldTool.native.result_event_id, null);
+      assert.equal(rows.find(row => row.kind === "assistant" && row.native.event_ids.includes("skipped")).status, "interrupted");
+      assert.equal(rows.find(row => row.native?.call_event_id === "answered").status, "completed");
+      assert.equal(rows.find(row => row.native?.call_event_id === "current").status, "pending");
+      controller.restore({ selectedId: oldTool.id });
+      assert.match(elements.get("inspectorContent").innerHTML, />Skipped<\/em>/);
+    };
+    verify();
+    controller.setHistory({ items: [answered, skipped, result, next, current] });
+    verify();
+  });
+});
 
 test("real Deferred cross-Run fact order merges result SSE and keeps selection, count and refresh identity", () => {
   for (const factsFirst of [true, false]) withController((controller, elements) => {
@@ -488,17 +589,18 @@ test("late failed assistant facts replace closed live content before the next su
 });
 
 test("thinking-only assistant summaries reflect the same terminal state live and after refresh", () => {
-  for (const [terminal, status, summary] of [["error", "failed", "模型响应失败"], ["cancelled", "interrupted", "已停止"], ["final", "completed", "模型思考"]]) {
-    withController(controller => {
+  for (const [terminal, status, summary] of [["error", "failed", "Model response failed"], ["cancelled", "interrupted", "Interrupted"], ["final", "completed", "Model reasoning"]]) {
+    withController((controller, elements) => {
       controller.ingest({ event: "session", data: { run_id: "run-1" } });
       controller.ingest({ event: "thinking", data: { delta: "保留思考正文" } });
-      assert.equal(controller.events()[0].summary, "模型处理中");
+      assert.equal(controller.events()[0].summary, "Model processing");
       controller.ingest({ event: terminal, data: {} });
       assert.equal(controller.events()[0].summary, summary);
       assert.equal(controller.events()[0].status, status);
       controller.setHistory({ items: [{ ...fact("thinking-only", 1, 1, 0, { part_kind: "thinking", content: "保留思考正文" }), status }] });
       assert.equal(controller.events()[0].summary, summary);
       assert.equal(controller.events()[0].payload.thinking, "保留思考正文");
+      assert.match(elements.get("inspectorContent").innerHTML, /class="thinking-heading">思考过程<\/span>/);
     });
   }
 });
@@ -583,7 +685,8 @@ test("tool-only assistant responses remain visible and exportable without invent
   for (const row of assistants) {
     assert.equal(row.payload.content, null);
     assert.equal(row.payload.thinking, null);
-    assert.equal(row.summary, `调用 ${row.payload.tool_calls.length} 个工具`);
+    const count = row.payload.tool_calls.length;
+    assert.equal(row.summary, `${count} tool call${count === 1 ? "" : "s"}`);
   }
   assert.equal(JSON.parse(JSON.stringify(rows)).filter(row => row.kind === "assistant").length, 4);
 });
@@ -629,6 +732,33 @@ test("reused tool call IDs in different loops retain distinct arguments, results
     assert.deepEqual(rows.map((row) => row.payload.args), [{ loop: 0 }, { loop: 1 }]);
     assert.deepEqual(rows.map((row) => row.result.result), ["结果0", "结果1"]);
     assert.deepEqual(rows.map((row) => row.native.result_event_id), ["result-0", "result-1"]);
+  });
+});
+
+test("end-of-run persistence replaces live tools with reused IDs and identical arguments", () => {
+  withController(controller => {
+    controller.ingest({ event: "session", data: { run_id: "run-1" } });
+    const saved = [];
+    for (let loop = 0; loop < 2; loop += 1) {
+      const payload = { tool: "lookup", tool_call_id: "reused", args: { key: "same" } };
+      controller.ingest({ event: "text", data: { delta: "同一条进度" } });
+      controller.ingest({ event: "tool_call", data: payload });
+      controller.ingest({ event: "tool_result", data: { ...payload, result: `结果${loop}` } });
+      saved.push(
+        fact(`text-${loop}`, loop * 3 + 1, loop * 2 + 1, 0, { part_kind: "text", content: "同一条进度" }),
+        fact(`call-${loop}`, loop * 3 + 2, loop * 2 + 1, 1, {
+          part_kind: "tool-call", tool_name: "lookup", tool_call_id: "reused", args: payload.args,
+        }),
+        fact(`result-${loop}`, loop * 3 + 3, loop * 2 + 2, 0, {
+          part_kind: "tool-return", tool_name: "lookup", tool_call_id: "reused", content: `结果${loop}`,
+        }, "tool/results"),
+      );
+    }
+    for (const event of saved) appendFact(controller, event);
+    controller.ingest({ event: "final", data: {} });
+    const tools = controller.events().filter(row => row.kind === "tool");
+    assert.deepEqual(tools.map(row => row.result.result), ["结果0", "结果1"]);
+    assert.deepEqual(tools.map(row => row.native.result_event_id), ["result-0", "result-1"]);
   });
 });
 
@@ -873,6 +1003,47 @@ test("output details have only Summary, Output and Raw and show the attempt payl
     assert.match(markup, /&quot;attempt&quot;: 1/);
     assert.doesNotMatch(markup, /json_schema|historical snapshot|current Agent configuration/);
   });
+});
+
+test("remote task Input and Result reuse session file links and display the tool's completion", () => {
+  withController((controller, elements) => {
+    const user = fact("question", 1, 0, 0, {
+      part_kind: "user-prompt", content: [
+        { kind: "text-content", content: "Use one file" },
+        { kind: "attachment-ref", id: "local_selected", name: "selected.txt", mime: "text/plain" },
+        { kind: "attachment-ref", id: "local_unused", name: "unused.txt", mime: "text/plain" },
+      ],
+    }, "user/message");
+    const call = fact("remote-call", 2, 1, 0, {
+      part_kind: "tool-call", tool_name: "delegate_task", tool_call_id: "remote",
+      args: JSON.stringify({ task: "Use one file", attachments: [{ id: "local_selected" }, { id: "local_unknown" }] }),
+    });
+    const result = fact("remote-result", 3, 2, 0, {
+      part_kind: "tool-return", tool_name: "delegate_task", tool_call_id: "remote",
+      content: { status: "input_required", result: "Which month?" },
+      metadata: { remote_agent: { status: "input_required" }, generated_files: [
+        { file_id: "local_report", file_name: "report.txt", mime: "text/plain", byte_size: 30 },
+      ] },
+    }, "tool/results");
+    controller.setHistory({ items: [user, call, result] });
+    const html = () => elements.get("inspectorContent").innerHTML;
+    controller.restore({ selectedId: "question", detailTab: "summary" });
+    assert.match(html(), /href="\/files\/local_selected"/);
+    controller.restore({ selectedId: "tool:remote", detailTab: "summary" });
+    const [input, output] = html().split(/<span>Input<\/span>|<span>Result<\/span>/).slice(1);
+    assert.match(input, /trajectory-attachment-row.*href="\/files\/local_selected"/);
+    assert.doesNotMatch(input, /href="\/files\/local_(?:unknown|unused|report)"/);
+    assert.match(output, /input_required/);
+    assert.doesNotMatch(output, /Needs answer/);
+    assert.match(output, /generated-file-item.*href="\/files\/local_report"/);
+    assert.match(html(), /Completed/);
+    assert.doesNotMatch(html(), /工具产物/);
+    controller.restore({ selectedId: "tool:remote", detailTab: "input" });
+    assert.match(html(), /href="\/files\/local_selected"/);
+    controller.restore({ selectedId: "tool:remote", detailTab: "result" });
+    assert.match(html(), /href="\/files\/local_report"/);
+    assert.doesNotMatch(html(), /href="\/files\/local_selected"/);
+  }, { attachmentUrl: file => `/files/${file.id}` });
 });
 
 test('view_image metadata renders all pages consistently in live and durable trajectory without first-file duplicates', () => {

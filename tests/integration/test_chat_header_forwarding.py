@@ -17,7 +17,7 @@ from tests.integration.helpers.chat import (
 class ChatHeaderForwardingStreamTest(unittest.IsolatedAsyncioTestCase):
     async def test_chat_stream_forwards_request_headers_to_mcp_tool(self) -> None:
         test_model = TestModel(
-            call_tools=["echo_echo_request_headers"],
+            call_tools=["mcp__echo__echo_request_headers"],
             custom_output_text="ok",
         )
         async with async_echo_chat_app() as (app, record_file):
@@ -56,12 +56,12 @@ class ChatHeaderForwardingStreamTest(unittest.IsolatedAsyncioTestCase):
 
         def response(messages, info):
             if any(isinstance(part, UserPromptPart) for part in messages[-1].parts):
-                return ModelResponse(parts=[ToolCallPart("echo_echo_request_headers", {})])
+                return ModelResponse(parts=[ToolCallPart("mcp__echo__echo_request_headers", {})])
             return ModelResponse(parts=[TextPart("ok")])
 
         async def stream(messages, info):
             if any(isinstance(part, UserPromptPart) for part in messages[-1].parts):
-                yield {0: DeltaToolCall(name="echo_echo_request_headers", json_args="{}")}
+                yield {0: DeltaToolCall(name="mcp__echo__echo_request_headers", json_args="{}")}
             else:
                 yield "ok"
 
@@ -264,7 +264,7 @@ class ChatHeaderForwardingTests(unittest.TestCase):
         app.include_router(api_router)
 
         test_model = TestModel(
-            call_tools=["echo_fixture_reverse"],
+            call_tools=["mcp__echo_fixture__reverse"],
             custom_output_text="ok",
         )
         try:

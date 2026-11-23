@@ -103,6 +103,10 @@
           <div class="composer-drop-overlay" id="composerDropOverlay" aria-hidden="true">
             <i data-lucide="file-up" aria-hidden="true"></i><span>松开添加附件</span>
           </div>
+          <div class="composer-remote-reply" id="composerRemoteReply" hidden>
+            <span id="composerRemoteReplyLabel" role="status"></span>
+            <button class="btn text compact" id="clearComposerRemoteReply" type="button">取消选择</button>
+          </div>
           <div class="attachment-preview hidden" id="attachmentPreview"></div>
           <input type="file" id="fileInput" class="hidden" multiple accept="image/*,.docx,.xlsx,.txt,.log,.csv,.json,.md,.html,.xml,.mp3,.wav,.mp4" />
           <div class="composer-input-row">
@@ -132,12 +136,12 @@
               </span>
               <div class="composer-model-picker" id="composerMeta">
                 <select id="modelSelect" class="composer-model-select" aria-hidden="true" tabindex="-1"></select>
-                <button type="button" class="composer-model-trigger" id="composerModelTrigger" aria-haspopup="listbox" aria-expanded="false" title="选择模型">
+                <button type="button" class="composer-model-trigger" id="composerModelTrigger" aria-haspopup="listbox" aria-controls="composerModelList" aria-expanded="false" title="选择模型">
                   <span class="composer-provider-icon"><i data-lucide="sliders-horizontal" aria-hidden="true"></i></span>
                   <span class="composer-model-trigger-label">模型</span>
                   <i class="composer-model-chevron" data-lucide="chevron-up" aria-hidden="true"></i>
                 </button>
-                <div class="composer-model-menu hidden" id="composerModelMenu" role="listbox" aria-label="选择本会话模型"></div>
+                <div class="composer-model-menu reasoning-model-menu hidden" id="composerModelMenu"></div>
               </div>
               <button class="send-btn" id="sendBtn" title="发送" aria-label="发送">
                 <i data-lucide="send" aria-hidden="true"></i>
@@ -158,8 +162,9 @@
         </button>
         <button type="button" class="attachment-image-dialog-nav previous" id="attachmentImageDialogPrevious" aria-label="上一张图片" hidden><i data-lucide="chevron-left" aria-hidden="true"></i></button>
         <button type="button" class="attachment-image-dialog-nav next" id="attachmentImageDialogNext" aria-label="下一张图片" hidden><i data-lucide="chevron-right" aria-hidden="true"></i></button>
-        <img id="attachmentImageDialogImage" alt="附件图片预览" />
+        <img id="attachmentImageDialogImage" alt="附件图片预览" referrerpolicy="no-referrer" />
         <p id="attachmentImageDialogName" aria-live="polite"></p>
+        <p id="attachmentImageDialogError" class="hidden">图片无法加载。<a id="attachmentImageDialogOpen" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">打开原图</a></p>
       </div>
     </dialog>
   </div>

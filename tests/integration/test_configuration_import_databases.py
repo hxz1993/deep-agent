@@ -14,14 +14,14 @@ import tempfile
 import unittest
 from uuid import uuid4
 
-from sqlalchemy import MetaData, inspect, select, text
+from sqlalchemy import MetaData, delete, insert, inspect, select, text, update
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from pydantic_ai import Agent as ModelAgent
 from pydantic_ai.models.test import TestModel
 
-from deep_agent.db.models import Base
 from deep_agent.db.dialect import resolve_dialect
+from deep_agent.db.models import Agent, AgentPublication, RemoteAgentConnection
 from deep_agent.db.stores.bundle import create_data_stores
 from deep_agent.db.reference_integrity import acquire_write_barrier
 from deep_agent.services.configuration_import import (
@@ -102,7 +102,7 @@ class ConfigurationImportDatabaseTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(await db.scalar(text("SELECT agent_id FROM channel_accounts WHERE id='channel-1'")), "agent-1")
                     self.assertEqual(await db.scalar(text("SELECT version_num FROM alembic_version")), "012")
                     self.assertEqual(await db.run_sync(lambda c: sum(len(inspect(c).get_foreign_keys(t))
-                                                                     for t in Base.metadata.tables)), 0)
+                                                                     for t in physical.tables)), 0)
                 # Remain on 012 through the complete import/locking contract.
                 await build_configuration_import_plan(backup.path, target_engine=target)
                 # Reverse direction: the importer blocks ordinary writers too.
@@ -123,8 +123,9 @@ class ConfigurationImportDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 # Only current runtime CRUD requires the new ORM columns. Do
                 # not weaken the historical backup/restore assertions above by
                 # replacing their 012 source or target with current metadata.
-                await asyncio.to_thread(_upgrade_target_schema, target_url, "013")
+                await asyncio.to_thread(_upgrade_target_schema, target_url, "head")
                 await self._verify_imported_agent_chat(target, target_url)
+                await self._verify_remote_publication_backup(target, target_url, root)
         finally:
             if target is not None:
                 await target.dispose()
@@ -132,6 +133,32 @@ class ConfigurationImportDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 async with admin.connect() as db:
                     await db.execute(text(f"DROP DATABASE {name}"))
             await admin.dispose()
+
+    async def _verify_remote_publication_backup(self, target, target_url: str, root: Path) -> None:
+        connection_id = str(uuid4())
+        capabilities = [f"agent_connection:{connection_id}"]
+        config = {"protocol": "a2a", "card_url": "https://example.test/card",
+                  "headers": {"x-fixture": "fixture-only"}}
+        scope = {"apps": {"mode": "selected", "items": [{"app_id": "app1", "space_id": "space1"}]}}
+        async with target.begin() as db:
+            await db.execute(insert(RemoteAgentConnection).values(id=connection_id, name="文档", config=config))
+            await db.execute(update(Agent).where(Agent.id == "agent-1").values(capabilities=capabilities))
+            await db.execute(insert(AgentPublication).values(id=str(uuid4()), code="documents", name="文档助理",
+                                                             description="", agent_id="agent-1", scope=scope))
+        backup = await export_backup(target_url, environment="fixture", output_root=root / "backup-016")
+        async with target.begin() as db:
+            await db.execute(delete(AgentPublication))
+            await db.execute(update(Agent).where(Agent.id == "agent-1").values(capabilities=[]))
+            await db.execute(delete(RemoteAgentConnection))
+        plan = await build_configuration_import_plan(backup.path, target_engine=target)
+        await apply_configuration_import(plan, target_engine=target, file_store=_RejectingFileStore(), request_headers={})
+        async with target.connect() as db:
+            self.assertEqual(await db.scalar(select(RemoteAgentConnection.config).where(
+                RemoteAgentConnection.id == connection_id)), config)
+            self.assertEqual(await db.scalar(select(Agent.capabilities).where(Agent.id == "agent-1")), capabilities)
+            publication = (await db.execute(select(AgentPublication.agent_id, AgentPublication.scope).where(
+                AgentPublication.code == "documents"))).one()
+            self.assertEqual(tuple(publication), ("agent-1", scope))
 
     async def _verify_imported_agent_chat(self, target, target_url: str) -> None:
         factory = async_sessionmaker(target, expire_on_commit=False)

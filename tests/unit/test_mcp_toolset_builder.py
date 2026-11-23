@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import os
+import shutil
+import tempfile
 import unittest
-import httpx
 from contextlib import asynccontextmanager
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import PropertyMock, patch
 
+import certifi
+import httpx
 from fastmcp.exceptions import ToolError
 from mcp import McpError
 from mcp.types import ErrorData
@@ -12,7 +19,6 @@ from pydantic_ai.exceptions import ModelRetry, RunCancelled
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
-    RetryPromptPart,
     TextPart,
     ToolCallPart,
     ToolReturnPart,
@@ -22,7 +28,10 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 from pydantic_ai.toolsets import FunctionToolset
 
+from deep_agent.agent.history import is_tool_retry
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.tool_names import READ_ONLY_TOOL
+from deepfos_platform.conf.option import OptionNotSetError
 from tests.helpers.conversation import project_model_messages
 from deep_agent.capabilities.mcp.toolset_builder import (
     build_mcp_toolset,
@@ -33,6 +42,30 @@ from deep_agent.capabilities.mcp.toolset_builder import (
 )
 from deep_agent.options import OPTION
 from deep_agent.capabilities.mcp.run_scoped import RunScopedMcpToolset
+from deep_agent.capabilities.mcp.snapshot_toolset import _default_tls_context
+from deep_agent.ptc import FilePayloadResolvingToolset, HybridCodeMode, build_code_mode_tool_package
+from deep_agent.ptc.toolset import HybridCodeModeToolset
+
+
+class McpTlsContextTests(unittest.TestCase):
+    def test_default_bundle_reuses_context_until_replaced(self):
+        with tempfile.TemporaryDirectory(prefix="mcp-tls-TMP-to-delete-") as tmp:
+            original = certifi.where()
+            ca = Path(tmp) / "ca.pem"
+            shutil.copyfile(original, ca)
+            with patch.dict(os.environ, {"SSL_CERT_FILE": "", "SSL_CERT_DIR": "", "SSLKEYLOGFILE": ""}):
+                with patch("certifi.where", return_value=str(ca)), patch(
+                    "deep_agent.capabilities.mcp.snapshot_toolset.fastmcp_version", "3.3.0",
+                ):
+                    first = _default_tls_context()
+                    self.assertIsNotNone(first)
+                    self.assertIs(first, _default_tls_context())
+                    replacement = ca.with_name("new.pem")
+                    shutil.copyfile(original, replacement)
+                    replacement.replace(ca)
+                    self.assertIsNot(first, _default_tls_context())
+                    with patch.dict(os.environ, {"SSL_CERT_FILE": str(ca)}):
+                        self.assertIsNone(_default_tls_context())
 
 
 class McpInstructionIdentityTests(unittest.IsolatedAsyncioTestCase):
@@ -153,7 +186,7 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
                     tools = await run.get_tools(ctx)
                     for _ in range(2):
                         with self.assertRaises(ToolFailed) as failure:
-                            await run.call_tool("biz_query", {}, ctx, tools["biz_query"])
+                            await run.call_tool("mcp__biz__query", {}, ctx, tools["mcp__biz__query"])
                         self.assertIn("HTTP 401", str(failure.exception))
                         self.assertNotIn("temporarily unavailable", str(failure.exception))
                         self.assertNotIn("credential-never-log", str(failure.exception))
@@ -223,10 +256,109 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
             run_toolset = await toolset.for_run(ctx)
             tools = await run_toolset.get_tools(ctx)
             try:
-                await run_toolset.call_tool("pipeline_query", {}, ctx, tools["pipeline_query"])
+                await run_toolset.call_tool("mcp__pipeline__query", {}, ctx, tools["mcp__pipeline__query"])
             except Exception as raised:
                 return raised, inner.call_tool.await_count
         self.fail("Expected the MCP tool call to fail")
+
+    async def test_only_trusted_platform_read_annotations_enable_buffering(self) -> None:
+        ctx = RunContext(deps=AgentDeps(session_id="session-a"), model=TestModel(), usage=RunUsage())
+        gateway = "https://platform.example/deepfos-server"
+        platform_url = f"{gateway}/deepfos-mcp/mcp"
+        scenarios = [
+            (platform_url, True, None, True),
+            (platform_url, False, None, False),
+            (platform_url, True, "optional", False),
+            ("https://third-party.example/mcp", True, None, False),
+        ]
+        platform = SimpleNamespace(server=SimpleNamespace(base=gateway))
+        with patch("deep_agent.services.mcp_bound_app.PLATFORM_OPTION", platform):
+            for url, read_only, task_support, expected in scenarios:
+                with self.subTest(url=url, read_only=read_only, task_support=task_support):
+                    inspection = self._inspection()
+                    item = inspection["tools"]["snapshot"]["definitions"][0]
+                    item["annotations"]["readOnlyHint"] = read_only
+                    item["task_support"] = task_support
+                    toolset = build_mcp_toolset("biz", "url", {"url": url}, inspection=inspection)
+                    tools = await toolset.get_tools(ctx)
+                    metadata = tools["mcp__biz__query"].tool_def.metadata
+                    self.assertEqual(bool(metadata.get(READ_ONLY_TOOL)), expected)
+
+    async def test_external_https_mcp_does_not_require_a_platform_gateway(self):
+        inspection = self._inspection()
+        inspection["tools"]["snapshot"]["definitions"][0]["annotations"]["readOnlyHint"] = True
+        ctx = RunContext(deps=AgentDeps(session_id="session-a"), model=TestModel(), usage=RunUsage())
+        with patch("deep_agent.services.mcp_bound_app.PLATFORM_OPTION") as platform:
+            type(platform.server).base = PropertyMock(side_effect=OptionNotSetError("unconfigured"))
+            toolset = build_mcp_toolset("external", "url", {"url": "https://external.example/mcp"},
+                                       inspection=inspection)
+            tools = await toolset.get_tools(ctx)
+        self.assertNotIn(READ_ONLY_TOOL, tools["mcp__external__query"].tool_def.metadata)
+
+    async def test_platform_cube_member_search_has_a_typed_ptc_catalog(self):
+        ctx = RunContext(deps=AgentDeps(session_id="session-a"), model=TestModel(), usage=RunUsage())
+        gateway = "https://platform.example/deepfos-server"
+        platform = SimpleNamespace(server=SimpleNamespace(base=gateway))
+        item_schema = {
+            "type": "object",
+            "properties": {"name": {"type": "string"}, "description": {"type": "string"}},
+            "required": ["name"],
+        }
+        schema = {
+            "type": "object",
+            "properties": {
+                "results": {
+                    "type": "object",
+                    "additionalProperties": {"type": ["null", "array"], "items": item_schema},
+                },
+                "query_statuses": {"type": "object", "additionalProperties": {"type": "string"}},
+            },
+            "required": ["results", "query_statuses"],
+        }
+        inspection = self._inspection()
+        item = inspection["tools"]["snapshot"]["definitions"][0]
+        item.update(name="cube_search_members", output_schema=schema,
+                    annotations={"readOnlyHint": True}, task_support=None)
+        with patch("deep_agent.services.mcp_bound_app.PLATFORM_OPTION", platform):
+            for url, trusted in (
+                (f"{gateway}/deepfos-mcp/mcp", True),
+                ("https://third-party.example/mcp", False),
+            ):
+                with self.subTest(url=url):
+                    native = build_mcp_toolset("biz", "url", {"url": url}, inspection=inspection)
+                    wrapped = FilePayloadResolvingToolset(native, server_names=("biz",))
+                    tools = await wrapped.get_tools(ctx)
+                    definition = tools["mcp__biz__cube_search_members"].tool_def
+                    hybrid = HybridCodeModeToolset(wrapped=wrapped)
+                    callable_defs, _ = hybrid._partition_callable_tools(tools)
+                    stubs = hybrid._build_type_check_stubs(callable_defs)
+                    self.assertEqual(definition.return_schema, schema)
+                    self.assertEqual(
+                        definition.return_schema["properties"]["results"]["additionalProperties"]["type"],
+                        ["null", "array"],
+                    )
+                    descriptions = []
+
+                    def respond(_messages, info):
+                        descriptions.extend(tool.description or "" for tool in info.function_tools
+                                            if tool.name == "run_code")
+                        return ModelResponse(parts=[TextPart("done")])
+
+                    agent = Agent(
+                        FunctionModel(respond), deps_type=AgentDeps,
+                        toolsets=[build_code_mode_tool_package().toolset, wrapped],
+                        capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
+                    )
+                    await agent.run("Inspect the PTC catalog.", deps=AgentDeps(session_id="catalog"))
+                    self.assertEqual(len(descriptions), 1)
+                    if trusted:
+                        for rendered in (stubs, descriptions[0]):
+                            self.assertRegex(rendered, r"results: dict\[str, list\[\w+\] \| None\]")
+                            self.assertIn("description: NotRequired[str]", rendered)
+                            self.assertIn("query_statuses: dict[str, str]", rendered)
+                    else:
+                        self.assertIsNone(callable_defs["biz_cube_search_members"].return_schema)
+                        self.assertNotIn("Member-search return types:", descriptions[0])
 
     async def test_uses_snapshot_without_connecting(self) -> None:
         ctx = RunContext(
@@ -249,8 +381,9 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
                 instructions = await run_toolset.get_instructions(ctx)
 
         mcp_toolset_cls.assert_not_called()
-        self.assertEqual(list(tools), ["biz_query"])
-        self.assertEqual(tools["biz_query"].tool_def.return_schema, {"type": "object"})
+        self.assertEqual(list(tools), ["mcp__biz__query"])
+        self.assertEqual(tools["mcp__biz__query"].tool_def.return_schema, {"type": "object"})
+        self.assertIs(tools["mcp__biz__query"].tool_def.strict, False)
         self.assertEqual([part.content for part in instructions], ["Use the business catalog."])
 
     async def test_connects_on_first_call_and_reuses_connection(self) -> None:
@@ -280,10 +413,10 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
             async with run_toolset:
                 tools = await run_toolset.get_tools(ctx)
                 self.assertEqual(
-                    await run_toolset.call_tool("biz_query", {}, ctx, tools["biz_query"]),
+                    await run_toolset.call_tool("mcp__biz__query", {}, ctx, tools["mcp__biz__query"]),
                     {"ok": True},
                 )
-                await run_toolset.call_tool("biz_query", {}, ctx, tools["biz_query"])
+                await run_toolset.call_tool("mcp__biz__query", {}, ctx, tools["mcp__biz__query"])
 
         mcp_toolset_cls.assert_called_once()
         _, kwargs = mcp_toolset_cls.call_args
@@ -313,9 +446,9 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
             run_toolset = await toolset.for_run(ctx)
             tools = await run_toolset.get_tools(ctx)
             with self.assertRaises(ToolFailed) as first:
-                await run_toolset.call_tool("biz_query", {}, ctx, tools["biz_query"])
+                await run_toolset.call_tool("mcp__biz__query", {}, ctx, tools["mcp__biz__query"])
             with self.assertRaises(ToolFailed) as second:
-                await run_toolset.call_tool("biz_query", {}, ctx, tools["biz_query"])
+                await run_toolset.call_tool("mcp__biz__query", {}, ctx, tools["mcp__biz__query"])
 
         self.assertNotIn("secret", str(first.exception))
         self.assertEqual(str(first.exception), str(second.exception))
@@ -347,7 +480,7 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
             run_toolset = await toolset.for_run(ctx)
             tools = await run_toolset.get_tools(ctx)
             with self.assertRaises(ToolFailed) as raised:
-                await run_toolset.call_tool("biz_query", {}, ctx, tools["biz_query"])
+                await run_toolset.call_tool("mcp__biz__query", {}, ctx, tools["mcp__biz__query"])
 
         self.assertNotIn("private timeout detail", str(raised.exception))
         self.assertIn("timed out or is temporarily unavailable", str(raised.exception))
@@ -430,7 +563,7 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
             run_toolset = await toolset.for_run(ctx)
             tools = await run_toolset.get_tools(ctx)
             with self.assertRaises(ModelRetry) as raised:
-                await run_toolset.call_tool("biz_query", {}, ctx, tools["biz_query"])
+                await run_toolset.call_tool("mcp__biz__query", {}, ctx, tools["mcp__biz__query"])
 
         self.assertEqual(str(raised.exception), "choose a unique workbook path")
         self.assertEqual(inner.call_tool.await_count, 1)
@@ -457,12 +590,12 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
                 for message in messages
                 if isinstance(message, ModelRequest)
                 for part in message.parts
-                if isinstance(part, RetryPromptPart)
+                if is_tool_retry(part)
             ]
             return ModelResponse(
                 parts=[
                     ToolCallPart(
-                        tool_name="pipeline_query",
+                        tool_name="mcp__pipeline__query",
                         args={"attempt": len(retries) + 1},
                         tool_call_id=f"canvas-validation-{len(retries) + 1}",
                     )
@@ -495,7 +628,7 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
             for message in result.all_messages()
             if isinstance(message, ModelRequest)
             for part in message.parts
-            if isinstance(part, RetryPromptPart)
+            if is_tool_retry(part)
         ]
         failed = [
             part
@@ -543,7 +676,7 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
                 return ModelResponse(
                     parts=[
                         ToolCallPart(
-                            tool_name="pipeline_query",
+                            tool_name="mcp__pipeline__query",
                             args={},
                             tool_call_id="canvas-timeout-call",
                         )
@@ -622,7 +755,7 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
             run_toolset = await toolset.for_run(ctx)
             tools = await run_toolset.get_tools(ctx)
             with self.assertRaises(RunCancelled):
-                await run_toolset.call_tool("biz_query", {}, ctx, tools["biz_query"])
+                await run_toolset.call_tool("mcp__biz__query", {}, ctx, tools["mcp__biz__query"])
 
 
 if __name__ == "__main__":

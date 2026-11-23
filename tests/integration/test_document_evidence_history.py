@@ -12,9 +12,10 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from pydantic_ai.messages import ToolReturnPart, RetryPromptPart
+from pydantic_ai.messages import ToolReturnPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
+from deep_agent.agent.history import is_tool_retry
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
@@ -109,7 +110,7 @@ class EvidenceHistoryTests(unittest.IsolatedAsyncioTestCase):
         # A later Run cannot reuse the old temporary document cache. The saved
         # file remains downloadable independently via the existing FileStore.
         async def next_model(messages, info):
-            returns = [p for m in messages for p in m.parts if isinstance(p, RetryPromptPart)]
+            returns = [p for m in messages for p in m.parts if is_tool_retry(p)]
             if returns:
                 self.assertIn("不属于当前 Run", str(returns[-1].content))
                 yield "旧解析引用不可跨Run续读，已导出的文件仍可下载"

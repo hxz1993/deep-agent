@@ -2,16 +2,20 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 from sqlalchemy.orm.attributes import set_committed_value
 
-from deep_agent.db.models import Agent, AgentOutputConfig, LlmModel, UiToolPackage, ChatSession, ChatSessionEvent, ChannelAccount, ChannelSessionBinding, McpServer
+from deep_agent.db.models import AgentPublication, Agent, AgentOutputConfig, LlmModel, LlmProvider, UiToolPackage, ChatSession, ChatSessionEvent, ChannelAccount, ChannelSessionBinding, McpServer
 from deep_agent.db.deletion import DeletionImpact, DeletionConfirmationRequired
 from deep_agent.db.reference_integrity import ReferenceConflict, lock_reference, lock_optional, is_unique_conflict
 from deep_agent.db.stores._session import SessionBoundMixin
+from deep_agent.models.reasoning import DEFAULT_EFFORT, bound_agent_effort
 from deep_agent.schemas.agent import AgentCreate, AgentUpdate, AgentOutputConfig as OutputConfig
+from deep_agent.skills.catalog import active_skill_codes
+from deep_agent.remote_agents.store import lock_agent_connections
 
 
 class InvalidAgentOutputConfig(ValueError):
@@ -49,6 +53,13 @@ async def save_output_config(
         current.updated_at = datetime.now(UTC)
 
 
+async def _bind_effort(db, model, effort):
+    if effort is None or effort == DEFAULT_EFFORT:
+        return None
+    provider = await db.get(LlmProvider, model.provider_id, populate_existing=True) if model else None
+    return bound_agent_effort(effort, model, provider)
+
+
 class AgentStoreBase(SessionBoundMixin):
     async def get_by_id(self, agent_id: str) -> Agent | None:
         async with self._read() as db:
@@ -62,6 +73,22 @@ class AgentStoreBase(SessionBoundMixin):
         async with self._read() as db:
             return await self._list_all(db)
 
+    async def list_summaries(self, search: str, *, include_updater: bool) -> list[Agent]:
+        columns = [
+            Agent.id, Agent.name, Agent.model_id, Agent.reasoning_effort,
+            Agent.capabilities, Agent.skills, Agent.updated_at,
+        ]
+        if include_updater:
+            columns.append(Agent.updated_by)
+        query = select(Agent).options(load_only(*columns, raiseload=True)).order_by(Agent.name)
+        if search:
+            query = query.where(or_(
+                Agent.name.icontains(search, autoescape=True),
+                Agent.id.icontains(search, autoescape=True),
+            ))
+        async with self._read() as db:
+            return list((await db.scalars(query)).all())
+
     async def list_skill_references(self) -> list[dict]:
         """Read the Skill reference directory without loading Agent configuration."""
         async with self._read() as db:
@@ -72,7 +99,7 @@ class AgentStoreBase(SessionBoundMixin):
                 {
                     "id": row.id,
                     "name": row.name,
-                    "skills": list(dict.fromkeys(
+                    "skills": active_skill_codes(dict.fromkeys(
                         code for code in (row.skills if isinstance(row.skills, list) else [])
                         if isinstance(code, str) and code.strip()
                     )),
@@ -95,15 +122,18 @@ class AgentStoreBase(SessionBoundMixin):
     async def create_unique(self, data: AgentCreate, *, user_id: str | None = None) -> Agent:
         try:
             async with self._write() as db:
+                model = None
                 if data.model_id is not None:
-                    await lock_reference(db, LlmModel, LlmModel.id, data.model_id, "LLM model")
+                    model = await lock_reference(db, LlmModel, LlmModel.id, data.model_id, "LLM model")
                 await self._lock_ui_packages(db, data.capabilities)
                 await self._lock_mcp_servers(db, data.capabilities)
+                await lock_agent_connections(db, data.capabilities)
                 if await self._get_by_name(db, data.name) is not None:
                     raise ValueError(f"Agent already exists: {data.name}")
                 row = Agent(
                     name=data.name,
                     model_id=data.model_id,
+                    reasoning_effort=await _bind_effort(db, model, data.reasoning_effort),
                     capabilities=data.capabilities,
                     ui_tool_selection={},
                     skills=data.skills,
@@ -131,11 +161,14 @@ class AgentStoreBase(SessionBoundMixin):
                     return None
                 old_model, old_caps = row.model_id, list(row.capabilities or [])
                 new_model = data.model_id if "model_id" in data.model_fields_set else old_model
+                locked_models = {}
                 for model_id in sorted(value for value in {old_model, new_model} if value is not None):
-                    await lock_reference(db, LlmModel, LlmModel.id, model_id, "LLM model")
+                    locked_models[model_id] = await lock_reference(db, LlmModel, LlmModel.id, model_id, "LLM model")
                 await self._lock_ui_packages(db, old_caps + (data.capabilities or []))
                 await self._lock_mcp_servers(db, data.capabilities if data.capabilities is not None else old_caps,
                                              old_capabilities=old_caps)
+                await lock_agent_connections(db, data.capabilities if data.capabilities is not None else old_caps,
+                                             old_codes=old_caps)
                 row = await lock_optional(db, Agent, Agent.id, agent_id)
                 if row is None:
                     return None
@@ -171,7 +204,11 @@ class AgentStoreBase(SessionBoundMixin):
                     raise InvalidAgentOutputConfig("output_config is required when structured output is enabled")
                 if allow_text and config is None and (definition_changed or policy_changed):
                     raise InvalidAgentOutputConfig("output_config is required when allow_text_output is true")
-                updates = data.model_dump(exclude_unset=True, exclude={"output_config", "allow_text_output"})
+                updates = data.model_dump(exclude_unset=True, exclude={"output_config", "allow_text_output", "reasoning_effort"})
+                if 'reasoning_effort' in data.model_fields_set:
+                    updates['reasoning_effort'] = await _bind_effort(db, locked_models.get(new_model), data.reasoning_effort)
+                elif new_model != old_model:
+                    updates['reasoning_effort'] = None
                 # Keep the legacy column for existing databases, but never use its old per-tool scope.
                 updates["ui_tool_selection"] = {}
                 for field, value in updates.items():
@@ -210,6 +247,9 @@ class AgentStoreBase(SessionBoundMixin):
         if (await db.execute(select(ChannelAccount.id).where(
             ChannelAccount.agent_id == agent_id).limit(1).with_for_update())).first():
             raise ReferenceConflict("Agent 正被渠道配置使用，请先将对应渠道改绑到其他 Agent 或删除渠道；仅停用渠道不会解除关联")
+        if (await db.execute(select(AgentPublication.id).where(
+            AgentPublication.agent_id == agent_id).limit(1).with_for_update())).first():
+            raise ReferenceConflict("Agent 正被发布配置引用，请先解除关联")
         sessions = (await db.execute(select(ChatSession.session_id, ChatSession.user_id, ChatSession.created_at)
             .where(ChatSession.agent_id == agent_id).order_by(ChatSession.session_id).with_for_update())).all()
         return DeletionImpact.build("agent", agent_id, user_id, sessions=[tuple(row) for row in sessions])

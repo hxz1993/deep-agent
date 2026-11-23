@@ -44,6 +44,22 @@ test("关联渠道的Agent显示第四页签但不伪造普通会话来源", () 
   assert.match(html, /Current bot/);
 });
 
+test("概览按已保存的接入协议显示图标和名称", () => {
+  const cases = [
+    ["a2a", /data-protocol="a2a" aria-hidden="true"><\/span>A2A/],
+    ["mcp", /data-protocol="mcp" aria-hidden="true"><\/span>MCP/],
+    ["http", /data-lucide="globe" aria-hidden="true"><\/i>HTTP/],
+  ];
+  for (const [source_type, badge] of cases) {
+    const html = inspector({ tab: "session", extraState: {
+      sessions: [{ id: "session-1", agentId: "agent-1", source_type }],
+    } });
+    assert.match(html, badge);
+    assert.doesNotMatch(html, /集成<span|inspector-channel-badge/);
+  }
+  assert.match(inspector({ tab: "session" }), /favicon\.svg.*DeepFOS/);
+});
+
 test("历史来源独立于当前Agent绑定，ID转义并可复制", () => {
   const html = inspector({ channel: origin, accounts: [account] });
   assert.match(html, /Original bot/);

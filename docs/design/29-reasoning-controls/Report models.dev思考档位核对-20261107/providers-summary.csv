@@ -1,0 +1,12 @@
+﻿Provider编码,Provider名称,保留模型数,支持思考数,有档位枚举数,有开关数,有预算数,思考但未列可调项数,未声明思考数,能力未知数,V2提供默认值数,V1_V2控制不同数,V2未匹配数,近3个月模型数,近3个月思考模型数,近3个月有档位数,档位组合JSON
+alibaba,Alibaba,29,24,6,23,19,0,5,0,23,0,0,2,2,2,"[{""values"":[""high"",""max""],""models"":1},{""values"":[""low"",""high"",""max""],""models"":2},{""values"":[""low"",""medium"",""xhigh""],""models"":2},{""values"":[""none"",""low"",""medium"",""xhigh""],""models"":1}]"
+anthropic,Anthropic,17,17,13,2,8,0,0,0,0,0,0,4,4,4,"[{""values"":[""low"",""medium"",""high"",""max""],""models"":2},{""values"":[""low"",""medium"",""high"",""xhigh"",""max""],""models"":9},{""values"":[""low"",""medium"",""high""],""models"":2}]"
+deepseek,DeepSeek,2,2,2,2,0,0,0,0,2,0,0,1,1,1,"[{""values"":[""low"",""high"",""max""],""models"":2}]"
+google,Google,29,25,17,4,3,3,4,0,11,0,0,4,4,4,"[{""values"":[""low"",""high""],""models"":1},{""values"":[""low"",""medium"",""high""],""models"":7},{""values"":[""minimal"",""high""],""models"":2},{""values"":[""minimal"",""low"",""medium"",""high""],""models"":7}]"
+minimax,MiniMax (minimax.io),2,2,1,1,0,0,0,0,2,0,0,1,1,1,"[{""values"":[""low"",""medium"",""high"",""xhigh"",""max""],""models"":1}]"
+minimax-cn,MiniMax (minimax.cn),2,2,1,1,0,0,0,0,2,0,0,1,1,1,"[{""values"":[""low"",""medium"",""high"",""xhigh"",""max""],""models"":1}]"
+moonshotai,Moonshot AI,6,6,3,1,0,2,0,0,4,0,0,2,2,2,"[{""values"":[""low"",""high"",""max""],""models"":3}]"
+openai,OpenAI,38,29,29,0,0,0,9,0,0,0,0,7,7,7,"[{""values"":[""high""],""models"":1},{""values"":[""low"",""medium"",""high"",""xhigh"",""max""],""models"":2},{""values"":[""low"",""medium"",""high""],""models"":2},{""values"":[""medium"",""high"",""xhigh""],""models"":3},{""values"":[""minimal"",""low"",""medium"",""high"",""xhigh""],""models"":1},{""values"":[""minimal"",""low"",""medium"",""high""],""models"":3},{""values"":[""none"",""low"",""medium"",""high"",""xhigh"",""max""],""models"":9},{""values"":[""none"",""low"",""medium"",""high"",""xhigh""],""models"":7},{""values"":[""none"",""low"",""medium"",""high""],""models"":1}]"
+stepfun,StepFun (China),4,4,4,0,0,0,0,0,0,0,0,1,1,1,"[{""values"":[""low"",""high""],""models"":2},{""values"":[""low"",""medium"",""high""],""models"":2}]"
+xai,xAI,8,7,5,0,0,2,1,0,4,0,0,2,2,2,"[{""values"":[""low"",""medium"",""high"",""xhigh""],""models"":4},{""values"":[""none"",""low"",""medium"",""high"",""xhigh""],""models"":1}]"
+zhipuai,Zhipu AI,17,17,4,14,0,0,0,0,17,0,0,3,3,3,"[{""values"":[""high"",""max""],""models"":1},{""values"":[""low"",""high"",""max""],""models"":3}]"

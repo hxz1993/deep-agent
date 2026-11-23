@@ -14,6 +14,7 @@ from pydantic_ai.toolsets.abstract import ToolsetTool
 
 from deep_agent.agent.attachments import _download_file
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.tool_names import READ_ONLY_TOOL
 from deep_agent.ptc.diagnostics import current_collector
 from deep_agent.agent.tool_errors import observe_tool_operation, tool_error_message
 from deep_agent.capabilities.codes import PTC_PACKAGE_CODE
@@ -28,6 +29,7 @@ CODE_MODE_ORIGINAL_NAME_KEY = "deepagent_original_name"
 CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY = "deepagent_trusted_return_schema"
 CODE_MODE_HYBRID = "hybrid"
 CODE_MODE_CODE_ONLY = "code_only"
+CUBE_MEMBER_SEARCH_TOOL = "cube_search_members"
 
 FILE_DATA_TOKEN_PREFIX = "deepagent-file-data://"
 MAX_FILE_BYTES = 20 * 1024 * 1024
@@ -499,18 +501,22 @@ class FilePayloadResolvingToolset(WrapperToolset[AgentDeps]):
         for name, tool in tools.items():
             from deep_agent.agent.tool_discovery import (
                 MCP_RETURN_SCHEMA_TOOLS,
-                mcp_original_tool_name,
+                mcp_definition_identity,
             )
 
             metadata = dict(tool.tool_def.metadata or {})
             # Upstream MCP metadata cannot identify a trusted host builtin.
             metadata.pop("deepagent_ptc_builtin", None)
             metadata[CODE_MODE_METADATA_KEY] = CODE_MODE_HYBRID
-            metadata[CODE_MODE_ORIGINAL_NAME_KEY] = name
-            original_name = mcp_original_tool_name(name, self.server_names)
+            identity = ctx.deps.tool_names.get(name)
+            metadata[CODE_MODE_ORIGINAL_NAME_KEY] = identity.public if identity else name
+            _, original_name = mcp_definition_identity(tool.tool_def, self.server_names)
             metadata[CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY] = bool(
-                original_name in MCP_RETURN_SCHEMA_TOOLS
-                and tool.tool_def.return_schema
+                tool.tool_def.return_schema
+                and (
+                    original_name in MCP_RETURN_SCHEMA_TOOLS
+                    or (original_name == CUBE_MEMBER_SEARCH_TOOL and metadata.get(READ_ONLY_TOOL) is True)
+                )
             )
             tool_def = replace(tool.tool_def, metadata=metadata)
             result[name] = _ResolvingTool(
@@ -538,7 +544,8 @@ class FilePayloadResolvingToolset(WrapperToolset[AgentDeps]):
         error_detail: dict[str, str] | None = None
         collector = current_collector.get()
         if collector is not None:
-            collector.begin(ctx.tool_call_id, name, tool_args)
+            public_name = (tool.tool_def.metadata or {}).get(CODE_MODE_ORIGINAL_NAME_KEY, name)
+            collector.begin(ctx.tool_call_id, public_name, tool_args)
         try:
             resolved = _resolve_payload_value(tool_args, ctx.deps)
             result = await self.wrapped.call_tool(

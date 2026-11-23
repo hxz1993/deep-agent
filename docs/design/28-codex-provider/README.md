@@ -26,7 +26,7 @@
 
 授权临时流程只在 API 进程内存中保存 10 分钟，绑定管理员及目标供应商草稿。完整回调地址必须匹配 SDK 固定回调的 scheme、host、端口、路径与 state；验证成功才临时持有凭据，保存时在单一数据库事务中写入。取消、超时、重启或保存后使流程失效，Token 不进入浏览器存储。普通 Provider PATCH 不接收 OAuth JSON。
 
-运行使用 `OpenAICodexProvider`、`OpenAICodexCredentialSource`、`OpenAICodexModel`。同一进程内同一 Provider 共享 SDK Provider 和刷新锁；SDK 按需刷新，凭据源定向更新 JSON，`auth_revision` CAS 防止断开或重连后的旧写回。实验功能关闭时隐藏新建订阅并拒绝授权与新调用，仍可查看、断开或删除已存在的订阅配置。首版使用本机文件锁限制单运行所有者，不支持多 worker、多副本或 API/Gateway 两进程同时消费同一订阅。
+运行使用 `OpenAICodexProvider`、`OpenAICodexCredentialSource`、`OpenAICodexModel`。同一进程内同一 Provider 共享 SDK Provider 和刷新锁；SDK 按需刷新，凭据源定向更新 JSON，`auth_revision` CAS 防止断开或重连后的旧写回。实验功能关闭时隐藏新建订阅并拒绝授权与新调用，仍可查看、断开或删除已存在的订阅配置。本机 SQLite 按数据库实际路径加锁，独立数据库可各自完成授权。复制数据库用于新实例时应清除订阅凭据，再在目标实例单独授权。其他数据库沿用原本机锁。同一数据库上的多 worker 或 API/Gateway 仍只能由一个进程使用订阅，同一份凭据也不应由多个实例消费。
 
 `connected` 只表示本地保存了授权，不证明远端权限、余额或具体模型可用。授权失效、模型拒绝、额度不足明确报错，不自动切换模型。真实授权后再验证模型连接、流式对话、多轮、工具、取消、历史、标题、压缩、轨迹和 Usage；模拟测试不能替代真实联调。
 

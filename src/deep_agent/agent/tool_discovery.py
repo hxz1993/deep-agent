@@ -23,6 +23,8 @@ from deep_agent.agent.context.estimator import (
     canonical_json,
 )
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.observability import log_run_phase
+from deep_agent.agent.tool_names import MCP_IDENTITY
 from deep_agent.search import (
     FieldRole,
     SearchConfig,
@@ -97,6 +99,13 @@ _SEARCH_CONFIG = SearchConfig(token_aliases=_ACTION_ALIASES)
 ToolSearchDocument = SearchDocument
 
 
+@dataclass(frozen=True)
+class _McpPreselection:
+    query: tuple[str, str]
+    documents: tuple[ToolSearchDocument, ...]
+    selected: tuple[str, ...]
+
+
 @dataclass
 class ToolDiscoveryTelemetry:
     candidate_count: int = 0
@@ -119,6 +128,8 @@ class ToolDiscoveryTelemetry:
     search_query_matches: dict[str, tuple[str, ...]] = field(default_factory=dict, repr=False)
     search_feedback: dict[str, str] = field(default_factory=dict, repr=False)
     server_names: tuple[str, ...] = field(default_factory=tuple, repr=False)
+    bound_targets: dict[str, dict[str, str]] = field(default_factory=dict, repr=False)
+    preselection: _McpPreselection | None = field(default=None, repr=False)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -171,6 +182,13 @@ def mcp_original_tool_name(name: str, server_names: Sequence[str]) -> str | None
     return name[len(server) + 1 :]
 
 
+def mcp_definition_identity(tool: ToolDefinition, server_names: Sequence[str]) -> tuple[str, str | None]:
+    identity = (tool.metadata or {}).get(MCP_IDENTITY)
+    if isinstance(identity, (tuple, list)) and len(identity) == 2:
+        return identity[0], identity[1]
+    return _server_for_tool(tool.name, server_names), mcp_original_tool_name(tool.name, server_names)
+
+
 def build_return_schema_selector(
     *,
     server_names: Sequence[str],
@@ -178,7 +196,7 @@ def build_return_schema_selector(
     """Select the small evidence-backed MCP output-schema allowlist."""
 
     async def selector(ctx: RunContext[AgentDeps], tool: ToolDefinition) -> bool:
-        original_name = mcp_original_tool_name(tool.name, server_names)
+        _, original_name = mcp_definition_identity(tool, server_names)
         return original_name in MCP_RETURN_SCHEMA_TOOLS and bool(tool.return_schema)
 
     return selector
@@ -193,18 +211,26 @@ def build_search_documents(
     for tool in tools:
         properties = _schema_properties(dict(tool.parameters_json_schema or {}))
         description = tool.description or ""
-        server = _server_for_tool(tool.name, server_names)
-        original_name = mcp_original_tool_name(tool.name, server_names)
+        server, original_name = mcp_definition_identity(tool, server_names)
         metadata = tool.metadata or {}
+        target = metadata.get("deep_agent_mcp_target")
+        if target:
+            description = description.rpartition("\n绑定 MCP ")[0] or description
         annotations = metadata.get("annotations")
         title = str(metadata.get("title") or "")
         if not title and isinstance(annotations, dict):
             title = str(annotations.get("title") or "")
         fields = [SearchField("protocol_name", tool.name, FieldRole.CODE)]
+        if (tool.metadata or {}).get(MCP_IDENTITY):
+            fields.append(SearchField("legacy_protocol_name", f"{server}_{original_name}", FieldRole.CODE))
         if original_name and original_name != tool.name:
             fields.append(SearchField("original_protocol_name", original_name, FieldRole.CODE))
         if title:
             fields.append(SearchField("title", title, FieldRole.ALIAS))
+        if target:
+            fields.extend(SearchField(f"mcp_scope:{key}", target[key], FieldRole.TEXT)
+                          for key in ("name", "app", "app_id", "space", "space_id", "usage")
+                          if target[key])
         fields.extend(
             SearchField(f"parameter:{name}", name, FieldRole.ATTRIBUTE)
             for name, _description in properties
@@ -226,6 +252,29 @@ def build_search_documents(
     return documents
 
 
+def _mentions_scope(query: str, value: str) -> bool:
+    needle = normalize_text(value)
+    if not needle:
+        return False
+    if needle.isascii():
+        return bool(re.search(rf"(?<![a-z0-9_-]){re.escape(needle)}(?![a-z0-9_-])", query))
+    return needle in query
+
+
+def _scope_priority(query: str, fields: Sequence[SearchField]) -> int:
+    scope = {field.name.removeprefix("mcp_scope:"): field.value
+             for field in fields if field.name.startswith("mcp_scope:")}
+    if any(_mentions_scope(query, scope.get(key, "")) for key in ("name", "app", "app_id")):
+        return 3
+    if any(_mentions_scope(query, scope.get(key, "")) for key in ("space", "space_id")):
+        return 2
+    if scope.get("usage"):
+        terms = set(lexical_tokens(query)) & set(lexical_tokens(scope["usage"]))
+        if len(terms) >= 2:
+            return 1
+    return 0
+
+
 def rank_tool_documents(
     query: str,
     documents: Sequence[ToolSearchDocument],
@@ -240,9 +289,11 @@ def rank_tool_documents(
         query_text,
         top_k=max(limit, len(documents)),
     )
-    if result.hits and result.hits[0].rank_tier >= 920:
-        return [hit.document_id for hit in result.hits if hit.rank_tier >= 920][:limit]
-    return [hit.document_id for hit in result.hits[:limit]]
+    hits = result.hits
+    if hits and hits[0].rank_tier >= 920:
+        hits = [hit for hit in hits if hit.rank_tier >= 920]
+    priorities = {doc.id: _scope_priority(query_text, doc.fields) for doc in documents}
+    return [hit.document_id for hit in sorted(hits, key=lambda hit: -priorities[hit.document_id])[:limit]]
 
 
 def _context_ref_search_text(value: dict[str, Any]) -> str:
@@ -433,7 +484,7 @@ def _return_schema_telemetry(
     for tool in tools:
         if tool.name not in disclosed_names:
             continue
-        if mcp_original_tool_name(tool.name, server_names) not in MCP_RETURN_SCHEMA_TOOLS:
+        if mcp_definition_identity(tool, server_names)[1] not in MCP_RETURN_SCHEMA_TOOLS:
             continue
         if not tool.return_schema:
             unavailable.append(tool.name)
@@ -474,35 +525,39 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
         telemetry = ctx.deps.tool_discovery or ToolDiscoveryTelemetry()
         ctx.deps.tool_discovery = telemetry
         telemetry.server_names = self.server_names
+        targets = [tool.metadata["deep_agent_mcp_target"] for tool in definitions
+                   if (tool.metadata or {}).get("deep_agent_mcp_target")]
+        telemetry.bound_targets = {target["name"]: target for target in targets}
         try:
-            primary_query, supplemental_query = search_inputs_for_run(ctx)
-            all_documents = build_search_documents(
-                definitions,
-                server_names=self.server_names,
-            )
-            documents = all_documents
             if len(definitions) <= MCP_DIRECT_DISCLOSURE_LIMIT:
-                selected = [tool.name for tool in definitions]
+                selected = tuple(tool.name for tool in definitions)
             else:
-                selected = rank_tool_documents(
-                    primary_query,
-                    documents,
-                    limit=MCP_PRESELECT_LIMIT,
-                )
-                if (
-                    not selected
-                    and not primary_query.strip()
-                    and supplemental_query.strip()
-                ):
-                    supplemental_selected = rank_tool_documents(
-                        supplemental_query,
-                        documents,
-                        limit=MCP_PRESELECT_LIMIT,
-                    )
-                    selected = list(
-                        dict.fromkeys([*selected, *supplemental_selected])
-                    )[:MCP_PRESELECT_LIMIT]
+                query = search_inputs_for_run(ctx)
+                documents = tuple(build_search_documents(definitions, server_names=self.server_names))
+                cached = telemetry.preselection
+                if cached is None or cached.query != query or cached.documents != documents:
+                    primary, supplemental = query
+                    ranked = rank_tool_documents(primary, documents, limit=MCP_PRESELECT_LIMIT)
+                    if not ranked and not primary.strip() and supplemental.strip():
+                        ranked = rank_tool_documents(supplemental, documents, limit=MCP_PRESELECT_LIMIT)
+                    cached = _McpPreselection(query, documents, tuple(ranked))
+                    telemetry.preselection = cached
+                # Discovery and the current authorized definitions are still
+                # applied below on every step. Only lexical ranking is reused.
+                selected = cached.selected
             selected_set = set(selected)
+            legacy_names: dict[str, list[str]] = defaultdict(list)
+            for tool in definitions:
+                if (tool.metadata or {}).get(MCP_IDENTITY):
+                    server, original = mcp_definition_identity(tool, self.server_names)
+                    legacy_names[f"{server}_{original}"].append(tool.name)
+            # Old sessions recorded server_tool. Only inherit a reveal if
+            # that name still identifies exactly one authorized definition.
+            inherited = {
+                names[0] for legacy, names in legacy_names.items()
+                if legacy in ctx.discovered_tool_names and len(names) == 1
+            }
+            selected_set.update(inherited)
             prepared = [
                 replace(tool, defer_loading=False)
                 if tool.name in selected_set
@@ -539,7 +594,7 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
             telemetry.candidate_tools = [tool.name for tool in definitions]
             telemetry.direct_count = len(disclosed_names)
             telemetry.deferred_count = len(definitions) - len(disclosed_names)
-            telemetry.preselected_tools = selected
+            telemetry.preselected_tools = list(dict.fromkeys([*selected, *sorted(inherited)]))
             telemetry.estimated_full_schema_tokens = full_tokens
             telemetry.estimated_disclosed_schema_tokens = direct_tokens
             telemetry.estimated_saved_schema_tokens = max(0, full_tokens - direct_tokens)
@@ -572,7 +627,13 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
             )
             return [replace(tool, defer_loading=False) for tool in fallback_definitions]
         finally:
-            telemetry.retrieval_ms += (time.perf_counter() - started) * 1_000
+            ended = time.perf_counter()
+            telemetry.retrieval_ms += (ended - started) * 1_000
+            log_run_phase(
+                "model_tool_catalog", started, ended_at=ended,
+                session_id=ctx.deps.session_id, run_id=ctx.deps.run_id or ctx.run_id,
+                agent_id=ctx.deps.agent_id, request_index=ctx.run_step,
+            )
 
     async def get_instructions(self, ctx: RunContext[AgentDeps]) -> list[str] | None:
         original = await self.wrapped.get_instructions(ctx)
@@ -591,6 +652,17 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
                 "确认卡片本身不代表执行能力已具备。必要工具缺失时说明缺口，"
                 "不要反复改写名称搜索，也不要用其他对象的保存工具替代。"
             )
+        if telemetry and telemetry.bound_targets:
+            rows = [
+                "绑定应用 MCP 的来源如下。同名工具必须根据当前问题的目标应用和空间选用对应 MCP；"
+                "仅有一个匹配目标时直接选用。多个应用都符合且无法确定目标时，先问清楚再调用。"
+                "追问明确指定新应用时，以新目标为准。原生调用和 PTC 都按 MCP 来源区分。"
+            ]
+            for name, target in sorted(telemetry.bound_targets.items()):
+                usage = f"；用途 {target['usage']}" if target["usage"] else ""
+                rows.append(f"- {name}：{target['app']}（{target['app_id']}），"
+                            f"空间 {target['space']}（{target['space_id']}）{usage}")
+            parts.append("\n".join(rows))
         if telemetry is None or telemetry.deferred_count <= 0:
             return parts or None
         deferred_names = sorted(
@@ -602,7 +674,9 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
         if deferred_names:
             grouped: dict[str, list[str]] = defaultdict(list)
             for name in deferred_names:
-                grouped[_server_for_tool(name, self.server_names)].append(name)
+                identity = ctx.deps.tool_names.get(name)
+                server = identity.scope if identity and identity.group == "mcp" else _server_for_tool(name, self.server_names)
+                grouped[server].append(name)
             rows = [
                 "以下 MCP 工具当前仅提供名称；需要其完整参数时调用 search_tools，"
                 "不要猜测未披露工具的参数。已知完整协议名时，一次批量加载本轮需要的工具，"
@@ -683,8 +757,10 @@ def search_deferred_tools(
             normalized_query = query.casefold()
             query_matches: list[str] = []
             for tool in corpus.values():
-                original_name = mcp_original_tool_name(tool.name, telemetry.server_names)
+                server, original_name = mcp_definition_identity(tool, telemetry.server_names)
                 candidates = {tool.name.casefold()}
+                if (tool.metadata or {}).get(MCP_IDENTITY):
+                    candidates.add(f"{server}_{original_name}".casefold())
                 if original_name:
                     candidates.add(original_name.casefold())
                 if not any(
@@ -700,9 +776,19 @@ def search_deferred_tools(
                 ):
                     continue
                 query_matches.append(tool.name)
+            if len(query_matches) > 1:
+                fields_by_tool = {doc.id: doc.fields for doc in build_search_documents(
+                    [corpus[name] for name in query_matches], server_names=telemetry.server_names,
+                )}
+                priorities = {name: _scope_priority(normalize_text(query), fields)
+                              for name, fields in fields_by_tool.items()}
+                query_matches.sort(key=lambda name: -priorities[name])
+                if priorities[query_matches[0]]:
+                    query_matches = [name for name in query_matches
+                                     if priorities[name] == priorities[query_matches[0]]]
             exact_names.extend(query_matches)
             if not query_matches and re.fullmatch(
-                r"[a-zA-Z][a-zA-Z0-9-]*(?:_[a-zA-Z0-9-]+)+", query,
+                r"[a-zA-Z][a-zA-Z0-9-]*(?:_+[a-zA-Z0-9-]+)+", query,
             ):
                 missing_names.append(query)
 

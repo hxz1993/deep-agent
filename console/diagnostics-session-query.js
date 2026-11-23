@@ -1,4 +1,6 @@
 import { LIST_FILTER_KEYS } from "./diagnostics-navigation.js?v=20261019-release0138";
+const QUERY_BUSY = "诊断查询繁忙，请稍后重试";
+
 export function buildSessionQuery(filters, overview = false) {
   const params = new URLSearchParams();
   const keys = overview ? ["start", "end", "timezone", "agent_id"] : LIST_FILTER_KEYS.filter(key => key !== "period");
@@ -14,7 +16,7 @@ export function sessionQueryError(error) {
   if (code === 422) return `查询条件无效：${error.message || "请检查时间范围和标识。"}`;
   if (code === 503) {
     if (error.message === "诊断查询超时，请缩小时间范围或筛选条件") return "查询超时，请缩小时间范围或增加筛选条件后重试。";
-    if (error.message === "诊断查询繁忙，请稍后重试") return "诊断查询繁忙，请稍后重试。";
+    if (error.message === QUERY_BUSY) return "诊断查询繁忙，请稍后重试。";
     return "查询暂不可用或服务繁忙，请稍后手动刷新。";
   }
   return "读取失败，请检查网络后手动刷新。";
@@ -23,9 +25,19 @@ export function sessionQueryError(error) {
 export function createSessionReader(request) {
   let generation = 0, controller = null;
   function cancel() { generation += 1; controller?.abort(); controller = null; }
+  async function get(path, signal) {
+    try {
+      return await request(path, signal);
+    } catch (error) {
+      if (signal.aborted || Number(error?.status) !== 503 || error.message !== QUERY_BUSY) throw error;
+      await new Promise(resolve => setTimeout(resolve, 350));
+      signal.throwIfAborted();
+      return request(path, signal);
+    }
+  }
   function begin() {
     cancel(); const own = generation; controller = new AbortController(); const signal = controller.signal;
-    return { signal, current: () => generation === own && !signal.aborted, get: path => request(path, signal) };
+    return { signal, current: () => generation === own && !signal.aborted, get: path => get(path, signal) };
   }
   async function readEvents(scope, id, onProgress = () => {}) {
     const items = [], seen = new Set(); let after = null;

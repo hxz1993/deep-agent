@@ -4,61 +4,15 @@ import os
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from fastapi import FastAPI
-from httpx import ASGITransport, AsyncClient
+from httpx import AsyncClient
 
-from deep_agent.api.v1 import api_router
-from deep_agent.api.v1.channel_auth import ChannelRequestUserDep
-from deep_agent.core.context import AppContext, get_context, init_context, reset_context
+from deep_agent.core.context import get_context
 from deep_agent.security import ConsoleAdminAuthorizer
-from tests.helpers.admin_auth import allow_console_admin
-from tests.helpers.sqlite_stores import make_sqlite_stores, seed_default_agent
+
+from tests.helpers.channel_accounts import ChannelAccountsFixture
 
 
-class ChannelAccountsApiTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self) -> None:
-        self.key_identity = patch(
-            "deep_agent.api.v1.channel_accounts.PlatformEnterpriseAdminChecker.resolve_api_key_user",
-            new_callable=AsyncMock, return_value="session-user",
-        )
-        self.owner_check = self.key_identity.start()
-        self.addCleanup(self.key_identity.stop)
-        self.stores, self.engine, factory = await make_sqlite_stores()
-        self.agent_id = await seed_default_agent(self.stores)
-        self.app = FastAPI()
-        self.app.include_router(api_router)
-        @self.app.get("/identity-probe")
-        async def identity_probe(user: ChannelRequestUserDep):
-            return {"user": user}
-        allow_console_admin(self.app)
-        init_context(
-            AppContext.for_testing(
-                stores=self.stores,
-                db_engine=self.engine,
-                db_session_factory=factory,
-            )
-        )
-        self.transport = ASGITransport(app=self.app, raise_app_exceptions=False)
-
-    async def asyncTearDown(self) -> None:
-        await get_context().event_persister.aclose()
-        reset_context()
-        await self.engine.dispose()
-
-    async def request(self, method: str, path: str, *, user: str = "owner", json=None):
-        async with AsyncClient(transport=self.transport, base_url="http://test") as client:
-            return await client.request(method, path, headers={"user": user}, json=json)
-
-    def payload(self) -> dict:
-        return {
-            "name": "企微助手",
-            "bot_id": "bot-id",
-            "secret": "plain-secret",
-            "agent_id": self.agent_id,
-            "session_user_id": "session-user",
-            "enabled": False,
-        }
-
+class ChannelAccountsApiTests(ChannelAccountsFixture, unittest.IsolatedAsyncioTestCase):
     async def test_all_channel_types_check_owner_before_create(self):
         application = await self.stores.wecom.create_application(
             name="fixture", corp_id="corp", wecom_agent_id="1", app_secret="fixture-secret")

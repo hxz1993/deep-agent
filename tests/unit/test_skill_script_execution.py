@@ -9,11 +9,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 from pydantic import ValidationError
 from pydantic_ai import Agent, ModelRetry, RunContext
-from pydantic_ai.messages import ModelResponse, RetryPromptPart, TextPart, ToolCallPart
+from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
+from deep_agent.agent.history import is_tool_retry
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.api.v1.deps import _skill_script_execution_available
@@ -142,12 +143,12 @@ class SkillScriptValidationTests(unittest.IsolatedAsyncioTestCase):
             nonlocal step
             step += 1
             self.assertEqual(set(info.function_tools[0].parameters_json_schema["properties"]),
-                             {"skill_code", "script_path", "arguments", "inputs", "resource_paths", "files"})
+                             {"skill_code", "script_path", "arguments", "inputs", "resource_paths", "files", "include_context"})
             if step == 1:
                 return ModelResponse(parts=[ToolCallPart("execute_skill_script", bad_args, "invalid")])
             if step == 2:
                 self.assertEqual(self.backend.requests, [])
-                retries = [part for message in messages for part in message.parts if isinstance(part, RetryPromptPart)]
+                retries = [part for message in messages for part in message.parts if is_tool_retry(part)]
                 self.assertEqual(len(retries), 1)
                 self.assertEqual(retries[0].tool_call_id, "invalid")
                 self._safe_errors(retries[0].content, field="arguments", marker=marker)

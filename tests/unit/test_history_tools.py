@@ -15,6 +15,7 @@ from pydantic_ai.messages import (
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
+from deep_agent.db.serialization import StoredUserPromptPart
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.history_tools import build_history_toolset, score_search_text
 from deep_agent.schemas.agent import AgentCreate
@@ -34,7 +35,7 @@ class ConversationHistoryToolTests(unittest.IsolatedAsyncioTestCase):
             [
                 ModelRequest(
                     parts=[
-                        UserPromptPart(
+                        StoredUserPromptPart(
                             content=[
                                 "查询华东区域成员",
                                 {

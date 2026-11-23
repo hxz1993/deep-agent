@@ -144,14 +144,14 @@ test("会话详情保留既有属性并用横向页签、键值列表与复合�
 });
 
 test("测试 App 使用锚定轻量浮层而不是抽屉", () => {
-  assert.match(consoleIndex, /id="contextPopover"[\s\S]*role="dialog"/);
-  assert.match(consoleIndex, /<strong>调试<\/strong>/);
+  assert.match(consoleIndex, /<dialog class="context-popover" id="contextPopover"/);
+  assert.match(consoleIndex, /<strong id="contextTitle">调试<\/strong>/);
   assert.match(consoleIndex, /id="saveContextBtn">确定<\/button>/);
   assert.match(consoleIndex, /id="contextAppInput"/);
   assert.doesNotMatch(consoleIndex, /contextDrawer|contextBackdrop|context-drawer|drawer-backdrop/);
-  assert.match(consoleCss, /\.context-popover\s*\{[\s\S]*position: fixed;[\s\S]*border-radius: 13px/);
+  assert.match(consoleCss, /\.context-popover\s*\{[^}]*position: fixed;[^}]*border-radius: var\(--ui-radius-overlay\)/);
   assert.match(consoleIndex, /id="resetContextBtn">不分应用<\/button>/);
-  assert.match(contextSource, /contextAppInput"\)\?\.addEventListener\("input", previewContextFromInput\)/);
+  assert.match(contextSource, /appInput\?\.addEventListener\("input", \(\) => \{\s*previewContextFromInput\(\);/);
   assert.match(contextSource, /\["User ID", identity\?\.user \|\| "未认证"\]/);
   assert.match(contextSource, /identity\?\.username \|\| identity\?\.user \|\| "未认证"/);
   assert.match(contextSource, /api\.currentUser\(\)[\s\S]*catch\(\(\) => null\)/);
@@ -261,11 +261,11 @@ test("输入区使用内嵌模型菜单并把非文本模态放到模型选项",
   assert.match(template, /id="composerModelTrigger"/);
   assert.match(template, /id="composerModelMenu"/);
   assert.match(chatSource, /model-modality-badge/);
-  assert.match(chatSource, /\["image", "audio", "video"\]/);
+  assert.match(chatSource, /modelPickerModalityLabels\(model\.input_modalities/);
   assert.doesNotMatch(template, /composerModelModalities|composerUploadCapabilities/);
   assert.doesNotMatch(template, /deep-agent 可能会出错|composer-hint/);
   assert.match(chatSource, /provider-icons\.js/);
-  assert.match(chatSource, /class="composer-model-option-name"/);
+  assert.match(chatSource, /class="reasoning-model-option-name"/);
   assert.doesNotMatch(chatSource, /composer-model-option-copy[\s\S]*<small>/);
 });
 
@@ -284,7 +284,7 @@ test("输入框提供附件入口和圆环预算且不再暴露手动压缩", ()
   assert.match(workspaceCss, /\.context-budget-badge \{[\s\S]*width: 14px;[\s\S]*height: 14px;/);
   assert.match(workspaceCss, /\.attach-btn \{[^}]*width: 16px;[^}]*height: 16px;/);
   assert.match(workspaceCss, /\.attach-btn svg \{[^}]*width: 16px;[^}]*height: 16px;/);
-  assert.match(workspaceCss, /\.composer \{[^}]*padding: 10px 24px 16px;[^}]*border-top: 0;/);
+  assert.match(workspaceCss, /\.composer \{[^}]*padding: 10px var\(--chat-content-gutter\) 16px;[^}]*border-top: 0;/);
   assert.match(workspaceCss, /\.composer-model-picker\.open \.composer-model-trigger \{[^}]*background: var\(--bg-hover\);[^}]*box-shadow: none;/);
   assert.match(workspaceCss, /\.composer-icon-btn:focus-visible \{[^}]*background: var\(--bg-hover\);[^}]*box-shadow: none;/);
   assert.match(workspaceCss, /#input \{[^}]*font-size: 13px;[^}]*line-height: 18px;/);

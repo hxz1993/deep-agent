@@ -1,26 +1,44 @@
 # 模型原生思考配置：能力来源、默认值与接入影响
 
-> C09-THINKING · 2026-10-31 整理（10-30～10-31 核验）· **方案评审，未实施**。
+> C09-THINKING · 2026-10-31 首次完整整理；2026-11-08 已在 0.16.0 实现并完成本地验收。
 >
-> 产品基线 v0.15.0，Pydantic AI Slim 2.46.0、Harness 0.32.0。本次仅整合设计，未增加字段、迁移、接口、控件、依赖或运行时适配。
+> 下文保留原研究基线与讨论依据。最终行为和兼容边界见 [0.16.0 实施记录](Design%200.16.0思考强度实施/README.md)。
+
+## 0.16.0 实施范围
+
+旧客户端省略思考档位时沿用适用的 Agent 默认。聊天 API 支持单轮覆盖，Console 可在模型下拉里选择，电子表格等客户端可以按需适配。
+
+014 增加两列可空 JSONType，每轮档位沿用用户消息事件的元数据。产品默认只在 Agent 上配置，优先级为本轮指定 → Agent 默认 → 供应商默认。早期讨论和框架证据见 [Agent 默认与模型能力方案](backend-defaults-design-20261107.md)。
+
+已实现聊天及 Agent 共用模型下拉、模型档位同行编辑、目录原生档位和会话概览的轻量回显。界面和验收见[实施记录](<Design 0.16.0思考强度实施/03-界面与兼容.md>)。
+
+手工档位可粘贴 JSON 字符串数组或逗号分隔值，供应商默认沿用原请求，历史记录只增加一个可选字段。
+
+最新补查：OpenRouter的reasoning元数据包含档位、默认、开关及强制思考等字段，控制字段比models.dev更完整，但仅适用于该聚合路径；models.dev有逐模型原生values。补充DeepSeek Harness66491b05e3f0的第三方目录／手工声明机制，建议为新模型和私有网关提供管理员能力声明兜底，日常Agent仍只从枚举中选。详见新方案第3、5节。
+
+此前曾收敛为仅目录原生选项＋默认；随后用户要求加入简单手工数组兜底，**当前0.16.0范围包含手工声明**。通用“默认＝不传”不变，未知／不支持思考模型无需另造档位。已补核`@earendil-works/pi-ai`最新发布1.5.0：目录主要来自models.dev v2及专用来源，加Provider／family规则，构建生成后随包发布；仍有thinkingLevelMap。详见前期方案第1、2节。
+
+本轮已按生产过滤生成[154条模型明细和11个Provider汇总](Report%20models.dev思考档位核对-20261107/README.md)。135条支持思考、85条有档位，最近三个月28条均有档位。补充更正：当前v1没有思考默认专用字段，实验版v2已增加可选default，本范围65条填写；两版同键的控制清单无差异。无需为读取档位先迁v2。
+
+以下型号表主要保留 10-30～10-31 的核验快照；11-07 补查 ADK 2.13.0、OpenAI Agents Python 0.24.0、Pydantic AI 来源和实时 models.dev，不等于重新验收所有型号。与本轮范围冲突时以上述新方案为准。
 
 ## 1. 建议形态
 
 先选 Provider／模型，再显示该接入路径真正支持的原生控制，不提供统一五档再转换值。
 
-- 模型维护能力、来源、供应商默认说明，以及可选的产品默认；初始为“跟随供应商”。
-- Agent 默认思考配置与默认模型一起选择，初始继承模型默认。
-- 会话选择当前模型后，再选思考方式；发送时解析为本轮设置。
+- 模型只维护能力元数据、来源和供应商默认说明；已知则只读显示，未知留空，不配置产品默认。
+- Agent 默认思考配置与默认模型一起选择，初始“供应商默认”。
+- Console 选择当前模型后，再选思考方式；发送时解析为本轮设置，首版不新增会话长期偏好。
 - Provider 负责协议，不再加一套对其所有模型生效的默认强度。
 - 没有 effort 不代表不思考：固定思考模型只能显示“供应商默认／始终思考”，不能提供无效关闭按钮。
 
-9 月旧讨论曾建议“模型不保存默认，只做请求级设置”。本轮用户重新提出按模型表达能力与默认，该旧建议不再作为当前设计约束；实施仍需另行确认。
+9 月旧讨论曾建议只做请求级设置。0.16.0 将模型能力声明和 Agent 默认分开保存，聊天请求可覆盖本轮档位。
 
 ## 2. 默认值的含义
 
 | **选项** | **含义** |
 | --- | --- |
-| 继承 | 取适用的模型默认、Agent 默认或会话选择 |
+| 继承 | 取适用的 Agent 默认，未配置时由供应商决定；请求显式选择覆盖本轮 |
 | 跟随供应商 | 清除本功能添加的开关、effort、budget，实际不传这些字段 |
 | 明确档位 | 发送当前模型支持的原生值，例如 Qwen low、Kimi K3 max |
 
@@ -33,7 +51,8 @@ Codex model/list 的 defaultReasoningEffort 是客户端建议，不是 API 缺�
 | **来源** | **已确认能取得** | **缺口** |
 | --- | --- | --- |
 | 供应商 /models | DeepSeek 返回 effort.supported_levels/default_level；Kimi K3 返回 reasoning.effort.valid/default | 不是所有供应商都有；Step 模型列表只声明支持 reason，没有列档位 |
-| models.dev | reasoning_options：toggle、effort.values、budget_tokens.min/max；按 Provider＋模型区分 | 没有覆盖所有型号的独立供应商默认字段，也不是完整请求适配规范 |
+| models.dev | v1 reasoning_options：toggle、effort.values、budget_tokens.min/max；按 Provider＋模型区分；v2另有可选default | 默认资料仍不全，也不是完整请求适配规范；本项目当前解析v1 |
+| OpenRouter /models | reasoning.supported_efforts、default_effort、default_enabled、mandatory、supports_max_tokens | 字段较完整，但会有缺项／映射，不能直接用于同名原厂或私有网关 |
 | Pydantic AI Profile | supports_thinking、thinking_always_enabled 和部分协议特征 | 当前安装版不是完整的逐型号档位及默认目录 |
 | 官方文档、管理员修正 | 原生字段、允许值、默认、互斥条件与私有网关契约 | 需要来源和核验时间；目录刷新不覆盖人工修正 |
 
@@ -51,7 +70,9 @@ Codex model/list 的 defaultReasoningEffort 是客户端建议，不是 API 缺�
 | --- | --- | --- | --- |
 | Pydantic AI Core（安装版） | 统一 thinking 为布尔或 minimal/low/medium/high/xhigh；另有供应商原生设置 | Model → Agent → Run 设置逐层合并；原生字段优先于统一 thinking | 复用原生请求入口，UI 不照搬统一五档 |
 | Pydantic AI Harness／CLAI2（54a31ab） | /model settings 按模型提供控制；/effort 复用原生字段及 choices，并校验 | 按模型保存，支持 reset；部分能力由型号规则维护 | 官方应用层也需要单独的模型能力解析，不是只有 Core 通用设置 |
-| DeepSeek Harness（477b4f4205） | 核心 effort 是适配器拥有的字符串；pi-ai 用 reasoning、thinkingLevelMap 过滤可选项 | Provider／模型／effort 成组选择，支持 Agent 默认和会话选择；非法显式值拒绝 | 借鉴适配器提供能力；其 pi-ai off 可能只是省略参数，不可视为真实关闭 |
+| Google ADK 2.13.0（d68ca857d5e3） | Agent 的 ThinkingConfig；Gemini 按型号使用 level／budget，原生 Anthropic另有effort，LiteLLM路径有转换 | generate_content_config 或 BuiltInPlanner；并非完整跨厂商档位目录 | 原生控制与资料层分开，不把预算伪装成原生档位 |
+| OpenAI Agents Python 0.24.0（17d994bd3045） | Agent.model_settings.reasoning，RunConfig可覆盖；API按实际型号校验effort | SDK对部分GPT型号注入自己的隐式默认，不等于供应商不传默认 | Agent配置、运行覆盖可参考；不照搬其隐式型号默认 |
+| DeepSeek Harness（11-07补核66491b05e3f0） | 原厂off/low/high/max；第三方pi-ai目录过滤并映射，自定义可在UI声明reasoningEfforts | 原厂列表使用中约十分钟刷新；第三方随已安装目录，自定义声明下次请求生效；非法显式值拒绝 | 借鉴目录＋管理员声明兜底；空off可能只省略参数，不等于真实关闭 |
 | Codex | model/list 返回 supportedReasoningEfforts 和 defaultReasoningEffort | 目录可随账号／客户端变化；配置默认、会话和轮次选择 | 最符合先模型后档位；Ultra 含产品编排行为，不是通用 API effort |
 | OpenCode（014614d） | 优先 models.dev.reasoning_options → 模型 variants；缺失时回退型号／SDK 规则 | 模型 options／variants，Agent 可覆盖，界面切换 variant | 原生枚举＋字段格式适配；预算 variant 是产品定义，不必等同原生档位 |
 | Hermes（345cd2b0） | 内部宽梯度，多数入口先提供通用选择，再按供应商集合 clamp／转换 | 全局、模型覆盖、单次运行；缺省处理存在路径差异 | 并非严格原生档位方案，不照搬宽梯度或静默近似映射 |
@@ -95,7 +116,7 @@ OpenCode 本体是 Agent 客户端／Harness；Zen、Go 是其模型服务入口
 ```text
 原厂模型发现＋models.dev＋官方文档／管理员修正
 → 当前 Provider＋模型＋协议的能力
-→ 模型默认 → Agent 默认 → 会话／本轮选择
+→ Agent 默认／供应商缺省 → 本轮选择
 → 本轮解析、校验一次
 → Pydantic AI 原生 ModelSettings
 → 模型请求、工具循环、PTC 后续请求及 Deferred 接续
@@ -105,15 +126,15 @@ OpenCode 本体是 Agent 客户端／Harness；Zen、Go 是其模型服务入口
 | --- | --- | --- |
 | Provider／协议 | 集中选择原生参数格式 | 不按域名猜 Provider，不默认所有接口都是 OpenAI Chat |
 | 模型目录 | 复用 reasoning_options，补能力来源及供应商默认说明 | 不在 Run 内刷新，不覆盖人工修正 |
-| 模型配置 | 能力、只读供应商默认、可选产品默认 | 相同模型不同接入路径分别配置 |
+| 模型资料 | 能力元数据、只读供应商缺省；没有产品默认配置 | 相同型号不同接入路径分别匹配；未知不猜 |
 | Agent | 默认模型旁配置默认思考方式 | 请求换成其他模型时，不携带原模型专属 effort；复制安装导出须覆盖新配置 |
 | HTTP／SSE／Console／渠道 | 可选参数传同一种意图，控件随模型变化 | 旧客户端不传有效；继承与跟随供应商分开 |
 | AgentSpec／Runner | 集中解析并转换 ModelSettings | 不修改各工具实现，不靠提示词让模型少想 |
 | Deferred／历史／诊断 | 小型本轮实际选择与来源记录；接续保持本轮设置 | 不保存完整能力快照，不回填旧事件，不把选择值当实报消耗 |
 | 标题／压缩辅助请求 | 分别确定是否继承主请求强度，区分用途 | 不能无意把所有辅助请求提升到高档 |
-| 安装／备份／回归 | 模型与 Agent 配置保存、导入导出和旧包兼容 | 不改变 MCP 权限、PTC／Python 预算或结构化输出 |
+| 安装／备份／回归 | 模型能力资料与 Agent 选择的导入导出和旧包兼容 | 不改变 MCP 权限、PTC／Python 预算或结构化输出 |
 
-建议选择优先级：本轮显式选择 → 适用的会话选择 → Agent 默认 → 模型默认 → 供应商行为。每层可显式选择跟随供应商以停止继承；不新增 Provider／全局默认。
+本轮选择优先级：请求显式选择 → 默认模型仍匹配时的 Agent 默认 → 实际模型供应商缺省。可显式跟随供应商以停止继承，不新增模型产品默认、Provider／全局默认或会话长期偏好。
 
 切换模型后重新校验，不能把上一模型的 max 静默转成另一模型的 high。Console 对失效选择提示重选，API 对显式非法值返回校验错误。运行开始后固定该轮选择，管理员修改默认只影响下一轮。
 
@@ -134,11 +155,11 @@ OpenCode 本体是 Agent 客户端／Harness；Zen、Go 是其模型服务入口
 
 安装版通用 thinking 为五个字符串；最新上游已扩 max 并调整不可关闭模型行为，不能当作 2.46.0 的保证。安装版原生 OpenAI effort 类型已经有 max，部分接入无需升级；其他 Profile 必须逐项捕获真实请求，不能因支持 extra_body 就宣布所有型号可用。
 
-另有独立协议影响：本仓普通 OpenAI Provider 当前走 OpenAIChatModel。官方 GPT-6.1 Sol／Terra 的工具调用要求 Responses，Luna 的 Chat 工具支持也有限制；自定义网关可能另外适配。因此 effort 不是一个参数就能抹平所有协议。是否增加显式 Responses 接入应单独评估，不借本功能自动迁移所有模型。
+原研究的协议缺口已部分变化：v0.15.14 已提供 OpenAI／兼容模型的显式 Responses 选择，ChatGPT 订阅亦有原接入路径。本轮复用实际协议，不自动迁移模型；现有 `openai_reasoning_summary=auto` 只控制摘要展示，不代表已经配置强度。effort 字段不能抹平不同协议、网关及型号差异。
 
 ## 8. 存储、历史和首版边界
 
-模型与 Agent 当前没有完整的思考配置字段。如果要长期保存模型默认、人工能力修正和 Agent 默认，候选是在 LlmModel、Agent 各加可空 JSON 配置，既有事件只记录少量本轮选择；不另建运行配置表，不塞 global_settings。具体字段、迁移版本和安装备份结构须独立评审批准，本轮不实施 DDL。
+0.16.0 使用 `llm_models.reasoning_options`、`agents.reasoning_effort` 两个可空字段。目录 JSON 沿用原结构，用户轮事件只附带一个档位字符串。当前契约见 [0.16.0 实施说明](Design%200.16.0思考强度实施/README.md)，前期存储建议保留供研究参考。
 
 - 旧模型、Agent 没配置：不传思考控制，不回填默认记录。
 - 历史没有设置：显示未记录，不用今天的默认冒充过去的选择。
@@ -146,7 +167,7 @@ OpenCode 本体是 Agent 客户端／Harness；Zen、Go 是其模型服务入口
 - 目录更新导致显式档位失效：提示并拒绝该组合，不做近似转换。
 - 强度、思考过程展示、输出上限、超时、PTC 内存和执行预算分别处理。
 
-首版建议只开放供应商默认、真实关闭（仅支持时）和原生 effort；预算保留元数据，先不做自由配置。是否同时上模型默认、Agent 默认及会话持久偏好，进入实施前再收口，避免一次增加过多配置层。
+首版建议供应商默认、真正支持的开关和原生 effort；只做 Agent 默认及请求覆盖，模型能力只读，会话持久偏好和自由预算配置不纳入。本轮保持方案状态。
 
 回归至少覆盖：未知／固定思考／只有开关／有档位；同型号跨 Provider；默认继承与清除；模型切换；HTTP／SSE／渠道／Deferred；工具、PTC、结构化输出；安装备份；原生请求捕获；多次配对质量和延迟。Provider 400、MCP 失败、取消分别统计。
 
@@ -163,6 +184,9 @@ OpenCode 本体是 Agent 客户端／Harness；Zen、Go 是其模型服务入口
 - [Step 5 调参说明](https://platform.stepfun.com/cookbook/step-5-reasoning)：low/medium/high；默认尚未查实。
 - [OpenAI 模型](https://developers.openai.com/api/docs/guides/latest-model)、[Codex model/list](https://learn.chatgpt.com/docs/app-server#list-models-modellist)：API 默认与客户端建议分开。
 - [OpenCode 模型配置](https://docs.opencode.ai/docs/models/)，本地 014614d 的 provider/transform.ts、provider.ts。
+- [OpenRouter逐模型控制](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens#discovering-per-model-reasoning-options)：原生路由与聚合路由资料分开。
+- [ADK LlmAgent 配置](https://adk.dev/agents/llm-agents/)，本地2.13.0的planners/built_in_planner.py、models/lite_llm.py和anthropic_llm.py。
+- [OpenAI Agents 模型设置](https://developers.openai.com/api/docs/guides/agents/models#model-settings-prompts-and-feature-support)，本地0.24.0的models/default_models.py、run_internal/turn_preparation.py。
 - [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness/blob/477b4f4205/packages/llm/llm-pi-ai/src/models.ts)，同目录 adapter.ts 和 core/agent-default-model。
 - [Hermes 适配规则](https://github.com/NousResearch/hermes-agent/blob/345cd2b0/agent/reasoning_effort.py)，同提交 main_provider_setup.py；[OpenClaw](https://docs.openclaw.ai/tools/thinking)。
 - 本仓：models/provider_registry.py、models/catalog.py、api/v1/deps.py 的 _model_settings_for_spec、agent/spec.py、agent/runner.py、schemas/chat.py，以及模型／Agent CRUD、安装备份和 Console。

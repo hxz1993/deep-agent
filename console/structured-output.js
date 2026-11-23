@@ -31,13 +31,20 @@ function codeBlock(name, value, expanded) {
   }) || `<div class="markdown-code-header"><code>${escape(name)}</code></div><pre><code class="hljs language-json">${jsonMarkup(value)}</code></pre>`;
   return `<section class="structured-output-json markdown-body">${block}</section>`;
 }
-export function renderStructuredOutput({ name, output, mode = "full", failed = false, expanded } = {}) {
-  const sections = structuredOutputSections(output);
+export function renderStructuredOutput({ name, output, mode = "full", failed = false, expanded, publicationProtocol } = {}) {
+  const publication = publicationProtocol === "a2a" || publicationProtocol === "mcp";
+  const title = publication ? `${publicationProtocol.toUpperCase()} Output` : name;
+  const state = publication && !failed ? { completed: "已完成", input_required: "待补充" }[output?.status] : null;
+  const sections = publication ? null : structuredOutputSections(output);
   const grouped = mode === "grouped" && sections !== null;
+  const viewSwitch = publication ? "" : `<div class="console-segmented output-view-switch" role="group" aria-label="输出展示方式">
+    <button type="button" data-output-mode="full" class="${!grouped ? "active" : ""}" aria-pressed="${!grouped}">完整 JSON</button>
+    <button type="button" data-output-mode="grouped" class="${grouped ? "active" : ""}" aria-pressed="${grouped}"${sections === null ? ' disabled title="数组及标量使用完整 JSON 展示"' : ""}>按结构分组</button>
+  </div>`;
   const body = grouped && sections.length ? sections.map(section => section.prose
     ? `<section class="structured-output-text"><details open><summary><code>${escape(section.name)}</code></summary><div>${escape(section.output)}</div></details></section>`
-    : codeBlock(section.name, section.output, expanded)).join("") : codeBlock("JSON", output, expanded);
-  return `<div class="structured-output"><div class="structured-output-toolbar"><code class="structured-output-title">${escape(name)}</code><div class="console-segmented output-view-switch" role="group" aria-label="输出展示方式"><button type="button" data-output-mode="full" class="${!grouped ? "active" : ""}" aria-pressed="${!grouped}">完整 JSON</button><button type="button" data-output-mode="grouped" class="${grouped ? "active" : ""}" aria-pressed="${grouped}"${sections === null ? ' disabled title="数组及标量使用完整 JSON 展示"' : ""}>按结构分组</button></div><button type="button" class="icon-action" data-output-copy title="复制完整 JSON" aria-label="复制完整 JSON"><i data-lucide="copy"></i></button><button type="button" class="icon-action" data-output-download title="下载完整 JSON" aria-label="下载完整 JSON"><i data-lucide="download"></i></button></div>${failed ? '<p class="structured-output-failed">此输出未被接受，仅供排查。</p>' : ""}<div class="structured-output-body">${body}</div></div>`;
+    : codeBlock(section.name, section.output, expanded)).join("") : codeBlock("JSON", output, publication ? expanded ?? false : expanded);
+  return `<div class="structured-output"><div class="structured-output-toolbar"><code class="structured-output-title">${escape(title)}</code>${state ? `<span class="structured-output-state">${escape(state)}</span>` : ""}${viewSwitch}<button type="button" class="icon-action" data-output-copy title="复制完整 JSON" aria-label="复制完整 JSON"><i data-lucide="copy"></i></button><button type="button" class="icon-action" data-output-download title="下载完整 JSON" aria-label="下载完整 JSON"><i data-lucide="download"></i></button></div>${failed ? '<p class="structured-output-failed">此输出未被接受，仅供排查。</p>' : ""}<div class="structured-output-body">${body}</div></div>`;
 }
 export function mountStructuredOutput(host, options = {}, { document = globalThis.document, window = globalThis.window } = {}) {
   const value = JSON.parse(JSON.stringify(options.output));

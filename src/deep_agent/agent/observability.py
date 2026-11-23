@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
+from contextlib import contextmanager
 from typing import Any, Iterable
 
 from pydantic_ai.messages import ModelMessage, ModelResponse
@@ -99,14 +100,31 @@ def run_metrics(
     return metrics
 
 
-def log_event(event: str, **fields: Any) -> None:
+def log_event(event: str, *, level: str | None = None, exception: BaseException | None = None, **fields: Any) -> None:
     """The unified, allowlisted diagnostic writer is never a business dependency."""
     try:
         from deep_agent.diagnostics import emit
 
         if event == "agent_run_completed" and fields.get("status") == "pending":
             event = "agent_run_pending"
-        level = "ERROR" if event.endswith("_failed") else "WARNING" if event.endswith("_retrying") else "INFO"
+        if level is None:
+            level = "ERROR" if event.endswith("_failed") else "WARNING" if event.endswith("_retrying") else "INFO"
+        if exception is not None:
+            fields["exception"] = exception
         emit(event, level=level, **fields)
     except Exception:
         pass
+
+
+def log_run_phase(phase: str, started_at: float, *, ended_at: float | None = None, **fields: Any) -> None:
+    end = time.perf_counter() if ended_at is None else ended_at
+    log_event("agent_run_phase", phase=phase, duration_ms=max(0, round((end - started_at) * 1000)), **fields)
+
+
+@contextmanager
+def observe_run_phase(phase: str, **fields: Any):
+    started_at = time.perf_counter()
+    try:
+        yield
+    finally:
+        log_run_phase(phase, started_at, **fields)

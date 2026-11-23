@@ -16,6 +16,8 @@
 
 研发状态只在 [TODO](../TODO.md) 维护。工具定义的当前说明见 [01 UI 工具](../01-ui-tools/README.md)，当前已发布通信契约见 [UI 工具协议](../../guides/ui-tools-external.md) 和 [SSE 协议](../../guides/sse-protocol.md)。本稿不表示线上协议已经改变。
 
+消息渠道缺少 UI 交互承载时的兜底见 [46 · Agent 运行护栏](../46-agent-guardrails/README.md#渠道-ui-工具的兜底)。这项检查独立于同 Run 等待方案。
+
 ## 为什么重新评估
 
 之前已有三处记录：

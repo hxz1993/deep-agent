@@ -129,7 +129,7 @@ class DingtalkRegistrationService(RegistrationService):
             raise
         except Exception as exc:
             emit("channel_registration_failed", level="WARNING", request_id=trace,
-                 phase=stage, error_type=type(exc).__name__,
+                 phase=stage, exception=exc,
                  reason=str(exc) if isinstance(exc, ValueError) and str(exc) in {
                      "Missing nonce", "Missing device registration", "Invalid DingTalk verification URL",
                      "Missing credentials", "Registration rejected", "DingTalk registration request failed"} else "request_failed")

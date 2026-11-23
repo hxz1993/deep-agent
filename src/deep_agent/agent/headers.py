@@ -13,6 +13,21 @@ from deep_agent.channels.app_context import channel_deepfos_app, channel_deepfos
 from deep_agent.options import OPTION
 
 
+_EXECUTION_CONTEXT_HEADERS = frozenset({
+    "authorization", "cookie", "token", "x-user-token", "x-tenant-id",
+    "x-deepfos-key", "user", "app", "space", "language",
+})
+
+
+def extract_execution_context_headers(
+    request: Request, *, channel_account: object | None = None,
+) -> dict[str, str]:
+    """Capture fixed trusted profile inputs without changing MCP forwarding policy."""
+    return extract_forward_headers(
+        request, allowed=_EXECUTION_CONTEXT_HEADERS, channel_account=channel_account,
+    )
+
+
 def _split_rules(allowed: Iterable[str]) -> tuple[frozenset[str], tuple[str, ...]]:
     exact: set[str] = set()
     wildcard_prefixes: list[str] = []
@@ -36,6 +51,16 @@ def _get_header(request: Request, target: str) -> str | None:
         if name.lower() == target:
             return value
     return None
+
+
+def filter_verified_mcp_headers(headers: dict[str, str]) -> dict[str, str]:
+    """Apply the MCP forwarding allowlist to a verified request identity."""
+    exact, wildcard_prefixes = _split_rules(OPTION.agent.mcp_forward_request_headers)
+    return {
+        name: value for name, value in headers.items()
+        if _is_allowed_header(name, exact, wildcard_prefixes)
+        or (name == "token" and _is_allowed_header("authorization", exact, wildcard_prefixes))
+    }
 
 
 def extract_forward_headers(

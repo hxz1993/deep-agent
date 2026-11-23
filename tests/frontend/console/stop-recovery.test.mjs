@@ -54,6 +54,13 @@ test('old Run responses cannot recover the current Run', async () => {
   assert.equal(result.status, 'stale');
 });
 
+test('a newer Run confirms the specified stop target has ended', async () => {
+  const result = await verifyStreamStop({ ...options(async (kind) => response(
+    kind === 'cancel' ? { status: 'not_running' } : { status: 'running', run_id: 'next' },
+  )), runId: 'previous' });
+  assert.equal(result.status, 'idle');
+});
+
 test('real terminal or teardown aborts pending verification', async () => {
   const controller = new AbortController();
   const resultPromise = verifyStreamStop({ ...options(async () => new Promise(() => {})), signal: controller.signal });
@@ -109,12 +116,15 @@ function streamHarness() {
   const calls = [];
   const noop = () => {};
   const context = { state, calls, AbortController, boundedStreamRequest,
-    serviceUrl: (url) => url, setConn: noop, trajectory: null,
+    serviceUrl: (url) => url, trajectory: null,
+    window: { DeepAgentConsole: { setConnectionStatus: noop } },
+    updateSessionRunIndicators: noop,
     applyAssistantPresentationActions: noop, assistantActionsFromSse: noop,
     failAutomaticContextCompaction: noop, clearComposerPlan: noop, addErrorTo: noop,
     addSystemNote: (message) => calls.push(message),
     setStreaming: (value) => { state.streaming = value; },
     syncSessionsFromBackend: async () => calls.push('sessions'),
+    refreshSessionFilterOptions: async () => {},
     refreshCurrentHistory: async () => calls.push('history'),
     daFetch: async (_, { signal }) => ({ ok: true, body: { signal } }),
     readSse: async ({ signal }) => new Promise((_, reject) => {

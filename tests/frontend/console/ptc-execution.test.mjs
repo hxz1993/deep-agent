@@ -45,3 +45,13 @@ test("旧格式、缺失和未知版本有安全兜底", () => {
   assert.match(renderPtcExecution(event({ ptc_diagnostics: { version: 99 } })), /版本暂不支持/);
   assert.doesNotMatch(renderPtcExecution(event({ ptc_diagnostics: { version: 1, steps: [{ tool_name: "<script>" }] } })), /<script>/);
 });
+
+test("源码定位元数据不改变甘特图、统计和结果展示", () => {
+  const sample = event({ ptc_diagnostics: { version: 1, summary: { duration_ms: 20, call_count: 1 }, steps: [{
+    call_id: "outer__1", tool_name: "query", status: "completed", start_offset_ms: 2, duration_ms: 10,
+    output: { state: "captured", value: 42 },
+  }] } });
+  const before = renderPtcExecution(sample);
+  sample.result.metadata.ptc_diagnostics.steps[0].source_location = { call_id: "outer", filename: "<python-input-0>", start: 6, end: 13 };
+  assert.equal(renderPtcExecution(sample), before);
+});

@@ -12,6 +12,7 @@ const FIELD_LABELS = {
   timestamp: "时间", summary: "摘要", message: "正文", raw: "原始日志", request_id: "请求 ID", event: "事件",
   level: "等级", source: "来源", schema_version: "格式版本", record_id: "记录 ID", boot_id: "启动 ID",
   instance_id: "实例 ID", process_id: "进程 ID", session_id: "会话 ID", run_id: "执行 ID", agent_id: "Agent ID",
+  task_id: "任务 ID", publication_id: "发布 ID", connection_id: "远程连接 ID", protocol: "接入方式", artifact_count: "产物数",
   agent_name: "Agent 名称", conversation_id: "对话 ID", channel_run_id: "渠道执行 ID", account_id: "渠道账号 ID", wecom_application_id: "企微应用 ID",
   tool_call_id: "工具调用 ID", tool: "工具", model_id: "模型 ID", model_name: "模型", provider_name: "供应商",
   profile_service: "用户资料服务", discovery_type: "服务发现方式", discovery_namespace: "发现命名空间",

@@ -20,6 +20,14 @@
 直播中的 Thinking、工具进度、自动压缩提示等可以只存在于当前页面，不要求在 History 中重放。
 History 的用户消息、助手回复、工具、Plan、附件和 Context 均由后端从 Event Store 确定性投影。
 
+用户输入先保存。纯只读调用的正文和结果可以先从 SSE 展示，History 在收尾提交后补齐。
+需要查看进行中的会话时，使用下文的观察流。审批卡在待操作事实提交后才可交互。
+写入和能力未知的工具在执行前检查持久化，实际压缩也先保存其所用历史。
+压缩提交后，后续只读轮次沿用内存中的摘要和增量。输出预留从入场历史采样一次，此后每个模型响应只计入一次。
+正常完成、主动停止或执行异常收尾时，会保存可恢复的已接收内容，终态按实际保存结果返回。普通聊天的发送连接断开后，已开始的 Run 继续执行。
+
+普通聊天从首个模型请求起提供 `present`。模型可用它选择会话附件和可信工具返回的文件，直接交付原附件时无需重新生成。成功的 `final` 和同步 `ChatResponse` 可带 `output_files`，每项含 File ID、文件名、MIME、已知大小及可用时的 `preview_url`。History 在对应的最终 `assistant_message` 或 `structured_output` 上返回同样的列表。空列表、取消、失败和等待 UI 回传时省略该字段，正文及业务 JSON 仍在原有 `output` 中。
+
 ## 结构化输出（0.14.0，默认关闭）
 
 Agent 显式开启后，输出尝试使用独立 `type:"output"`；它不是 UI Deferred 工具，也不是顶层运行 error。
@@ -100,13 +108,14 @@ Usage基准加新增内容估算；`estimated`表示保守估算。基准失效�
 
 `GET /api/v1/sessions/{session_id}/live?agent_id=…&run_id=…` 是只读 SSE，
 沿用 History 的用户与 Agent 归属校验。客户端打开会话时从 `run-status` 获取当前 Run，
-只观察这个 ID；空闲时不连接，也不自动跟随下一轮。原页面 POST SSE 不重复订阅。
+该接口只观察指定的 Run。原页面 POST SSE 不重复订阅该 Run。
+Console 查询会话列表时传 `include_active_runs=true`，当前 API 实例可见的运行项会附带 `active_run_id`。默认列表返回原有字段，点开时以运行状态接口为准。
 
 | 事件 | 内容与用途 |
 | --- | --- |
 | `observation_sync` | `session_id, agent_id, run_id, replay_available, baseline_sequence`；历史与当前回放衔接边界 |
 | `observation` | `run_id, event, data`；内部 `event/data` 原样复用现有聊天 SSE |
-| `observation_end` | `run_id`；该轮源请求已收尾，回读历史后解除运行状态，连接结束 |
+| `observation_end` | `run_id`；该轮执行已收尾，回读历史后解除运行状态，连接结束 |
 | `observation_reset` | 有界原因；观察连接不可继续，重新校准历史，不取消或重跑 Agent |
 
 上述包装是瞬时传输控制，不写入事件表、模型历史或轨迹行。`baseline_sequence` 只读取该轮开始前
@@ -119,8 +128,21 @@ Usage基准加新增内容估算；`estimated`表示保守估算。基准失效�
 
 转发与原执行位于同一个 API worker，不引入跨进程协调。回放最多每 Run 4 MiB/4,096 帧、
 进程共 32 MiB；观察队列最多 1 MiB/512 帧，总订阅上限 128。慢客户端被断开而非阻塞执行。
-Run 结束释放回放，连接断开释放队列；首轮已发送页面/渠道仍负责原请求生命周期，
-关闭只读观察页面不会停止 Agent，明确停止仍调用现有取消接口。
+Run 结束释放回放，连接断开释放队列。普通聊天的 Run 由服务进程管理，关闭发起请求或只读观察都只断开相应连接。
+重新打开会话时可查询并跟随仍活跃的同一个 Run，或回读已保存的结果。明确停止仍调用现有取消接口。
+渠道发送流沿用原请求生命周期，进程重启不恢复尚未完成的 Run。
+
+诊断会话详情（含发布 Agent 和远程 Agent 跳入）打开时，如果已经有活动 Run，使用管理员只读
+`GET /api/v1/diagnostics/sessions/{session_id}/live?run_id=…` 接入同一事件流。读取历史和文件仍走
+诊断权限，页面关闭只断开观察。A2A 和 MCP 发布任务执行时也产生运行事件；结构化回复在校验后展示。
+详情页观察打开时发现的那一轮，结束后以历史校准。
+
+普通聊天的 Console 打开会话后，以 `GET /api/v1/sessions/{session_id}/activity?agent_id=…`
+监听同一会话的新一轮。初次连接和 Run 开始、结束时发出 `session_activity`，只包含
+`status`（`running` 或 `idle`）和 `run_id`。连接保持到切换会话或关闭页面，
+每个进程最多 128 条会话活动连接，独立于 Run 流的订阅上限。
+多个变化可以合并为最新通知。客户端用状态、历史和指定 Run 的 SSE 校准，不重发消息。
+同一会话同时仅允许一轮。控制台停止时带 `run_id`，避免迟到的停止命令取消下一轮。
 
 工具生命周期帧继续使用稳定调用字段 `tool`，并额外返回展示字段 `display_name`：
 
@@ -158,7 +180,7 @@ Run 结束释放回放，连接断开释放队列；首轮已发送页面/渠道
 
 阶段只取 `preparing/summarizing/validating/committing/retry_wait`。历史预算估算、安全边界选择和证据整理
 均不得阻塞 SSE 事件循环，准备阶段耗时较长时同样发送 `preparing` 心跳。默认总预算 300 秒；
-客户端断开或正式取消会取消摘要调用。
+取消 Run 会取消摘要调用。普通聊天的 Run 在发送连接断开后继续，包括正在进行的摘要调用。
 
 实时会话可在触发位置展示压缩进度；重新打开 History 不恢复压缩提示。Console 轨迹仍通过 Event API
 展示真实 Compaction Event。

@@ -84,10 +84,9 @@ v0.3.2 起备份同时保存 UI 工具包及每个手工 UI 工具的 `package_c
 
 v0.3.18 起备份同时保存 `skill_packages` 与 `agents.skills`。其中上传 Skill 只备份平台 File ID、
 Hash、Manifest 和资源索引，不包含平台文件服务中的原始 ZIP，因此配置备份本身不是跨环境自包含
-的Skill迁移包。需要完整留存或迁移时，应同时在Console Skill页面执行“导出全部”；集合中的每个
-`skills/<code>.zip`都可在目标环境通过现有“上传安装”导入。若当前环境中的File ID已经失效，
-先在Skill管理页重新提交相同ZIP修复原包，再重新导出。Agent的Skill选择仍保存在配置DB中，
-导出的Skill ZIP不携带Agent绑定。
+的 Skill 迁移包。需要完整留存或迁移时，同时调用 `GET /api/v1/configuration/skills/export` 下载
+通用及应用专用原包集合。若 File ID 已失效，先在对应作用域重新上传相同 ZIP 修复原包，再重新导出。
+Agent 的 Skill 选择和应用作用域保存在配置 DB 中。单独分发原包时，通过目标作用域的上传入口安装。
 
 会话标题不再有独立模型配置；首轮标题请求直接复用该轮实际生效的Provider和模型，因此配置备份
 无需保存标题专用表或环境变量。
@@ -95,8 +94,8 @@ Hash、Manifest 和资源索引，不包含平台文件服务中的原始 ZIP，
 备份工具只负责生成数据库配置备份，不直接修改目标库。无会话新环境可通过企业管理员接口
 `POST /api/v1/configuration/import`执行受控初始化；接口只接受与目标库Alembic Revision完全一致的
 备份，不升级、降级或修改目标版本号。数据库文件通过multipart临时上传并在请求结束后删除，不进入
-平台File Store。若备份包含上传Skill，还必须同时提供Skill“导出全部”ZIP；接口会把原包上传到目标
-环境File Store，只替换新的`platform_file_id`，Skill code、Agent绑定及全部数据库主键保持不变。
+平台 File Store。若备份包含上传 Skill，须同时提供配置备份接口导出的原包集合。初始化会把原包上传到
+目标 File Store 并更新 `platform_file_id`，保留 Skill code、Agent 绑定及各配置主键。
 
 先预检：
 
@@ -307,3 +306,16 @@ Provider、Skill、MCP、UI工具包和UI工具仍无启停字段，Agent关联�
 共享环境从010升级011前使用010代码导出配置备份，停止旧实例后执行标准`alembic upgrade head`。
 迁移后核验模型数量不变、`enabled`全部非空，并验证停用模型从业务模型列表消失、管理列表仍可读取和
 重新启用。升级后的配置备份文件名使用`v011`。
+
+## 应用 Skill 数据转换
+
+数据库保持 `015`。新版启动前转换以集成配置 ID 为归属的旧应用包及引用清单。命令使用明确指定的目标数据库配置，
+默认只读预检并输出需转换的包和配置数量。预检会拒绝无归属、重名或非法引用。
+
+```bash
+PYTHONPATH=src .venv/bin/python -m maintenance.app_skill_ownership --config <目标数据库配置>
+```
+
+停止同库旧 API 和其他配置写入端，完成数据库备份，再用同一命令追加 `--apply`。转换在一个配置独占事务内更新
+`skill_packages.scope_ref` 和 `integration_scoped_settings.settings.skills`，保留内部主键、原 ZIP、File ID 和缓存。
+随后重跑预检，两个计数均为零时启动新版。新版支持直接恢复同 Revision 的旧备份。切回旧服务时使用转换前备份。

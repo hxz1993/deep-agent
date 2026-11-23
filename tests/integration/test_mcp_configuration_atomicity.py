@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
@@ -11,7 +12,7 @@ from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
-from deep_agent.schemas.mcp import McpServerCreate
+from deep_agent.schemas.mcp import McpInspectionResult, McpServerCreate, McpServerUpdate
 from deep_agent.schemas.agent import AgentCreate
 from tests.helpers.admin_auth import allow_console_admin
 from tests.helpers.sqlite_stores import make_sqlite_stores
@@ -52,6 +53,36 @@ class McpConfigurationAtomicityTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertIsNone(await self.stores.mcp.get_by_name("blank-url"))
+
+    async def test_bound_app_save_uses_selected_scope_without_platform_login(self) -> None:
+        url = "https://platform.example/deepfos-server/deepfos-mcp/mcp"
+        config = {"url": url, "request_context": {
+            "mode": "bound_app", "target_app_id": "demo001", "target_space_id": "demo",
+            "target_app_name": "示例应用",
+        }}
+        platform = SimpleNamespace(server=SimpleNamespace(base="https://platform.example/deepfos-server"))
+        with (
+            patch("deep_agent.services.mcp_bound_app.PLATFORM_OPTION", platform),
+            patch("deep_agent.api.v1.mcp.IntegrationAppDirectory") as directory,
+            patch("deep_agent.api.v1.mcp.inspect_mcp_server") as inspect,
+        ):
+            async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+                response = await client.post("/api/v1/mcp", json={
+                    "name": "bound-example", "transport": "url", "config": config,
+                })
+                self.assertEqual(response.status_code, 201, response.text)
+                response = await client.patch("/api/v1/mcp/bound-example", json={
+                    "description": "更新说明", "config": config,
+                })
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json()["config"]["request_context"], config["request_context"])
+                self.assertEqual(response.json()["description"], "更新说明")
+                response = await client.patch("/api/v1/mcp/bound-example", json={
+                    "config": {**config, "url": "https://other.example/mcp"},
+                })
+                self.assertEqual(response.status_code, 422, response.text)
+            directory.assert_not_called()
+            inspect.assert_not_awaited()
 
     async def test_create_pipeline_failure_does_not_leave_duplicate_row(self) -> None:
         with patch(
@@ -97,6 +128,37 @@ class McpConfigurationAtomicityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row.config["url"], "http://old.example.test/mcp")
         self.assertEqual(row.inspection["status"], "healthy")
 
+    async def test_late_inspection_cannot_overwrite_reconfigured_mcp(self) -> None:
+        for method, route in (("POST", "/inspect"), ("PATCH", "")):
+            with self.subTest(method=method):
+                name = f"stale-{method.lower()}"
+                await self.stores.mcp.create_unique(
+                    McpServerCreate(name=name, transport="url", config={"url": "https://old.example.test/mcp"}),
+                )
+                async def delayed_inspection(*args, **kwargs):
+                    await self.stores.mcp.update(
+                        name, McpServerUpdate(config={"url": "https://latest.example.test/mcp"}),
+                        inspection={"status": "stale"},
+                    )
+                    return McpInspectionResult.model_validate({
+                        "inspection": {"status": "healthy"},
+                        "changes": {
+                            "status": {"before": "unknown", "after": "healthy"},
+                            "tool_count": {"before": 0, "after": 0},
+                            "resource_count": {"before": 0, "after": 0},
+                            "template_count": {"before": 0, "after": 0},
+                        },
+                    })
+
+                with patch("deep_agent.api.v1.mcp.inspect_mcp_server", side_effect=delayed_inspection):
+                    async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+                        options = {"json": {"config": {"url": "https://candidate.example.test/mcp"}}} if method == "PATCH" else {}
+                        response = await client.request(method, f"/api/v1/mcp/{name}{route}", **options)
+                self.assertEqual(response.status_code, 409, response.text)
+                row = await self.stores.mcp.get_by_name(name)
+                self.assertEqual(row.config["url"], "https://latest.example.test/mcp")
+                self.assertEqual(row.inspection, {"status": "stale"})
+
     async def test_rename_write_failure_rolls_back_mcp_and_agent_references(self) -> None:
         await self.stores.mcp.create_unique(
             McpServerCreate(
@@ -111,7 +173,7 @@ class McpConfigurationAtomicityTests(unittest.IsolatedAsyncioTestCase):
                 name="atomic-rename-agent",
                 model_id=model_id,
                 prompt="keep capability",
-                capabilities=["builtin:general", "mcp:atomic-rename-old"],
+                capabilities=["builtin:ptc", "mcp:atomic-rename-old"],
             )
         )
 
@@ -131,7 +193,7 @@ class McpConfigurationAtomicityTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await self.stores.mcp.get_by_name("atomic-rename-new"))
         self.assertEqual(
             (await self.stores.agent.get_by_id(agent.id)).capabilities,
-            ["builtin:general", "mcp:atomic-rename-old"],
+            ["builtin:ptc", "mcp:atomic-rename-old"],
         )
 
 

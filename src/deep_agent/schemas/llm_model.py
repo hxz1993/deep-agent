@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from deep_agent.db.ids import normalize_provider_id
 from deep_agent.models.provider_registry import model_unavailable_reason
+from deep_agent.models.reasoning import (EffortOption, ReasoningCatalogReference, available_efforts, model_reasoning_options)
 from deep_agent.time import UtcDatetime
 
 if TYPE_CHECKING:
@@ -88,6 +89,8 @@ class LlmModelCreate(BaseModel):
     )
     enabled: bool = True
     purpose: Literal["chat"] = "chat"
+    reasoning_options: list[EffortOption] | None = Field(default=None, max_length=8)
+    reasoning_catalog: ReasoningCatalogReference | None = None
 
     @field_validator("provider_id")
     @classmethod
@@ -141,6 +144,8 @@ class LlmModelUpdate(BaseModel):
     tags: list[str] | None = None
     enabled: bool | None = None
     purpose: Literal["chat"] | None = None
+    reasoning_options: list[EffortOption] | None = Field(default=None, max_length=8)
+    reasoning_catalog: ReasoningCatalogReference | None = None
 
     @field_validator("provider_id")
     @classmethod
@@ -229,6 +234,10 @@ class LlmModelResponse(BaseModel):
         "provider_disabled",
         "model_wrong_purpose",
     ] | None = None
+    reasoning_options: list[EffortOption] | None = None
+    reasoning_efforts: list[str] = Field(default_factory=list)
+    reasoning_source: Literal['catalog', 'manual'] | None = None
+    reasoning_catalog: ReasoningCatalogReference | None = None
     agent_count: int = Field(default=0, description="Number of agents referencing this preset.")
     created_at: UtcDatetime
     updated_at: UtcDatetime
@@ -242,6 +251,7 @@ class LlmModelResponse(BaseModel):
         agent_count: int = 0,
     ) -> LlmModelResponse:
         unavailable_reason = model_unavailable_reason(row, provider)
+        options = model_reasoning_options(row, provider)
         return cls(
             id=row.id,
             name=row.name,
@@ -260,6 +270,10 @@ class LlmModelResponse(BaseModel):
             selectable=unavailable_reason is None,
             unavailable_reason=unavailable_reason,
             agent_count=agent_count,
+            reasoning_options=options,
+            reasoning_efforts=available_efforts(row, provider),
+            reasoning_source=(row.reasoning_options.get('source') if options is not None else None),
+            reasoning_catalog=(row.reasoning_options.get('catalog') if options is not None else None),
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -299,6 +313,7 @@ class LlmModelClientResponse(LlmModelSummary):
     provider: LlmProviderSummary
     api_key_set: bool
     selectable: bool
+    reasoning_efforts: list[str] = Field(default_factory=list)
     unavailable_reason: str | None = None
 
     @classmethod

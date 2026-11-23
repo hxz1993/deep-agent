@@ -3,10 +3,12 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote
 
+from httpx import AsyncClient
 from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.toolsets import FunctionToolset
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.tool_names import ScopedToolset
 from deep_agent.capabilities.mcp.builtin_config import normalize_mcp_config
 from deep_agent.capabilities.mcp.request_context import inject_request_meta
 from deep_agent.capabilities.mcp.run_scoped import RunScopedMcpToolset
@@ -35,22 +37,25 @@ def build_mcp_toolset(
     config: dict[str, Any],
     *,
     inspection: dict[str, Any] | None = None,
+    description: str | None = None,
 ) -> Any:
     """Build a registry-ready MCP toolset with request header forwarding."""
     transport, config = normalize_mcp_config(name, transport, config)
     if transport == "builtin":
-        return RunScopedMcpToolset(server_name=name, config=config).prefixed(name)
+        return ScopedToolset(RunScopedMcpToolset(server_name=name, config=config), "mcp", name)
     if transport == "url":
         parsed = McpInspection.from_value(inspection, transport=transport)
         if parsed.tools.snapshot_status != "ready" or parsed.tools.snapshot is None:
             return FunctionToolset(id=f"mcp-unavailable-{quote(name, safe='')}")
-        return SnapshotMcpToolset(
+        toolset = SnapshotMcpToolset(
             server_name=name,
             config=config,
             snapshot=parsed.tools.snapshot,
             init_timeout=resolve_mcp_init_timeout(config),
             max_retries=resolve_mcp_max_retries(),
-        ).prefixed(name)
+            description=description,
+        )
+        return ScopedToolset(toolset, "mcp", name)
     raise ValueError(f"Unsupported MCP transport: {transport!r}")
 
 
@@ -60,18 +65,20 @@ def build_resource_client(
     config: dict[str, Any],
     *,
     request_headers: dict[str, str] | None = None,
+    http_client: AsyncClient | None = None,
 ) -> Any:
     """Unprefixed MCP client for host-side Resource detection and proxy calls."""
     transport, config = normalize_mcp_config(name, transport, config)
     if transport != "url":
         raise ValueError(f"Resource access requires url transport, got {transport!r}")
     url = config["url"]
-    headers = resolve_mcp_headers(transport, config, request_headers)
+    headers = resolve_mcp_headers(transport, config, request_headers) if http_client is None else None
     init_timeout = resolve_mcp_init_timeout(config)
     return MCPToolset(
         url,
         id=f"resources-{quote(name, safe='')}",
         headers=headers,
+        http_client=http_client,
         init_timeout=init_timeout,
         max_retries=resolve_mcp_max_retries(),
     )

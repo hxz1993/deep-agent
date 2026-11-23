@@ -13,6 +13,7 @@ from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai_codex import CredentialsRefreshError, CredentialsPersistenceError
 from deep_agent.services.codex_provider import CodexUnavailable
 
+from deep_agent.models.provider_errors import PROVIDER_QUOTA_CODE, PROVIDER_QUOTA_MESSAGE, is_provider_quota_error
 from deep_agent.models.provider_registry import ProviderRuntimeConfig, resolve_provider_model
 from deep_agent.schemas.llm_model import LlmModelTestResponse
 
@@ -23,6 +24,8 @@ def safe_failure(exc: Exception) -> tuple[str, str]:
     """Never expose exception text, HTTP bodies, credentials, or generated output."""
     status = getattr(exc, "status_code", None)
     name = type(exc).__name__.lower()
+    if is_provider_quota_error(exc):
+        return PROVIDER_QUOTA_CODE, PROVIDER_QUOTA_MESSAGE
     if isinstance(exc, TimeoutError) or "timeout" in name:
         return "timeout", "请求超时，请检查网络或稍后重试"
     if isinstance(exc, CredentialsRefreshError):

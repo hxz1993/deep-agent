@@ -1,12 +1,13 @@
 import { sessionLoadingHtml, prepareSessionRender, setSessionLoading } from "./session-loading.js?v=20260918-release01012";
-import { savedRunPresentation, sessionStatusLabels as statusLabels, renderContextReferenceContent as contextReferenceContent } from "./session-presentation.js?v=20261103-trajectory-files";
-import { createConversationPresenter } from "./conversation-presenter.js?v=20261103-view-image3";
+import { savedRunPresentation, sessionStatusLabels as statusLabels, renderContextReferenceContent as contextReferenceContent } from "./session-presentation.js?v=20261106-ptc-source";
+import { createConversationPresenter } from "./conversation-presenter.js?v=diagnostic-run-observer";
 import { projectConversationItems, sortConversationItems } from "./conversation-items.js?v=20261103-view-image1";
-import { applyAssistantPresentationActions } from "./assistant-presentation.js?v=20261103-view-image1";
-import { createTrajectoryController } from "./trajectory.js?v=20261103-trajectory-files";
+import { applyAssistantPresentationActions, assistantActionsFromSse } from "./assistant-presentation.js?v=20261103-view-image1";
+import { createTrajectoryController } from "./trajectory.js?v=20261106-ptc-source";
 import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
-import { renderSessionInspector } from "./session-inspector.js?v=20261013-providers";
-import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260929-release0124";
+import { eventEffort, historyEffort } from "./reasoning-ui.js?v=0160";
+import { renderSessionInspector } from "./session-inspector.js?v=session-source-rows";
+import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=session-source-rows";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp } from "./time.js?v=20260912-21";
 import { bindAttachmentImagePreviews, attachmentDownloadUrl } from "./attachment-preview.js?v=20261103-view-image1";
@@ -17,9 +18,10 @@ const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace
 const icon = (name) => `<i data-lucide="${name}" aria-hidden="true"></i>`;
 
 /** Locate a saved Conversation item, never guess from visible text or truncated IDs. */
-export function findConversationFocus(items = [], events = [], { eventId, runId } = {}) {
+export function findConversationFocus(items = [], events = [], { eventId, runId, turnId } = {}) {
   const ordered = sortConversationItems(items);
   if (eventId) return ordered.find((item) => item.item_id === eventId || item.source_event_ids?.includes(eventId)) || null;
+  if (turnId) return ordered.find((item) => item.kind === "user_message" && item.turn_id === turnId) || null;
   if (!runId) return null;
   const ids = new Set(events.filter((event) => event.run_id === runId).map((event) => event.event_id));
   return ordered.find((item) => item.source_event_ids?.some((id) => ids.has(id))) || null;
@@ -56,6 +58,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
   const state = { sessionId: null, conversationId: null };
   let data = { session: {}, history: { items: [] }, events: [], users: {} };
   let presenters = [];
+  let liveAssistant = null;
   let renderedRows = [];
   let selectedReference = null;
   let inspectorTab = "session";
@@ -82,14 +85,18 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     if (disposed || currentView === "trajectory") return;
     const session = data.session;
     const { run, usage, model, runModel } = savedRunPresentation(session, data.events, selectedRunId);
+    const items = data.history.items || [];
+    const assistant = items.findLast(item => item.kind === "assistant_message");
+    const currentAssistant = items.findLast(item => item.kind === "assistant_message" && item.run_id === run.run_id);
+    run.reasoning_effort = historyEffort(items, currentAssistant?.turn_id) || eventEffort(data.events, run.run_id);
     const contextStatus = { ...(session.context_status || {}) };
     if (session.context_error) contextStatus.unavailable_reason = typeof session.context_error === "string" ? session.context_error : session.context_error.message || "当前配置无法估算";
     const status = session.latest_status?.status || session.latest_status || "unknown";
     const userId = session.user_id;
     role("inspectorContent").innerHTML = renderSessionInspector({
       state: { sessionId: session.session_id, agentId: session.agent_id, conversationId: session.conversation_id, modelMessageCount: data.history.items?.filter((item) => ["user_message", "assistant_message"].includes(item.kind)).length },
-      activeSession: { appId: session.app_id, spaceId: session.space_id, turnCount: session.turn_count, messageCount: session.message_count, attachmentCount: session.attachment_count },
-      model, runModel,
+      activeSession: { source_type: session.source_type, appId: session.app_id, spaceId: session.space_id, turnCount: session.turn_count, messageCount: session.message_count, attachmentCount: session.attachment_count },
+      model, runModel, sessionReasoningEffort: historyEffort(items, assistant?.turn_id),
       modelProvider: session.provider_name ? { name: session.provider_name } : null,
       run, usage, contextStatus, agentName: session.agent_name || session.agent_id || "未记录",
       sessionCache: session.cache_usage || {}, runCache: run.cache_usage || {},
@@ -126,7 +133,34 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     button.title = visible ? "隐藏详情" : "显示详情";
   }
 
+  function clearLiveAssistant() {
+    liveAssistant?.dispose();
+    liveAssistant?.row.remove();
+    liveAssistant = null;
+  }
+
+  function ingestLiveFrame(frame) {
+    if (disposed) return;
+    trajectory.ingest(frame);
+    const actions = assistantActionsFromSse(frame.event, frame.data);
+    if (!actions.length) return;
+    const atEnd = messages.scrollHeight - messages.clientHeight - messages.scrollTop < 48;
+    if (!liveAssistant) {
+      messages.querySelector(".empty-state")?.remove();
+      liveAssistant = conversation.createAssistantMessage(null, null, null, {
+        live: true,
+        startedAt: data.session.active_run?.started_at,
+        allowDeferred: false,
+        autoAttachDeferred: false,
+      });
+      liveAssistant.row.dataset.diagnosticLiveRun = frame.run_id;
+    }
+    applyAssistantPresentationActions(liveAssistant, actions);
+    if (atEnd && currentView === "conversation") messages.scrollTop = messages.scrollHeight;
+  }
+
   function renderConversation() {
+    clearLiveAssistant();
     presenters.forEach((presenter) => presenter.dispose()); presenters = []; renderedRows = [];
     messages.replaceChildren();
     let day = "";
@@ -142,8 +176,12 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
       if (node.type === "user") {
         row = conversation.addMessage("user", node.text, node.createdAt, node.order?.sequence, node.attachments, node.contextRefs);
       } else {
-        // Message event timestamps are not an exact execution duration.
-        const presenter = conversation.createAssistantMessage(node.createdAt, node.order?.sequence, null, { allowDeferred: false, autoAttachDeferred: false });
+        const presenter = conversation.createAssistantMessage(node.createdAt, node.order?.sequence, null, {
+          startedAt: node.startedAt,
+          completedAt: node.completedAt,
+          allowDeferred: false,
+          autoAttachDeferred: false,
+        });
         applyAssistantPresentationActions(presenter, node.actions); presenters.push(presenter); row = presenter.row;
       }
       row.dataset.conversationItemId = node.itemId;
@@ -168,11 +206,11 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
 
   function focus(target = {}) {
     if (disposed) return false;
-    const view = target.view || (target.eventId || target.runId ? "conversation" : currentView);
+    const view = target.view || (target.eventId || target.runId || target.turnId ? "conversation" : currentView);
     currentView = view === "trajectory" ? "trajectory" : "conversation";
     trajectory.selectView(currentView, { notify: false });
     renderedRows.forEach(({ row }) => markMessage(row, false));
-    if (!target.eventId && !target.runId) return true;
+    if (!target.eventId && !target.runId && (currentView !== "conversation" || !target.turnId)) return true;
     if (currentView === "trajectory") {
       const found = trajectory.focus(target);
       if (!found) showNotice(target.eventId ? "未找到对应事件；当前展示此会话已保存的轨迹。" : "未找到该轮对应记录；当前展示此会话已保存的轨迹。");
@@ -225,6 +263,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     }
     setInspectorVisible(value.inspectorVisible !== false);
     if (value.inspectorWidth) find(".diagnostic-detail-grid").style.setProperty("--diagnostic-inspector-width", value.inspectorWidth);
+    renderInspector();
     messages.scrollTop = Number(value.messagesScrollTop) || 0;
     role("inspectorContent").scrollTop = Number(value.inspectorScrollTop) || 0;
   }
@@ -239,22 +278,26 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     loadingSnapshot = next.history == null ? previous : null;
     data = { session: next.session || {}, history: next.history || { items: [] }, events: nextEvents, users: next.users || next.session?.users || {} };
     state.sessionId = data.session.session_id; state.conversationId = data.session.conversation_id;
+    state.exportRunStatus = data.session.latest_status?.status || data.session.latest_status || "unknown";
     if (!sameSession) { inspectorTab = "session"; selectedRunId = null; selectedReference = null; lastFocusKey = null; }
     role("chatTitle").textContent = data.session.title || data.session.name || "未命名会话";
     role("sessionBadge").textContent = formatSessionIdSubtitle(state.sessionId);
-    find("[data-detail-refresh]").title = ["running", "pending", "waiting", "awaiting_input"].includes(data.session.latest_status) ? "仅展示已保存内容，点击刷新更新" : "刷新会话";
+    find("[data-detail-refresh]").title = "刷新会话";
     showNotice();
     // Context/profile refreshes reuse the same history: keep existing message DOM
     // and disclosure state instead of parsing every long reply again.
     if (historyChanged) renderConversation();
-    if (eventsChanged) trajectory.setHistory({ session_id: state.sessionId, items: data.events }, { preserveView: Boolean(previous) });
+    if (eventsChanged) trajectory.setHistory({ session_id: state.sessionId, items: [...data.events] }, {
+      preserveView: Boolean(previous), preserveLive: next.preserveLive === true && sameSession,
+    });
+    if (historyChanged) trajectory.setConversationHistory(data.history.items || []);
     trajectory.setExportReady(next.eventsComplete === true && !next.eventsError);
     if (previous) restore(previous); else { currentView = "conversation"; trajectory.selectView("conversation", { notify: false }); renderInspector(); }
     if (next.history == null && !next.historyError) messages.innerHTML = `<div class="diagnostic-detail-error" role="status"><p>正在读取已保存对话…</p></div>`;
     if (next.focus) {
       const target = next.focus;
-      const key = JSON.stringify([target.view || "conversation", target.eventId || "", target.runId || ""]);
-      const needsEvents = target.view === "trajectory" || (target.runId && !target.eventId);
+      const key = JSON.stringify([target.view || "conversation", target.eventId || "", target.runId || "", target.turnId || ""]);
+      const needsEvents = target.view === "trajectory" || (target.runId && !target.eventId && !target.turnId);
       const ready = next.history != null && (!needsEvents || next.eventsComplete !== false);
       // Context estimates and refreshes must not move an already inspected view.
       if (key !== lastFocusKey) {
@@ -315,10 +358,10 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     else if (button.hasAttribute("data-detail-refresh")) onRefresh();
     else if (button.hasAttribute("data-detail-inspector")) setInspectorVisible(button.getAttribute("aria-pressed") !== "true");
     else if (button.dataset.inspectorTab) { inspectorTab = button.dataset.inspectorTab; renderInspector(); }
-    else if (button.hasAttribute("data-detail-copy-session") || button.dataset.inspectorCopy || (button.dataset.copyFileId && currentView !== "trajectory")) {
+    else if (button.hasAttribute("data-detail-copy-session") || button.dataset.inspectorCopy) {
       event.stopPropagation();
       try {
-        await copyTextToClipboard(button.dataset.inspectorCopy || button.dataset.copyFileId || state.sessionId);
+        await copyTextToClipboard(button.dataset.inspectorCopy || state.sessionId);
         if (disposed) return;
         toast("已复制");
         if (button.hasAttribute("data-detail-copy-session")) {
@@ -373,6 +416,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
   function destroy() {
     if (disposed) return; disposed = true;
     clearTimeout(copyFeedbackTimer);
+    clearLiveAssistant();
     presenters.forEach((presenter) => presenter.dispose()); presenters = []; renderedRows = [];
     trajectory.destroy(); disposeImagePreviews(); disposeViewImagePreviews(); listeners.splice(0).forEach((remove) => remove());
     if (imageDialog.open) imageDialog.close();
@@ -382,5 +426,5 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     root.replaceChildren(); root.classList.remove("diagnostic-session-detail");
   }
   renderInspector(); refreshIcons();
-  return { load, focus, snapshot, restore, setLoading, prepareRender, setError, destroy };
+  return { load, focus, snapshot, restore, setLoading, prepareRender, setError, ingestLiveFrame, destroy };
 }

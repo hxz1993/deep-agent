@@ -38,6 +38,14 @@ v0.14.11 将维护页收敛为紧凑表格＋第二页详情，具体使用见[S
 - 旧布局不兼容；原会话／结果／文件不改写，使用根 `assets/...` 或旧 `main.py` 定位的脚本需要适配。执行目录、限额与示例见[Skill 指南](../../guides/skills.md)。
 - 实现与发布验收见[发布审计](../../reports/2026-10-30-release-0.15.0-audit.md)；不代表已部署线上或真实客户 OCR 完成验收。
 
+## 0.15.6 按需运行上下文
+
+普通 Python／Skill 通过 `include_context=True` 按次取得非凭据
+`DEEP_AGENT_CONTEXT`，默认关闭，原生与 PTC 共用 Run 缓存；不是以下独立密钥配置草案。
+接口、字段与失败兜底见[Skill 指南](../../guides/skills.md#按需读取当前用户与应用范围)。
+后续 MCP／Skill 共用的客户身份映射、换票及可更新适配器方向见
+[42 企业集成与鉴权适配器](../42-enterprise-auth-adapters/README.md)；尚未实现，不等同于当前非凭据上下文。
+
 ## 历史环境变量方案与原型（未采用）
 
 - [独立配置与执行注入草案](skill-environment-design.md)：2026-10-30评审存档；本轮明确不采用，不作为当前实现规范。

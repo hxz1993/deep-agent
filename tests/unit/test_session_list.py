@@ -4,51 +4,16 @@ import asyncio
 import unittest
 from datetime import datetime, timezone
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from pydantic_ai.messages import ModelRequest, UserPromptPart
 
-from deep_agent.api.v1 import api_router
-from deep_agent.capabilities import build_registry
-from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
-from deep_agent.core.context import AppContext, get_context, init_context, reset_context
-from deep_agent.schemas.agent import AgentCreate
+from deep_agent.core.context import get_context
 from deep_agent.db.models import ChatSession
 from sqlalchemy import update
-from tests.helpers.sqlite_stores import make_sqlite_stores_sync
+
+from tests.helpers.session_list import SessionListFixture
 
 
-class SessionListApiTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.user_id = "user-a"
-        self.stores, self.engine, self.session_factory = make_sqlite_stores_sync()
-        async def seed_agents() -> tuple[str, str]:
-            model = (await self.stores.llm_model.list_all())[0]
-            agent_a = await self.stores.agent.create_unique(
-                AgentCreate(name="session-list-a", model_id=model.id, prompt="test")
-            )
-            agent_b = await self.stores.agent.create_unique(
-                AgentCreate(name="session-list-b", model_id=model.id, prompt="test")
-            )
-            return agent_a.id, agent_b.id
-
-        self.agent_a, self.agent_b = asyncio.run(seed_agents())
-        self.app = FastAPI()
-        self.app.include_router(api_router)
-        ctx = AppContext.for_testing(
-            registry=build_registry(),
-            stores=self.stores,
-            mcp_lease_manager=McpLeaseManager(),
-            db_engine=self.engine,
-            db_session_factory=self.session_factory,
-        )
-        init_context(ctx)
-        self.client = TestClient(self.app, headers={"user": self.user_id})
-
-    def tearDown(self) -> None:
-        reset_context()
-        asyncio.run(self.engine.dispose())
-
+class SessionListApiTests(SessionListFixture, unittest.TestCase):
     def test_list_sessions_returns_paginated_wrapper(self) -> None:
         store = get_context().store
         import asyncio
@@ -112,6 +77,41 @@ class SessionListApiTests(unittest.TestCase):
         self.assertEqual(payload["total"], 1)
         self.assertEqual(payload["items"][0]["agent_id"], self.agent_a)
         self.assertEqual(payload["items"][0]["user_prompt"], "only a")
+
+    def test_list_reports_only_active_runs_owned_by_the_caller(self) -> None:
+        ctx = get_context()
+
+        async def seed() -> None:
+            for session_id in ("active", "idle"):
+                await ctx.store.append(
+                    session_id, [ModelRequest(parts=[UserPromptPart(content="query")])],
+                    agent_id=self.agent_a, user_id=self.user_id,
+                    run_id=f"seed-{session_id}",
+                )
+
+        asyncio.run(seed())
+        active = ctx.active_runs.register(
+            agent_id=self.agent_a, session_id="active", user_id=self.user_id, run_id="this-run",
+        )
+        ctx.active_runs.register(
+            agent_id=self.agent_a, session_id="idle", user_id="someone-else", run_id="other-run",
+        )
+        url = f"/api/v1/sessions?agent_id={self.agent_a}"
+        default = self.client.get(url)
+        self.assertEqual(default.status_code, 200, default.text)
+        self.assertTrue(all("active_run_id" not in row for row in default.json()["items"]))
+        response = self.client.get(f"{url}&include_active_runs=true")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            {item["session_id"]: item.get("active_run_id") for item in response.json()["items"]},
+            {"active": "this-run", "idle": None},
+        )
+        self.assertTrue(all("active_run_id" not in row for row in response.json()["items"]
+                            if row["session_id"] == "idle"))
+        ctx.active_runs.unregister(active)
+        idle = self.client.get(f"{url}&include_active_runs=true")
+        self.assertEqual(idle.status_code, 200, idle.text)
+        self.assertTrue(all("active_run_id" not in row for row in idle.json()["items"]))
 
     def test_list_sessions_has_messages_filter(self) -> None:
         store = get_context().store

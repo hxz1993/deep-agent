@@ -52,8 +52,8 @@ test("Web Image 预览懒加载、无 Referrer 且始终保留原图回退", () 
   assert.match(html, /a=1&amp;b=2/);
 });
 
-test("实时工具卡和轨迹详情复用同一安全预览", () => {
-  assert.match(chatSource, /renderWebImagePreview\(result/);
+test("Web Image 工具在轨迹详情提供安全预览", () => {
+  assert.doesNotMatch(chatSource, /renderWebImagePreview\(/);
   assert.match(trajectorySource, /renderWebImagePreview\(result/);
   assert.match(workspaceCss, /\.web-image-preview\.load-failed img\s*\{\s*display:\s*none/);
   assert.match(workspaceCss, /\.web-image-preview-fallback/);

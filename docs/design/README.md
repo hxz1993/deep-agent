@@ -25,14 +25,14 @@
 | `18` | [`会话事件与轨迹`](18-session-trajectory/README.md) | 2026-08 | v0.6.0统一Event Store、Event API、持久化SSE、Plan与Console轨迹 |
 | `19` | [`Provider与模型分层`](19-model-provider-architecture/README.md) | 2026-08 | v0.5.6已完成两层归一化、007迁移与统一运行门禁 |
 | `20` | [`PTC程序编排`](20-code-mode/README.md) | 2026-08 | v0.14.7已接入现有Python／Skill／Web／下载中心双入口，内部完整数据交接与普通大结果保护分开；固定256 MiB／32 MiB／120秒／100次，不加配置项或会话工作区 |
-| `21` | [`Web 工具`](21-web-tools/README.md) | 2026-09 | 2026-09-19独立搜索服务、空态兼容及非终止失败结果纳入 v0.10.14；DeepSeek/Kimi管理草稿实测通过 |
+| `21` | [`Web 工具`](21-web-tools/README.md) | 2026-09 | 独立搜索已落地。2026-11-19 归档原生搜索、生图研究和展示原型，产品接入暂缓 |
 | `22` | [`渠道网关与企微 Channel`](22-wecom-channel/README.md) | 2026-09 | v0.7.0公共Gateway/官方SDK Adapter、三表、五个渠道命令与来源标题；002不变 |
 | `23` | [`诊断中心与日志`](23-diagnostics-and-logs/README.md) | 2026-09 | 日志、管理员会话查询与统计已发布；保留设计与实施说明，原型已清理 |
 | `24` | [`业务助手初始化与升级`](24-assistant-installation/README.md) | 2026-09 | 已由正式 Agent 安装包方案替代；旧稿已清理，保留指南入口 |
 | `26` | [`定时任务`](26-scheduled-tasks/README.md) | 2026-09-14 | 上游调研与初步设计；独立配置、Cron、会话归属及停机补跑，尚未开发 |
 | `27` | [`个人用量统计`](27-personal-usage/README.md) | 2026-09-23 | C04-USAGE 已在本地实现，版本 0.11.0 / 007；复用事件和 SDK Usage，管理员按人／日期／模型／Agent／用途统计，UI 验收中；价格／配额暂缓 |
 | `28` | [`Codex 订阅 Provider`](28-codex-provider/README.md) | 2026-09-24 | C10-CODEX 本机实验版；复用 Provider／模型链路，OAuth 凭据同表 JSON 保存；待真实授权联调 |
-| `29` | [`模型原生思考配置与影响面`](29-reasoning-controls/README.md) | 2026-10-31 | C09-THINKING 已恢复研究；原生档位、能力来源、默认层级与接入影响已整理，方案评审中，尚未实施 |
+| `29` | [`模型原生思考配置与影响面`](29-reasoning-controls/README.md) | 2026-11-08 | 已在 0.16.0 实现并验证 Agent 默认、请求覆盖、模型原生档位及手工声明、014 两列、事件历史与旧包兼容 |
 | `30` | [`UI 工具同 Run 等待与执行连续性`](30-ui-tool-inline-wait/README.md) | 2026-09-26 | 已验证官方 handler 保留 PTC 内存；保留 UI 定义与安装格式，运行／SSE／客户端待适配，发布兼容策略待决，尚未实施 |
 
 | `31` | [`敏感凭据数据库加密存储`](31-credential-encryption/README.md) | 2026-09-26 | 高优先级待实施；统一凭据边界、密钥部署、迁移与恢复，无业务客户端升级要求 |
@@ -42,7 +42,11 @@
 | `38` | [`Pydantic AI / Harness升级与能力采用`](38-pydantic-ai-harness-upgrade/README.md) | 2026-10-16 | Core 2.46→2.57、Harness 0.32→0.57研究；A～E分档及逐项TODO已记录，升级与新能力尚未实施 |
 | `39` | [`Agent 与 Skill 评测`](39-agent-evaluation/README.md) | 2026-11-02 | 三种图片原型已归档：列表工作台、案例与结果双栏、版本对比矩阵；布局待确认，尚未实施 |
 | `40` | [图像查看与PDF原页核验](40-image-viewing/README.md) | 2026-11-03 | 纳入 v0.15.2；v0.15.1 基线不含此功能 |
-| `41` | [工单助手委派本地仓库排查](41-ticket-repo-investigation/README.md) | 2026-11-03 | 已整理 Codex／DeepSeek Harness 接入、原会话续跑和人工介入方案，尚未实施 |
+| `41` | [工单助手委派本地仓库排查](41-ticket-repo-investigation/README.md) | 2026-11-04 | 补充 Autoloop／Symphony／SuperAgent 部署与复用比较、最小适配及原会话恢复缺口；内部原型优先少改造，尚未实施 |
+| `42` | [企业集成与鉴权适配器](42-enterprise-auth-adapters/README.md) | 2026-11-12 | MCP 绑定应用已实现，固定目标 App 和 Space 并继承本轮用户。统一账号映射与换票待评审 |
+| `43` | [中间产物管理与报告流水线](43-budget-report-pipeline/README.md) | 2026-11-06 | 11-09 补充财务场景和工作台映射。已有 Dot 交接、可选模块与财务交付规范，具体实施及 DDL 尚未批准 |
+| `44` | [智能输出与 Agent 对外调用](44-agent-invocation/README.md) | 2026-11-09 | Python 传提示词生成、调用已配置 Agent、内网 MCP 发布的设计建议，待评审 |
+| `46` | [Agent 运行护栏](46-agent-guardrails/README.md) | 2026-11-20 | 已记录框架对比和产品配置边界，消息渠道使用文字澄清 |
 
 ## 文档命名
 
@@ -50,7 +54,7 @@
 - `*-research.md`：上游项目、框架能力和实验依据。
 - `*-design.md`：当前认可的架构、数据和运行链路。
 - `*-history.md`：已废弃方案及废弃原因，不再作为实施依据。
-- `TODO.md`：唯一跨课题研发台账，按“待实现、有潜力、暂缓、已关闭、已实现”维护；课题文档不再维护独立待办副本。
+- `TODO.md`：唯一跨课题研发台账，维护待实现、待验收、有潜力及暂缓事项；课题文档不再维护独立待办副本。
 
 ## 阅读规则
 

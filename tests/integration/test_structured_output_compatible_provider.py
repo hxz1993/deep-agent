@@ -42,7 +42,7 @@ class StructuredOutputCompatibleProviderTests(unittest.IsolatedAsyncioTestCase):
                     chunks = [
                         {"choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": [
                             {"index": 0, "id": "private-call", "type": "function", "function": {
-                                "name": "private_result", "arguments": '{"ok":true,"zero":0}'}}]}, "finish_reason": None}]},
+                                "name": "output__private_result", "arguments": '{"ok":true,"zero":0}'}}]}, "finish_reason": None}]},
                         {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
                         {"choices": [], "usage": {"prompt_tokens": 13, "completion_tokens": 9, "total_tokens": 22}},
                     ]
@@ -54,7 +54,7 @@ class StructuredOutputCompatibleProviderTests(unittest.IsolatedAsyncioTestCase):
                     body = json.dumps({"id": "private", "object": "chat.completion", "created": 1700000000,
                         "model": "private-compatible", "choices": [{"index": 0, "message": {"role": "assistant",
                         "content": None, "tool_calls": [{"id": "private-call", "type": "function", "function": {
-                            "name": "private_result", "arguments": '{"ok":true,"zero":0}'}}]}, "finish_reason": "tool_calls"}],
+                            "name": "output__private_result", "arguments": '{"ok":true,"zero":0}'}}]}, "finish_reason": "tool_calls"}],
                         "usage": {"prompt_tokens": 13, "completion_tokens": 9, "total_tokens": 22}}).encode()
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
@@ -111,7 +111,7 @@ class StructuredOutputCompatibleProviderTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result["output"], {"ok": True, "zero": 0})
                 request = self.requests[-1]
                 self.assertNotIn("response_format", request)
-                output = next(tool["function"] for tool in request["tools"] if tool["function"]["name"] == "private_result")
+                output = next(tool["function"] for tool in request["tools"] if tool["function"]["name"] == "output__private_result")
                 self.assertIsNot(output.get("strict"), True)
                 self.assertEqual(request["tool_choice"], "required")
                 rows = await self.stores.coordinator.list_all_events(sid)

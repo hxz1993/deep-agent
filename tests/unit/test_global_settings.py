@@ -401,7 +401,6 @@ class GlobalSettingsApiTests(unittest.TestCase):
         headers = {"user": "enterprise-admin"}
         cases = (
             ("deepseek", None),
-            ("kimi", None),
             ("tavily", None),
             ("exa", None),
             ("you", None),
@@ -484,7 +483,7 @@ class GlobalSettingsApiTests(unittest.TestCase):
         self.assertIsNone(asyncio.run(self.stores.global_setting.get("web_search")))
 
     def test_deleted_provider_reference_is_visible_and_repairable(self):
-        value = {"mode": "provider", "provider": "kimi", "model": "kimi-k3",
+        value = {"mode": "provider", "provider": "deepseek", "model": "legacy-model",
                  "credential_source": "llm_provider", "llm_provider_id": "missing"}
         asyncio.run(self.stores.global_setting.upsert("web_search", value=value, version=1))
         headers = {"user": "enterprise-admin"}
@@ -492,27 +491,27 @@ class GlobalSettingsApiTests(unittest.TestCase):
         actual = response.json()["value"]
         self.assertEqual(response.status_code, 200)
         self.assertEqual(actual["llm_provider_id"], "missing")
-        self.assertEqual(actual["provider"], "kimi")
+        self.assertEqual(actual["provider"], "deepseek")
         self.assertIsNone(actual["model"])
         self.assertIn("no longer exists", actual["configuration_error"])
         self.assertEqual(asyncio.run(self.stores.global_setting.get("web_search")).value, value)
         response = self.client.put("/api/v1/global-settings/web-search", headers=headers,
-                                  json={"value": {"mode": "provider", "provider": "kimi",
+                                  json={"value": {"mode": "provider", "provider": "deepseek",
                                                   "credential_source": "api_key", "api_key": "new-key"}})
         self.assertEqual(response.status_code, 200, response.text)
         stored = asyncio.run(self.stores.global_setting.get("web_search"))
         self.assertNotIn("model", stored.value)
         self.assertNotIn("llm_provider_id", stored.value)
 
-    def test_legacy_kimi_model_is_removed_only_when_saved(self):
-        value = {"mode": "provider", "provider": "kimi", "model": "kimi-k3", "api_key": "old-key"}
+    def test_legacy_search_model_is_removed_only_when_saved(self):
+        value = {"mode": "provider", "provider": "deepseek", "model": "legacy-model", "api_key": "old-key"}
         asyncio.run(self.stores.global_setting.upsert("web_search", value=value, version=1))
         headers = {"user": "enterprise-admin"}
         response = self.client.get("/api/v1/global-settings/web-search", headers=headers)
         self.assertIsNone(response.json()["value"]["model"])
         self.assertEqual(asyncio.run(self.stores.global_setting.get("web_search")).value, value)
         response = self.client.put("/api/v1/global-settings/web-search", headers=headers,
-                                  json={"value": {"mode": "provider", "provider": "kimi", "model": "kimi-k3"}})
+                                  json={"value": {"mode": "provider", "provider": "deepseek", "model": "legacy-model"}})
         self.assertEqual(response.status_code, 200, response.text)
         stored = asyncio.run(self.stores.global_setting.get("web_search"))
         self.assertNotIn("model", stored.value)

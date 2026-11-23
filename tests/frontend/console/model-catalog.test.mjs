@@ -1,3 +1,4 @@
+import { effortValues } from '../../../console/reasoning-ui.js';
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -88,7 +89,7 @@ test("模型目录使用供应商卡片和紧凑能力标签", () => {
   assert.match(consoleStyles, /\.catalog-lab-item\s*\{[^}]*border-radius: 9px/);
   assert.match(consoleStyles, /\.catalog-lab-item\s*\{[^}]*align-items: center/);
   assert.match(consoleStyles, /\.catalog-lab-item > span,[\s\S]*\.catalog-lab-item > strong \{[^}]*align-items: center/);
-  assert.match(consoleStyles, /\.catalog-model-table:not\(\.catalog-provider-table\)\s*\{ table-layout: fixed; \}/);
+  assert.match(consoleStyles, /\.catalog-model-table:not\(\.catalog-provider-table\)\s*\{[^}]*min-width: 0;[^}]*table-layout: fixed; \}/);
 });
 
 test("模型目录填满内容区且只滚动内部列表", () => {
@@ -251,21 +252,22 @@ test("目录自定义下拉保留选中值并通过原 change 事件更新筛选
 
 
 test("供应商模型行使用该供应商的编码和能力而非研发方上限", () => {
-  const sandbox = {};
-  const source = catalogSource.slice(0, catalogSource.indexOf("async function parseJsonResponse"))
+  const sandbox = { effortValues };
+  const source = catalogSource.slice(0, catalogSource.indexOf("async function parseJsonResponse")).replace(/^import .+;\n/gm, "")
     + catalogSource.slice(catalogSource.indexOf("function renderModelRows"), catalogSource.indexOf("function renderResults"));
   vm.runInNewContext(source + `
     catalogState.providerId = "second";
     catalogState.items = [{ canonical_model_id: "lab/model", model_label: "Model", context_window_tokens: 9999999,
       providers: [
         { provider_id: "first", provider_model_id: "wrong" },
-        { provider_id: "second", provider_model_id: "correct", context_window_tokens: 32000, max_output_tokens: 8000, input_modalities: ["text"], tags: ["tool_call"] }
+        { provider_id: "second", provider_model_id: "correct", context_window_tokens: 32000, max_output_tokens: 8000, input_modalities: ["text"], tags: ["tool_call"], reasoning_options: [{type:"effort",values:["low","xhigh"]}] }
       ] }];
     globalThis.result = renderModelRows();`, sandbox);
   assert.match(sandbox.result, /correct/);
   assert.match(sandbox.result, /32K/);
   assert.match(sandbox.result, /8K/);
-  assert.equal((sandbox.result.match(/<td(?: |>)/g) || []).length, 5);
+  assert.equal((sandbox.result.match(/<td(?: |>)/g) || []).length, 6);
+  assert.match(sandbox.result, />low<\/code><code[^>]*>xhigh<\/code>/);
   assert.doesNotMatch(sandbox.result, /data-use-model|使用此模型/);
   assert.match(sandbox.result, />工具</);
   assert.doesNotMatch(sandbox.result, /wrong|9999999|接入渠道/);

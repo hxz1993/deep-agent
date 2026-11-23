@@ -19,24 +19,39 @@ Sandbox Worker 仍只使用受控的 `src`，禁止继承宿主的任意 `PYTHON
 
 ## 运行命令
 
+日常及发布都按影响面选测，不强制每次发布跑全量；可先用 `--suite affected --base HEAD --list` 查看范围。
+相关源码和测试未变化时复用已有通过结果，版本号／文档调整只补必要检查；有失败或未解风险再扩测。
+全量保留为手动 `--suite all`；脚本无参数仍默认 all，包含 Python 与 Console，调用时明确选择；
+`--suite quick` 仅为显式纯逻辑清单加 Console 全量，不能替代完整验收。
+`--list` 只显示选测原因，`--durations` 默认 20，可选 JSON 写忽略的 `output/TMP to delete.../`。
+跨版本 Agent 包 HTTP 矩阵用当前解释器启动新服务。旧 Git 快照应通过已有的 `DEEP_AGENT_TEST_LEGACY_PYTHON` 指向符合其依赖的解释器，避免用当前 SDK 启动旧服务。
+显式领域清单在 `helpers/test_groups.json`；新增／移动相关测试需同步清单，未知生产路径、
+共享入口、数据库、依赖、删除或无法确定消费者的 helper 一律全量，不按目录名猜成本。
+
+共用初始化放非 TestCase 的 fixture/mixin，不从其他测试模块直接导入测试类借用 setUp。
+确需继承整组行为时用模块引用基类，保留不同初始化下的场景。重复 ID 在统一入口报错，
+不得运行时静默去重。subTest 保留参数标签，权限、取消和事务边界不为减数量强行合并。
+
 运行中持久化回归入口：`unit/test_message_persistence.py`、`test_message_part_store.py`、
 `integration/test_incremental_message_persistence.py`、`test_message_persistence_process_exit.py`、`test_channel_message_persistence.py`。
 真实 SDK 需在模型静默/并行工具中途设屏障，从独立 HTTP/SQLite 连接读 History，不能先 flush 后宣称实时。
 强杀验证只能使用隔离子进程及临时库；禁止杀稳定 8000 或重放真实业务工具。
-Console 跟随验证包含请求串行、同 Sequence 状态更新、切页迟到数据及运行工具只读。正常/取消不新增 RUN 或异常回执；执行失败仅一条 execution/error，不能进入模型正文；半段文本不定时落库。
+Console 跟随验证包含请求串行、同 Sequence 状态更新、切页迟到数据及运行工具只读。正常/取消不新增 RUN 事件或合成助手正文；首个 Assistant 前取消时需用既有 execution/error(status=interrupted) 留下可判定终态，SSE 仍为 cancelled。执行失败仅一条 execution/error，不能进入模型正文；半段文本不定时落库。
+
+轨迹 ZIP 回归使用隔离文件库与可信事件，验证当前调用者权限、快照摘要、部分失败及清理，不从请求轨迹内容授予附件权限。真实验收另核对用户上传、Python、Skill 和 PTC 产物及清单 SHA256；详见 `integration/test_trajectory_export.py`。
 
 ```bash
 # 全部
-PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v
+PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -t . -p "test_*.py" -v
 
 # 排查失败：首个报错即停
-PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" --failfast -v
+PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -t . -p "test_*.py" --failfast -v
 
-# 仅单元（无网络、无外部子进程）
-PYTHONPATH=src python3.12 -m unittest discover -s tests/unit -p "test_*.py" -v
+# 仅 unit 目录（含部分数据库、HTTP 和子进程边界测试，不等同快速组）
+PYTHONPATH=src .venv/bin/python -m unittest discover -s tests/unit -t . -p "test_*.py" -v
 
 # 仅集成（HTTP、MCP 子进程、header 转发）
-PYTHONPATH=src python3.12 -m unittest discover -s tests/integration -p "test_*.py" -v
+PYTHONPATH=src .venv/bin/python -m unittest discover -s tests/integration -t . -p "test_*.py" -v
 ```
 
 ---
@@ -76,7 +91,7 @@ tests/
 | `test_ptc_stream_failures.py` | 真实 SDK/Monty + 隔离 SQLite：PTC 连续失败后原生恢复、嵌套等待取消、Provider异常及普通工具重试耗尽的 SSE/History/Registry 闭环 |
 | `test_event_persister.py`、`test_runner_history.py` | 写入失败回执与超时释放、显式关闭 SDK 流后部分历史保存、终态写入失败不覆盖原始错误 |
 | `test_sandbox_*.py` | Python公网及内网HTTP可达性、FileStore输入、`deepagent_files`产物发布、回滚、依赖探针与子进程清理 |
-| `test_global_settings.py` | 运行设置安全白名单、Web Search唯一配置、六Provider校验、Key掩码/保留和草稿测试 |
+| `test_global_settings.py` | 运行设置安全白名单、Web Search唯一配置、供应商校验、Key掩码/保留和草稿测试 |
 | `test_web_tools.py`、`test_web_proxy_compat.py` | `builtin:web`目录、视觉模型条件注入、HTML图片位置与URL规范化、固定Provider无降级、SSRF-safe Fetch/Image边界及HTTP代理fake-IP/SNI兼容 |
 | `test_console_admin_auth.py` | 企业管理员放行、普通用户与固定admin拒绝、401/503、凭证缓存、管理路由审计和运行接口开放边界 |
 | `test_builtin_mcp_config.py` | builtin MCP 配置规范化 |

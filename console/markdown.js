@@ -7,6 +7,14 @@
   let renderSequence = 0;
   let markdownOptions;
   let mathExtension;
+  let highlightCode = true;
+  // Fixed categories keep failure logging bounded during repeated stream renders.
+  const warned = new Set();
+  function warnOnce(kind, ...details) {
+    if (warned.has(kind)) return;
+    warned.add(kind);
+    console.warn(...details);
+  }
 
   function codeIcon(name) {
     const definition = global.lucide?.icons?.[name];
@@ -43,7 +51,8 @@
       label: block.querySelector("pre")?.getAttribute?.("aria-label") || "",
       touched: Boolean(block.dataset.codeDisclosureTouched), wrapped: block.classList.contains("is-wrapped"),
       wrapTouched: Boolean(block.dataset.codeWrapTouched),
-    })).filter(item => item.touched || item.wrapTouched);
+      g2View: block.closest?.("deepagent-g2-chart")?.dataset.g2View,
+    })).filter(item => item.touched || item.wrapTouched || item.g2View === "config");
   }
 
   function restoreCodeState(root, saved = []) {
@@ -51,6 +60,7 @@
     for (const item of saved) {
       const block = item.toolCallId ? blocks.find(candidate => candidate.closest?.("[data-tool-call-id]")?.dataset.toolCallId === item.toolCallId && (candidate.querySelector("pre")?.getAttribute?.("aria-label") || "") === item.label) : blocks[item.index];
       if (!block || (block.dataset.codeLanguage || "") !== item.language) continue;
+      if (item.g2View === "chart" || item.g2View === "config") block.closest?.("deepagent-g2-chart")?._setView?.(item.g2View, false);
       if (item.touched) { block.dataset.codeDisclosureTouched = "1"; setCodeExpanded(block, item.expanded); }
       if (item.wrapTouched) {
         block.dataset.codeWrapTouched = "1";
@@ -62,9 +72,9 @@
     }
   }
 
-  function replaceBody(root, source) {
+  function replaceBody(root, source, options) {
     const saved = captureCodeState(root);
-    root.innerHTML = renderBody(source);
+    root.innerHTML = renderBody(source, options);
     restoreCodeState(root, saved);
   }
 
@@ -149,7 +159,7 @@
   function init() {
     if (ready) return true;
     if (typeof global.marked === "undefined" || typeof global.DOMPurify === "undefined") {
-      console.warn("[deep-agent] Markdown 库未加载，将回退为纯文本");
+      warnOnce("markdown-dependencies", "[deep-agent] Markdown 库未加载，将回退为纯文本");
       return false;
     }
 
@@ -182,9 +192,12 @@
           if (language === "mermaid") {
             return `<div class="mermaid-diagram" data-mermaid-state="pending">${codeBlock(escapeHtml(text), language, { source: text })}</div>\n`;
           }
+          if (language === "g2") {
+            return `<deepagent-g2-chart data-g2-state="${highlightCode ? "pending" : "streaming"}"><div class="g2-chart-toolbar"><span class="g2-chart-title">G2 图表</span><div class="console-segmented" role="group" aria-label="G2 展示方式"><button type="button" data-g2-view="chart" class="active" aria-pressed="true">图表</button><button type="button" data-g2-view="config" aria-pressed="false">配置</button></div></div><div class="g2-chart-config" hidden>${codeBlock(escapeHtml(text), language, { source: text, label: "G2 图表配置", expanded: true })}</div></deepagent-g2-chart>\n`;
+          }
 
           let highlighted = escapeHtml(text);
-          if (typeof global.hljs !== "undefined") {
+          if (highlightCode && typeof global.hljs !== "undefined") {
             if (language && global.hljs.getLanguage(language)) {
               try {
                 highlighted = global.hljs.highlight(text, { language, ignoreIllegals: true }).value;
@@ -228,6 +241,20 @@
         node.setAttribute("target", "_blank");
         node.setAttribute("rel", "noopener noreferrer");
       }
+      if (node.tagName === "IMG") node.removeAttribute("data-markdown-image");
+      if (node.tagName === "IMG" && node.hasAttribute("src")) {
+        node.setAttribute("loading", "lazy");
+        node.setAttribute("referrerpolicy", "no-referrer");
+        try {
+          const url = new URL(node.getAttribute("src"), global.document.baseURI);
+          if (["https:", "http:"].includes(url.protocol) && !url.username && !url.password && !node.closest("a")) {
+            node.setAttribute("data-markdown-image", "");
+            node.setAttribute("tabindex", "0");
+            node.setAttribute("role", "button");
+            node.setAttribute("aria-label", node.getAttribute("alt") ? `预览图片 ${node.getAttribute("alt")}` : "预览图片");
+          }
+        } catch { /* Unresolvable sources remain ordinary images. */ }
+      }
     });
     ready = true;
     return true;
@@ -257,22 +284,26 @@
     return extension;
   }
 
-  function render(source) {
+  function render(source, { highlight = true } = {}) {
     const text = String(source ?? "");
     if (!init()) return `<pre class="md-fallback">${escapeHtml(text)}</pre>`;
     // Footnotes are scoped per message, including repeated renders during streaming.
     const parser = global.markedFootnote && text.includes("[^")
       ? new global.marked.Marked(markdownOptions, ...(mathExtension ? [mathExtension] : []), scopedFootnotes(`md-fn-${++renderSequence}-`))
       : global.marked;
-    const raw = parser.parse(text);
+    const previousHighlight = highlightCode;
+    highlightCode = highlight;
+    let raw;
+    try { raw = parser.parse(text); } finally { highlightCode = previousHighlight; }
     return global.DOMPurify.sanitize(raw, {
       USE_PROFILES: { html: true, mathMl: true, svg: true },
-      ADD_ATTR: ["target", "rel", "class", "data-lang", "data-mermaid-state"],
+      ADD_TAGS: ["deepagent-g2-chart"],
+      ADD_ATTR: ["target", "rel", "class", "data-lang", "data-mermaid-state", "data-g2-state"],
     });
   }
 
-  function renderBody(source) {
-    return `<div class="markdown-body">${render(source)}</div>`;
+  function renderBody(source, options) {
+    return `<div class="markdown-body">${render(source, options)}</div>`;
   }
 
   function loadMermaid() {
@@ -317,7 +348,7 @@
       message.className = "mermaid-diagram-error";
       message.textContent = "Mermaid 图表语法有误，已保留源代码。";
       node.appendChild(message);
-      console.warn("[deep-agent] Mermaid 渲染失败", error);
+      warnOnce("mermaid-render", "[deep-agent] Mermaid 渲染失败", error);
     }
   }
 
@@ -346,7 +377,7 @@
           node.appendChild(message);
         }
       }
-      console.warn("[deep-agent] Mermaid 资源加载失败", error);
+      warnOnce("mermaid-load", "[deep-agent] Mermaid 资源加载失败", error);
     }
   }
 

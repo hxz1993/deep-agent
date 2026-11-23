@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import unittest
+from unittest.mock import patch
 
 import httpx
 
@@ -94,6 +96,25 @@ class ModelsDevClientTests(unittest.IsolatedAsyncioTestCase):
                     catalog_url="/catalog.json",
                     labs_url="/labs",
                 )
+
+    async def test_slow_optional_labs_is_cancelled_without_losing_the_catalog(self) -> None:
+        labs_cancelled = asyncio.Event()
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/catalog.json":
+                return httpx.Response(200, json={"models": {}, "providers": {}})
+            try:
+                await asyncio.Event().wait()
+            finally:
+                labs_cancelled.set()
+
+        with patch("deep_agent.models.models_dev._OPTIONAL_LABS_TIMEOUT_SECONDS", 0.02):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="https://models.test") as client:
+                bundle = await asyncio.wait_for(
+                    fetch_models_dev_bundle(client=client, catalog_url="/catalog.json", labs_url="/labs"), 2,
+                )
+        self.assertEqual(bundle.labs, [])
+        self.assertTrue(labs_cancelled.is_set())
 
     async def test_catalog_requires_models_and_providers_objects(self) -> None:
         async def handler(request: httpx.Request) -> httpx.Response:

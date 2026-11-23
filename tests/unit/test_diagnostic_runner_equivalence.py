@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from contextlib import ExitStack
+from contextlib import AsyncExitStack, ExitStack
 from pathlib import Path
 import re
 from tempfile import TemporaryDirectory
@@ -157,65 +157,71 @@ class DiagnosticRunnerEquivalenceTests(unittest.IsolatedAsyncioTestCase):
     async def terminal_case(self, streaming, case, broken_sink=False):
         from deep_agent.capabilities.ui.builtin import build_ui_toolset
 
-        stores, engine, _ = await make_sqlite_stores()
-        agent_id = await seed_default_agent(stores)
-        persister = EventPersister(stores.coordinator)
-        await persister.start()
-        rows, calls, steps, out = [], [], [], []
-        entered = asyncio.Event()
-        registry = ActiveRunRegistry()
-        failure = ModelHTTPError(503, "fixture", "do-not-log-this-body")
+        # Cancellation may recycle the SQLite connection. Keep the schema in a
+        # per-call file so reconnecting cannot replace this fixture with an empty DB.
+        async with AsyncExitStack() as cleanup:
+            tmp = cleanup.enter_context(TemporaryDirectory(prefix="TMP_to_delete_diagnostic_terminal_"))
+            stores, engine, _ = await make_sqlite_stores(f"sqlite+aiosqlite:///{Path(tmp) / 'terminal.db'}")
+            cleanup.push_async_callback(engine.dispose)
+            agent_id = await seed_default_agent(stores)
+            persister = EventPersister(stores.coordinator)
+            cleanup.push_async_callback(persister.aclose)
+            await persister.start()
+            rows, calls, steps, out = [], [], [], []
+            entered = asyncio.Event()
+            registry = ActiveRunRegistry()
+            failure = ModelHTTPError(503, "fixture", "do-not-log-this-body")
 
-        async def slow():
-            calls.append("slow")
-            entered.set()
-            await asyncio.Event().wait()
+            async def slow():
+                calls.append("slow")
+                entered.set()
+                await asyncio.Event().wait()
 
-        def respond(messages, info):
-            steps.append("model")
-            if case == "provider":
-                raise failure
-            if case == "cancel":
-                return ModelResponse(parts=[ToolCallPart("slow", {}, "fixture-slow")])
-            if case == "pending":
-                return ModelResponse(parts=[ToolCallPart("builtin__confirm", {"message": "fixture"}, "fixture-ui")])
-            return ModelResponse(parts=[TextPart("done")])
-
-        async def stream(messages, info):
-            response = respond(messages, info)
-            for part in response.parts:
-                if isinstance(part, ToolCallPart):
-                    yield {0: DeltaToolCall(name=part.tool_name, json_args=json.dumps(part.args), tool_call_id=part.tool_call_id)}
-                else:
-                    yield part.content
-
-        agent = Agent(FunctionModel(respond, stream_function=stream), deps_type=AgentDeps,
-                      tools=[slow], toolsets=[build_ui_toolset()] if case == "pending" else [],
-                      capabilities=[RuntimeDiagnostics()])
-        runner = AgentRunner(agent, stores.coordinator, UsageLimits(request_limit=5), active_runs=registry,
-                             ui_tool_hints={"builtin__confirm": {"widget": "confirm"}})
-        deps = AgentDeps(session_id="terminal-fixture", agent_id=agent_id, user="fixture-user")
-
-        def capture(event, **fields):
-            if broken_sink:
-                raise RuntimeError("diagnostic failure")
-            rows.append((event, fields))
-
-        async def execute():
-            try:
-                if streaming:
-                    async for event in runner.run_stream(deps.session_id, "fixture", deps, persister=persister):
-                        out.append(event)
-                else:
-                    out.append(await runner.run(deps.session_id, "fixture", deps))
-            except (Exception, asyncio.CancelledError) as exc:
-                out.append({"raised": type(exc).__name__})
+            def respond(messages, info):
+                steps.append("model")
                 if case == "provider":
-                    self.assertIs(exc, failure)
+                    raise failure
+                if case == "cancel":
+                    return ModelResponse(parts=[ToolCallPart("slow", {}, "fixture-slow")])
+                if case == "pending":
+                    return ModelResponse(parts=[ToolCallPart("builtin__confirm", {"message": "fixture"}, "fixture-ui")])
+                return ModelResponse(parts=[TextPart("done")])
 
-        try:
+            async def stream(messages, info):
+                response = respond(messages, info)
+                for part in response.parts:
+                    if isinstance(part, ToolCallPart):
+                        yield {0: DeltaToolCall(name=part.tool_name, json_args=json.dumps(part.args), tool_call_id=part.tool_call_id)}
+                    else:
+                        yield part.content
+
+            agent = Agent(FunctionModel(respond, stream_function=stream), deps_type=AgentDeps,
+                          tools=[slow], toolsets=[build_ui_toolset()] if case == "pending" else [],
+                          capabilities=[RuntimeDiagnostics()])
+            runner = AgentRunner(agent, stores.coordinator, UsageLimits(request_limit=5), active_runs=registry,
+                                 ui_tool_hints={"builtin__confirm": {"widget": "confirm"}})
+            deps = AgentDeps(session_id="terminal-fixture", agent_id=agent_id, user="fixture-user")
+
+            def capture(data, _level):
+                if broken_sink:
+                    raise RuntimeError("diagnostic failure")
+                rows.append(data.decode().rstrip("\n"))
+
+            async def execute():
+                try:
+                    if streaming:
+                        async for event in runner.run_stream(deps.session_id, "fixture", deps, persister=persister):
+                            out.append(event)
+                    else:
+                        out.append(await runner.run(deps.session_id, "fixture", deps))
+                except (Exception, asyncio.CancelledError) as exc:
+                    out.append({"raised": type(exc).__name__})
+                    if case == "provider":
+                        self.assertIs(exc, failure)
+
             with ExitStack() as stack:
-                stack.enter_context(patch("deep_agent.diagnostics.emit", side_effect=capture))
+                stack.enter_context(patch.object(runtime, "_runtime", None))
+                stack.enter_context(patch.object(runtime, "mirror_operational", side_effect=capture))
                 stack.enter_context(patch.object(AgentRunner, "_generate_model_title", return_value=None))
                 stack.enter_context(patch("deep_agent.agent.runner.logger.exception"))
                 stack.enter_context(patch("deep_agent.agent.runner.logger.warning"))
@@ -241,12 +247,17 @@ class DiagnosticRunnerEquivalenceTests(unittest.IsolatedAsyncioTestCase):
                 history = await stores.coordinator.get_raw_history(deps.session_id, agent_id=agent_id)
             expected = "agent_run_pending" if case == "pending" else "agent_run_cancelled" if case == "cancel" else "agent_run_failed"
             if not broken_sink:
-                terminals = [(name, fields) for name, fields in rows
-                             if name in {"agent_run_completed", "agent_run_pending", "agent_run_cancelled", "agent_run_failed"}]
-                self.assertEqual([name for name, _ in terminals], [expected])
-                self.assertNotIn("agent_tool_event", [name for name, _ in rows])
-                self.assertNotIn("do-not-log-this-body", repr(rows))
-                self.assertEqual(terminals[0][1]["run_id"], deps.run_id)
+                self.assertNotIn("do-not-log-this-body", "\n".join(rows))
+                records = [parse_record(line) for line in rows]
+                self.assertTrue(all(record is not None for record in records))
+                terminals = [record for record in records if record["event"] in {
+                    "agent_run_completed", "agent_run_pending", "agent_run_cancelled", "agent_run_failed",
+                }]
+                self.assertEqual([record["event"] for record in terminals], [expected])
+                self.assertNotIn("agent_tool_event", [record["event"] for record in records])
+                self.assertEqual(terminals[0]["run_id"], deps.run_id)
+                if case == "provider":
+                    self.assertIn("ModelHTTPError@", terminals[0]["error_stack"])
             if case == "cancel":
                 self.assertEqual(calls, ["slow"])
                 if streaming:
@@ -259,9 +270,6 @@ class DiagnosticRunnerEquivalenceTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(sum(event.get("type") == "tool_call" for event in out), 1)
             return stable({"output": out, "calls": calls, "steps": steps,
                            "history": ModelMessagesTypeAdapter.dump_python(history, mode="json")})
-        finally:
-            await persister.aclose()
-            await engine.dispose()
 
     async def test_terminal_diagnostics_are_exactly_once_and_fail_open_for_both_runners(self):
         for streaming in (False, True):

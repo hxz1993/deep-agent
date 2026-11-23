@@ -49,7 +49,7 @@ class EmptyResponseUsageTests(unittest.IsolatedAsyncioTestCase):
         capability = MessagePersistenceCapability(None, history_length=0, skip_user_prompt=True)
         capability._record(ModelResponse(parts=[ToolCallPart("unknown", {"secret": "value"}, "call")],
                                          usage=RequestUsage(input_tokens=10, output_tokens=2)))
-        messages = capability._completed_messages()
+        messages = capability.completed_messages()
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0].parts, [])
         self.assertEqual(messages[0].usage.input_tokens, 10)

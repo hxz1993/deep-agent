@@ -1,10 +1,10 @@
-import { mountStructuredOutput, serializeStructuredOutput } from "./structured-output.js?v=20261022-output-inspector3";
+import { createRenderBatch, renderIconsWithin } from "./render-scheduler.js?v=20261105-v01510";
+import { mountStructuredOutput, serializeStructuredOutput } from "./structured-output.js?v=20261121-publication";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260912-21";
 import { attachmentDownloadUrl, isImageAttachment } from "./attachment-preview.js?v=20261103-view-image1";
-import { renderWebImagePreview } from "./web-image.js?v=20260912-21";
-import { findViewImageResult, renderViewImageResult } from "./view-image.js?v=20261103-view-image3";
-import { isPlanningToolEvent, processDisclosureLabel, toolResultPresentation } from "./assistant-presentation.js?v=20261103-view-image1";
+import { renderReplyFileCards } from "./reply-files.js";
+import { isPlanningToolEvent, isRemoteAgentToolEvent, processDisclosureLabel, toolResultPresentation } from "./assistant-presentation.js?v=remote-agents-1";
 
 // No controller imports or initialization: each host owns its DOM and capabilities.
 export function createConversationPresenter({
@@ -12,11 +12,26 @@ export function createConversationPresenter({
   scrollToBottom = () => {}, showConsoleToast = () => {},
   mergeUiToolCall = (call) => call, isUiToolCall = () => false,
   maybeAttachHitlWidget = () => {}, renderHitlWidget = () => {}, resumeDeferred = () => {},
-  onContextReference = () => {}, isContextReferenceSelected = () => false,
+  onContextReference = () => {}, isContextReferenceSelected = () => false, onRemoteTaskReply = null,
 } = {}) {
   if (!messages) throw new TypeError("Conversation presentation requires its own message host");
   const lucideIcon = (name, className = "") => `<i data-lucide="${name}" class="${className}" aria-hidden="true"></i>`;
-  const refreshLucideIcons = () => window.requestAnimationFrame(() => window.lucide?.createIcons());
+  const pendingIconRoots = new Set();
+  let iconQueued = false;
+  const refreshLucideIcons = (root = messages) => {
+    pendingIconRoots.add(root);
+    if (iconQueued) return;
+    iconQueued = true;
+    window.requestAnimationFrame(() => {
+      iconQueued = false;
+      for (const node of pendingIconRoots) {
+        if (node.isConnected !== false) renderIconsWithin(node, window.lucide);
+      }
+      pendingIconRoots.clear();
+    });
+  };
+  const toolDetailRenderers = new WeakMap();
+  const toolDetailStates = new WeakMap();
 function createMessageActions({
   getText = null,
   timestamp,
@@ -44,7 +59,7 @@ function createMessageActions({
         copyBtn.title = "已复制";
         copyBtn.setAttribute("aria-label", copiedLabel);
         copyBtn.innerHTML = lucideIcon("check");
-        refreshLucideIcons();
+        refreshLucideIcons(actions);
         showConsoleToast(toastMessage);
         window.setTimeout(() => {
           if (!copyBtn.isConnected) return;
@@ -53,7 +68,7 @@ function createMessageActions({
           copyBtn.setAttribute("aria-label", copyLabel);
           copyBtn.innerHTML = lucideIcon("copy");
           copyBtn.disabled = false;
-          refreshLucideIcons();
+          refreshLucideIcons(actions);
         }, 1500);
       } catch {
         copyBtn.disabled = false;
@@ -103,7 +118,7 @@ function addMessage(role, text, timestamp, branchPoint, attachments, contextRefs
     }));
   }
   messages.appendChild(row);
-  refreshLucideIcons();
+  refreshLucideIcons(row);
   scrollToBottom();
   return row;
 }
@@ -158,7 +173,7 @@ function renderMessageAttachments(container, attachments) {
     wrap.appendChild(chip);
   }
   container.appendChild(wrap);
-  refreshLucideIcons();
+  refreshLucideIcons(wrap);
 }
 
 function processElapsedSecondsBetween(startedAt, completedAt) {
@@ -171,7 +186,8 @@ function processElapsedSecondsBetween(startedAt, completedAt) {
 function createAssistantMessage(timestamp, branchPoint, beforeNode = null, processTiming = {}) {
   const allowDeferred = !readOnly && processTiming.allowDeferred !== false;
   const autoAttachDeferred = allowDeferred && processTiming.autoAttachDeferred !== false;
-  let isLive = !readOnly && !timestamp;
+  const observesLive = processTiming.live === true;
+  let isLive = observesLive || (!readOnly && !timestamp);
   const messageTimestamp = timestamp || (readOnly ? null : new Date().toISOString());
   const suppliedStartMs = serverTimestampMilliseconds(processTiming.startedAt);
   let processStartedAt = suppliedStartMs || Date.now();
@@ -179,7 +195,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
   let processElapsedSeconds = processElapsedSecondsBetween(
     processTiming.startedAt,
     processTiming.completedAt,
-  ) ?? (readOnly ? null : 0);
+  ) ?? (readOnly && !isLive ? null : 0);
   let processTimer = null;
   const row = document.createElement("div");
   row.className = "msg-row assistant assistant-answer";
@@ -205,7 +221,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
 
   if (beforeNode?.parentNode === messages) messages.insertBefore(row, beforeNode);
   else messages.appendChild(row);
-  refreshLucideIcons();
+  refreshLucideIcons(row);
   scrollToBottom();
 
   let textBuffer = "";
@@ -216,10 +232,33 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
   let interruptedStatus = null;
   const toolBlocks = new Map(); // tool_call_id -> element
   const pendingToolPositions = new Map(); // block -> original process position
+  let textDirty = false, thinkingDirty = false, disposed = false;
+  const streamRender = createRenderBatch(() => flushStreamContent(), {
+    schedule: (window.setTimeout || globalThis.setTimeout).bind(window),
+    cancel: (window.clearTimeout || globalThis.clearTimeout).bind(window),
+  });
+  function flushStreamContent() {
+    if (disposed || (!thinkingDirty && !textDirty)) return;
+    if (thinkingDirty) {
+      renderThinkingContent();
+      thinkingDirty = false;
+    }
+    if (textDirty) {
+      replaceMarkdownBody(ensureFinalContent(), textBuffer, { highlight: !isLive || processFinished });
+      textDirty = false;
+    }
+    updateProcessDisclosure();
+    scrollToBottom();
+  }
+  function requestStreamRender() {
+    if (!isLive || processFinished) flushStreamContent();
+    else streamRender.request();
+  }
 
   function syncPendingToolPresentation() {
     for (const block of toolBlocks.values()) {
-      const pending = block.classList.contains("hitl-pending") && !block.dataset.done;
+      const pending = (block.classList.contains("hitl-pending") && !block.dataset.done)
+        || Boolean(block.querySelector("[data-remote-task-reply]"));
       const position = pendingToolPositions.get(block);
       if (pending && !position) {
         const marker = document.createComment("pending tool position");
@@ -244,7 +283,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
   }
 
   function startProcess() {
-    if (readOnly) return;
+    if (readOnly && !observesLive) return;
     isLive = true;
     processFinished = false;
     if (processTimer) window.clearInterval(processTimer);
@@ -313,7 +352,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
         toastMessage: "已复制 Agent 回复",
       });
       wrap.appendChild(finalActions);
-      refreshLucideIcons();
+      refreshLucideIcons(row);
     }
     return finalContent;
   }
@@ -331,6 +370,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
 
   function promoteFinalToProcess() {
     if (!textBuffer) return;
+    streamRender.flush();
     addProcessText(textBuffer, window.DeepAgentMarkdown?.captureCodeState?.(finalContent));
     finalContent?.remove();
     finalActions?.remove();
@@ -366,7 +406,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       });
       thinkingHead.title = "展开思考过程";
       processBody.appendChild(thinkingBlock);
-      refreshLucideIcons();
+      refreshLucideIcons(row);
       updateProcessDisclosure();
     }
     return thinkingBlock;
@@ -378,7 +418,8 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
   }
 
   function finalizeThinkingBlock() {
-    if (!thinkingBlock) return;
+    if (!thinkingBlock && !thinkingDirty) return;
+    streamRender.flush();
     thinkingBlock.querySelector(".thinking-title").textContent = "思考过程";
     thinkingBlock.querySelector(".thinking-status").innerHTML = "";
     thinkingBlock = null;
@@ -387,6 +428,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
   }
 
   function sealFinalContent() {
+    streamRender.flush();
     if (!finalContent || finalContent.dataset.structuredOutputId) return;
     finalContent.classList.remove("streaming");
     replaceMarkdownBody(finalContent, textBuffer);
@@ -394,9 +436,21 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
   }
 
   let acceptedOutputId = null;
+  let replyFiles = null;
   const presenter = {
     row,
+    setOutputFiles(files) {
+      replyFiles?.remove();
+      replyFiles = null;
+      const markup = renderReplyFileCards(files, { base: document.baseURI, attachmentUrl });
+      if (!markup) return;
+      replyFiles = document.createElement("div");
+      replyFiles.innerHTML = markup;
+      wrap.insertBefore(replyFiles, finalActions);
+      refreshLucideIcons(replyFiles);
+    },
     setStructuredOutput(value) {
+      streamRender.flush();
       if (acceptedOutputId === value.id && finalContent?.dataset.structuredOutputId === value.id) return;
       promoteFinalToProcess();
       acceptedOutputId = value.id;
@@ -412,9 +466,9 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
     appendThinking(delta) {
       promoteFinalToProcess();
       thinkingBuffer += delta;
-      renderThinkingContent();
-      updateProcessDisclosure();
-      scrollToBottom();
+      ensureThinkingBlock();
+      thinkingDirty = true;
+      requestStreamRender();
     },
     finalizeThinking() {
       finalizeThinkingBlock();
@@ -428,9 +482,11 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
     addProcessText,
     appendText(delta) {
       textBuffer += delta;
-      replaceMarkdownBody(ensureFinalContent(), textBuffer);
+      textDirty = true;
+      requestStreamRender();
     },
     setFinalText(content) {
+      streamRender.flush();
       const output = typeof content === "string"
         ? content
         : content == null ? "" : pretty(content);
@@ -452,6 +508,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       finishProcess();
     },
     markInterrupted() {
+      streamRender.flush();
       if (interruptedStatus) return;
       for (const block of toolBlocks.values()) {
         if (block.dataset.done) continue;
@@ -471,9 +528,10 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       wrap.appendChild(interruptedStatus);
       row.classList.add("interrupted");
       finishProcess();
-      refreshLucideIcons();
+      refreshLucideIcons(row);
     },
     addToolCall(data) {
+      streamRender.flush();
       finalizeThinkingBlock();
       promoteFinalToProcess();
       const merged = mergeUiToolCall(data);
@@ -484,11 +542,10 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
 
       if (existing) {
         if (hasArgs) {
-          const argsEl = existing.querySelector(".args");
-          if (argsEl) {
-            if (window.DeepAgentJson?.updateBlock) window.DeepAgentJson.updateBlock(argsEl, merged.args);
-            else argsEl.innerHTML = window.DeepAgentJson?.highlight(merged.args) || escapeHtml(pretty(merged.args));
-          }
+          const details = toolDetailStates.get(existing);
+          if (details) { details.args = merged.args; details.argsDirty = true; }
+          if (existing.classList.contains("open") || isUiToolCall(merged)) toolDetailRenderers.get(existing)?.();
+          else existing.querySelector("[data-tool-args]")?.replaceChildren?.();
         }
         if (merged.widget) existing.dataset.widget = merged.widget;
         if (merged.metadata) existing.dataset.metadata = JSON.stringify(merged.metadata);
@@ -502,39 +559,42 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       const isToolSearch =
         merged.source === "tool_search" || ["search_tools", "tool_search"].includes(merged.tool);
       const isSkillLoad = merged.tool === "load_capability";
+      const isRemoteAgent = isRemoteAgentToolEvent(merged);
       const defaultTitle = merged.display_name || merged.tool || "tool";
-      block.className = `tool-block${isToolSearch ? " tool-search-block" : ""}${isSkillLoad ? " skill-load-block" : ""}`;
+      block.className = `tool-block${isToolSearch ? " tool-search-block" : ""}${isSkillLoad ? " skill-load-block" : ""}${isRemoteAgent ? " remote-agent-tool-block" : ""}`;
       block.dataset.toolCallId = key;
       block.dataset.toolName = merged.tool || "";
       block.dataset.defaultTitle = defaultTitle;
       if (merged.widget) block.dataset.widget = merged.widget;
       if (merged.metadata) block.dataset.metadata = JSON.stringify(merged.metadata);
       const renderedArgs = hasArgs ? merged.args : {};
-      const argsHtml = window.DeepAgentJson?.renderBlock(renderedArgs, { className: "args", ariaLabel: "工具参数 JSON" })
-        || `<pre class="args">${escapeHtml(pretty(renderedArgs))}</pre>`;
       block.innerHTML = `
         <button type="button" class="tool-head" aria-expanded="false">
-          <span class="tool-icon">${lucideIcon(isToolSearch ? "search" : isSkillLoad ? "book-open-check" : "wrench")}</span>
+          <span class="tool-icon">${lucideIcon(isToolSearch ? "search" : isSkillLoad ? "book-open-check" : isRemoteAgent ? "bot" : "wrench")}</span>
           <span class="tool-name">${escapeHtml(defaultTitle)}</span>
-          <span class="tool-status">${readOnly ? '<span class="tool-status-pending">尚无已保存结果</span>' : '<span class="spinner" role="status" aria-label="运行中"></span>'}</span>
+          <span class="tool-status">${readOnly && !isLive ? '<span class="tool-status-pending">尚无已保存结果</span>' : '<span class="spinner" role="status" aria-label="运行中"></span>'}</span>
           <span class="chevron">${lucideIcon("chevron-right")}</span>
         </button>
         <div class="tool-body">
-          <div class="label">参数 args</div>
-          ${argsHtml}
+          <div class="label">参数</div>
+          <div data-tool-args=""></div>
         </div>`;
+      toolDetailStates.set(block, { args: renderedArgs, argsDirty: true, resultDirty: false });
+      toolDetailRenderers.set(block, () => hydrateToolDetails(block));
+      if (isUiToolCall(merged)) hydrateToolDetails(block);
       block.querySelector(".tool-head").addEventListener("click", () => {
         block.dataset.disclosureTouched = "1";
         setToolBlockExpanded(block, !block.classList.contains("open"));
       });
       processBody.appendChild(block);
-      refreshLucideIcons();
+      refreshLucideIcons(row);
       toolBlocks.set(key, block);
       if (autoAttachDeferred) maybeAttachHitlWidget(block, merged);
       updateProcessDisclosure();
       scrollToBottom();
     },
     addToolResult(data) {
+      streamRender.flush();
       promoteFinalToProcess();
       const key = data.tool_call_id;
       if (isPlanningToolEvent(data)) return;
@@ -545,27 +605,70 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       if (!block) return;
       block.dataset.done = "1";
       block.classList.remove("hitl-pending");
+      const isRemoteAgent = isRemoteAgentToolEvent({ ...data, tool: data.tool || block.dataset.toolName });
+      if (isRemoteAgent && !block.classList.contains("remote-agent-tool-block")) {
+        block.classList.add("remote-agent-tool-block");
+        block.querySelector(".tool-icon").innerHTML = lucideIcon("bot");
+      }
       const title = block.querySelector(".tool-name");
       if (title && block.dataset.defaultTitle) title.textContent = block.dataset.defaultTitle;
       const resultStatus = toolResultPresentation(data);
       block.querySelector(".tool-status").innerHTML = `<span class="${resultStatus.className}">${resultStatus.label}</span>`;
-      refreshLucideIcons();
+      refreshLucideIcons(row);
       const body = block.querySelector(".tool-body");
       const existingWidget = body.querySelector(".hitl-widget");
       if (existingWidget) existingWidget.remove();
       const previousResult = body.querySelector("[data-tool-result]");
       const codeState = window.DeepAgentMarkdown?.captureCodeState?.(previousResult);
       previousResult?.remove();
+      if (data.outcome === "skipped") {
+        setToolBlockExpanded(block, false);
+        updateProcessDisclosure();
+        return;
+      }
       const res = document.createElement("div");
       res.dataset.toolResult = "1";
-      const imageOptions = { toolName: data.tool || block.dataset.toolName, metadata: data.metadata, attachmentUrl };
-      res.innerHTML = `${renderToolResultArtifacts(data.artifacts)}<div class="label" style="margin-top:8px">结果 result</div>${renderToolResult(data.result, imageOptions)}${renderLocalFileDownload(data.result, data.artifacts, imageOptions)}`;
-      window.DeepAgentMarkdown?.restoreCodeState?.(res, codeState);
+      const remote = data.metadata?.remote_agent;
+      if (!readOnly && onRemoteTaskReply && typeof remote?.id === "string") {
+        for (const previous of messages.querySelectorAll("[data-remote-task-reply]")) {
+          if (previous.dataset.remoteTaskReply === remote.id) previous.dispatchEvent(new window.Event("remote-task-updated"));
+        }
+        if (remote.status === "input_required") {
+          const reply = document.createElement("button");
+          reply.type = "button";
+          reply.className = "btn text compact remote-task-reply";
+          reply.dataset.remoteTaskReply = remote.id;
+          reply.textContent = "回复此任务";
+          reply.addEventListener("click", () => onRemoteTaskReply(remote));
+          reply.addEventListener("remote-task-updated", () => {
+            reply.remove();
+            updateProcessDisclosure();
+          }, { once: true });
+          block.insertBefore(reply, body);
+        }
+      }
+      res.innerHTML = `<div class="label" style="margin-top:8px">结果</div>
+        <div data-tool-result-content=""></div>`;
       body.appendChild(res);
-      refreshLucideIcons();
+      const details = toolDetailStates.get(block);
+      if (details) {
+        details.result = data.result;
+        details.resultDirty = true;
+        details.codeState = codeState;
+      }
+      if (block.classList.contains("open")) hydrateToolDetails(block);
+      refreshLucideIcons(row);
       updateProcessDisclosure();
     },
+    skipPendingTools() {
+      for (const [toolCallId, block] of toolBlocks) {
+        if (block.classList.contains("hitl-pending") && !block.dataset.done) {
+          this.addToolResult({ tool_call_id: toolCallId, outcome: "skipped" });
+        }
+      }
+    },
     removeToolCall(data) {
+      streamRender.flush();
       const key = data.tool_call_id;
       if (!key) return;
       if (isPlanningToolEvent(data)) return;
@@ -578,6 +681,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       updateProcessDisclosure();
     },
     attachHitlWidget(call) {
+      streamRender.flush();
       if (!allowDeferred) {
         const block = toolBlocks.get(call.tool_call_id);
         if (block && !block.dataset.done) {
@@ -599,11 +703,43 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       updateProcessDisclosure();
     },
     dispose() {
+      disposed = true;
+      streamRender.dispose();
+      for (const root of pendingIconRoots) {
+        if (root === row || row.contains?.(root)) pendingIconRoots.delete(root);
+      }
       if (processTimer) window.clearInterval(processTimer);
       processTimer = null;
     },
   };
   return presenter;
+}
+
+function hydrateToolDetails(block) {
+  const state = toolDetailStates.get(block);
+  if (!state) return;
+  if (state.argsDirty) {
+    const host = block.querySelector("[data-tool-args]");
+    if (host) {
+      const codeState = window.DeepAgentMarkdown?.captureCodeState?.(host);
+      const argsEl = host.querySelector(".args");
+      if (argsEl && window.DeepAgentJson?.updateBlock) window.DeepAgentJson.updateBlock(argsEl, state.args);
+      else host.innerHTML = window.DeepAgentJson?.renderBlock(state.args, { className: "args", ariaLabel: "工具参数 JSON" })
+        || `<pre class="args">${escapeHtml(pretty(state.args))}</pre>`;
+      window.DeepAgentMarkdown?.restoreCodeState?.(host, codeState);
+    }
+    state.argsDirty = false;
+  }
+  if (state.resultDirty) {
+    const host = block.querySelector("[data-tool-result-content]");
+    if (host) {
+      host.innerHTML = renderToolResult(state.result);
+      window.DeepAgentMarkdown?.restoreCodeState?.(host, state.codeState);
+      state.codeState = null;
+    }
+    state.resultDirty = false;
+  }
+  refreshLucideIcons(block);
 }
 
 function pretty(v) {
@@ -612,87 +748,12 @@ function pretty(v) {
   try { return JSON.stringify(v, null, 2); } catch (_) { return String(v); }
 }
 
-function renderToolResult(result, imageOptions = {}) {
-  const imageResults = renderViewImageResult(result, { attachmentUrl, ...imageOptions });
-  if (imageResults) return imageResults;
-  const imagePreview = renderWebImagePreview(result, { className: "tool-web-image-preview" });
-  if (imagePreview) return imagePreview;
+function renderToolResult(result) {
   if (typeof result === "string") {
     return `<div class="md-content tool-result-md markdown-body">${renderMarkdown(result)}</div>`;
   }
   return window.DeepAgentJson?.renderBlock(result, { ariaLabel: "工具结果 JSON" })
     || `<pre>${escapeHtml(pretty(result))}</pre>`;
-}
-
-function findLocalFileResult(value) {
-  if (Array.isArray(value)) {
-    for (const child of value) {
-      const found = findLocalFileResult(child);
-      if (found) return found;
-    }
-    return null;
-  }
-  if (!value || typeof value !== "object") return null;
-  const fileId = String(value.file_id || "");
-  if (fileId.startsWith("local_")) {
-    return { fileId, fileName: value.file_name || fileId };
-  }
-  for (const child of Object.values(value)) {
-    const found = findLocalFileResult(child);
-    if (found) return found;
-  }
-  return null;
-}
-
-function renderLocalFileDownload(result, artifacts = [], imageOptions = {}) {
-  if (findViewImageResult(result, imageOptions)) return "";
-  if (artifacts.some((item) => item?.kind === "sandbox_output")) return "";
-  const file = findLocalFileResult(result);
-  if (!file) return "";
-  const href = window.serviceUrl(
-    `api/v1/local-files/${encodeURIComponent(file.fileId)}/download`,
-  );
-  return `<a class="local-file-download" href="${escapeHtml(href)}" download>${lucideIcon("download")}<span>${escapeHtml(file.fileName)}</span></a>`;
-}
-
-function renderToolResultArtifacts(artifacts) {
-  if (!Array.isArray(artifacts) || artifacts.length === 0) return "";
-  const overflow = artifacts.filter((item) => item?.kind !== "sandbox_output");
-  const generated = artifacts.filter((item) => item?.kind === "sandbox_output");
-  const totalBytes = overflow.reduce(
-    (total, item) => total + (Number.isFinite(Number(item?.byte_size)) ? Number(item.byte_size) : 0),
-    0,
-  );
-  const size = totalBytes > 0 ? ` · ${formatArtifactBytes(totalBytes)}` : "";
-  const overflowHtml = overflow.length
-    ? `<div class="tool-result-artifact">${lucideIcon("archive")}<span>完整结果已外置${escapeHtml(size)}，当前展示预览；Agent 可按需读取。</span></div>`
-    : "";
-  const generatedHtml = generated.length
-    ? `<div class="generated-file-list"><div class="generated-file-heading">${lucideIcon("files")}<span>生成文件</span></div>${generated.map(renderGeneratedFileArtifact).join("")}</div>`
-    : "";
-  return `${overflowHtml}${generatedHtml}`;
-}
-
-function renderGeneratedFileArtifact(artifact) {
-  const fileId = String(artifact?.file_id || artifact?.artifact_id || "");
-  const fileName = String(artifact?.file_name || fileId || "未命名文件");
-  const details = [artifact?.mime, formatArtifactBytes(artifact?.byte_size)].filter(Boolean).join(" · ");
-  const downloadUrl = fileId.startsWith("local_")
-    ? attachmentUrl({ id: fileId, name: fileName, mime: artifact?.mime })
-      || window.serviceUrl(`api/v1/local-files/${encodeURIComponent(fileId)}/download`)
-    : null;
-  const download = downloadUrl
-    ? `<a href="${escapeHtml(downloadUrl)}" download title="下载文件">${lucideIcon("download")}</a>`
-    : "";
-  return `<div class="generated-file-item"><span class="generated-file-icon">${lucideIcon("file-output")}</span><span class="generated-file-copy"><strong>${escapeHtml(fileName)}</strong>${details ? `<small>${escapeHtml(details)}</small>` : ""}<code title="${escapeHtml(fileId)}">${escapeHtml(fileId)}</code></span><span class="generated-file-actions">${download}<button type="button" data-copy-file-id="${escapeHtml(fileId)}" title="复制 File ID">${lucideIcon("copy")}</button></span></div>`;
-}
-
-function formatArtifactBytes(value) {
-  const bytes = Number(value);
-  if (!Number.isFinite(bytes) || bytes <= 0) return "";
-  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
-  return `${Math.round(bytes)} B`;
 }
 
 function formatMessageTime(iso) {
@@ -710,6 +771,7 @@ function hasNonEmptyArgs(args) {
 }
 
 function setToolBlockExpanded(block, expanded) {
+  if (expanded) toolDetailRenderers.get(block)?.();
   block.classList.toggle("open", expanded);
   block.querySelector(".tool-head")?.setAttribute("aria-expanded", String(expanded));
 }
@@ -726,18 +788,18 @@ function renderMarkdown(src) {
   return window.DeepAgentMarkdown?.render(src) ?? `<pre class="md-fallback">${escapeHtml(src)}</pre>`;
 }
 
-function renderMarkdownBody(src) {
-  return window.DeepAgentMarkdown?.renderBody(src) ?? `<div class="markdown-body">${renderMarkdown(src)}</div>`;
+function renderMarkdownBody(src, options) {
+  return window.DeepAgentMarkdown?.renderBody(src, options) ?? `<div class="markdown-body">${renderMarkdown(src)}</div>`;
 }
 
-function replaceMarkdownBody(root, source) {
-  if (window.DeepAgentMarkdown?.replaceBody) window.DeepAgentMarkdown.replaceBody(root, source);
-  else root.innerHTML = renderMarkdownBody(source);
+function replaceMarkdownBody(root, source, options) {
+  if (window.DeepAgentMarkdown?.replaceBody) window.DeepAgentMarkdown.replaceBody(root, source, options);
+  else root.innerHTML = renderMarkdownBody(source, options);
 }
 
 function renderMarkdownDiagrams(root) {
   return window.DeepAgentMarkdown?.renderDiagrams(root) ?? Promise.resolve();
 }
 
-  return { createMessageActions, addMessage, renderMessageContextRefs, renderMessageAttachments, processElapsedSecondsBetween, createAssistantMessage, pretty, renderToolResult, findLocalFileResult, renderLocalFileDownload, renderToolResultArtifacts, renderGeneratedFileArtifact, formatArtifactBytes, formatMessageTime, hasNonEmptyArgs, setToolBlockExpanded, escapeHtml, renderMarkdown, renderMarkdownBody, renderMarkdownDiagrams };
+  return { addMessage, renderMessageAttachments, createAssistantMessage, pretty, hasNonEmptyArgs, setToolBlockExpanded, escapeHtml };
 }

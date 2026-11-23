@@ -147,7 +147,7 @@ def build_capability_instruction_block(spec: AgentSpec, *, document_config: Docu
             "",
             "Formats outside the upload list are blocked by the upload policy. Professional document parsing is available only when its tool is explicitly enabled; do not claim unlisted parsing capabilities.",
             "",
-            "When the user asks which input types you support, answer ONLY from the lists above. "
+            "When the user asks which input types the session upload pipeline supports, answer ONLY from the lists above. "
             "Do not infer capabilities from your training persona or generic assistant defaults.",
         ]
     )

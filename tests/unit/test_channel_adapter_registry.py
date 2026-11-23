@@ -2,11 +2,55 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock
 
+from pydantic_ai import RunContext
+from pydantic_ai.models.test import TestModel
+from pydantic_ai.usage import RunUsage
+
+from deep_agent.agent.deps import AgentDeps
+from deep_agent.channels.doc_tool import build_channel_doc
 from deep_agent.channels.gateway.runtime import ChannelRuntime
+from deep_agent.channels.instructions import channel_instructions
 from deep_agent.channels.registry import AdapterRegistry, default_registry
 
 
 class RegistryRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_channel_docs_match_each_adapter_and_do_not_mix_platforms(self):
+        registry = default_registry()
+        settings = SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(version=1, value={"max_size_mb": 50})))
+        deps = AgentDeps(session_id="fixture", agent_id="agent", user="user", upload_settings_store=settings)
+        ctx = RunContext(deps=deps, model=TestModel(), usage=RunUsage())
+        cases = {
+            "wecom": ("企业微信机器人", "图片：PNG、JPEG，最多 10 MiB", "引用文字及支持的引用附件"),
+            "wecom_app": ("企业微信应用", "AMR、WAV、MP3、Speex", "不提供独立的引用内容解析"),
+            "feishu": ("飞书", "语音：OPUS，最多 30 MiB", "支持引用当前消息回复"),
+            "dingtalk": ("钉钉", "最多 2 MiB，最长 60 秒", "引用附件不随引用读取"),
+        }
+        for channel_type, (name, media, quote) in cases.items():
+            with self.subTest(channel_type=channel_type):
+                doc = await build_channel_doc(channel_type, registry.message_capabilities(channel_type))(ctx)
+                self.assertTrue(doc.startswith(f"# {name}（{channel_type}）"))
+                self.assertIn(media, doc)
+                self.assertIn(quote, doc)
+                self.assertIn("/new", doc)
+                self.assertIn("合并转发不会展开", doc)
+                self.assertIn("附件合计最多 50 MiB", doc)
+                self.assertIn("公开链接取件还受 20 MiB", doc)
+                self.assertEqual("群内成员执行" in doc, channel_type != "wecom_app")
+                prompt = channel_instructions(channel_type)
+                self.assertIn(name, prompt)
+                self.assertIn("channel.message_source", prompt)
+                self.assertIn("channel.message_quote", prompt)
+                self.assertNotIn("/new", prompt)
+                for other_type, (other_name, _, _) in cases.items():
+                    if other_type != channel_type:
+                        self.assertNotIn(other_name, doc)
+                        self.assertNotIn(other_name, prompt)
+
+        settings.get.return_value = SimpleNamespace(version=99, value={})
+        doc = await build_channel_doc("feishu", registry.message_capabilities("feishu"))(ctx)
+        self.assertIn("暂时无法读取服务端附件配置", doc)
+        self.assertIn("/new", doc)
+
     def test_default_registry_installs_feishu_and_tracks_connection_settings(self):
         from deep_agent.channels.adapters.feishu import FeishuAdapter
         registry = default_registry()

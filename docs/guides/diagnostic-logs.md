@@ -15,6 +15,14 @@
 - `synthesized / reason=missing_result_cancelled` 或 `missing_result_failed`：调用确实缺少结果，分别补取消或异常结束结果。
 - `phase=history_prepare/terminal_persistence` 区分模型历史准备与终态持久化；可按 Session、Run、工具名和 `tool_call_id` 关联。只记录固定原因与标识，不保存正文。匹配日志描述本次历史读取，不代表工具又执行了一次。
 
+### 排查发布和远程 Agent
+
+如果读取 Agent Card 或建立 MCP 连接时就返回 401 或 403，先搜 `published_agent_access_failed`，按请求 ID 和 HTTP 状态定位。这一步通常还没有 Task ID。
+
+在「诊断 → 日志」的关键词框粘贴任务 ID。用发布页看到的 Task ID 可以查到 `published_agent_task`，查看 A2A 或 MCP 的任务状态、累计耗时和产物数量。取件失败时看 `phase=artifact_read` 和 `reason`。用同一条记录里的 Session ID 可以继续查模型和工具调用。
+
+远程委派使用工具返回的 `task_id` 查 `remote_agent_operation`。按 `phase` 区分首次委派、补答、续跑、取消和产物上传。检查连接时还没有任务，可以用连接 ID 搜 `phase=inspect`。两类记录只写关联标识、阶段、状态、耗时和错误类别，提示词、Header 和附件内容均不入日志。日志从新版运行时开始产生。
+
 ## 使用
 
 进入控制台「诊断 → 日志」（`/console/#/diagnostics/logs`），选择时间、来源、级别或关键词，
@@ -188,8 +196,18 @@ SDK 流式请求延迟到消费者任务执行，因此通过透明 `WrapperMode
 收到传输字节不等于模型已生成有效内容或 Token；例如只有 SSE 心跳也会增长。SDK 在传输层之外的
 JSON/SSE 解析失败可能仅表现为 `closed`，需结合模型请求失败事件。HTTP 200 头后零字节等待则能与
 持续有字节但没有模型事件的情况分开；旧版本日志不能补出这些事实。
+
 回归：`test_model_api_stream_diagnostics.py` 使用真实 HTTPX/OpenAI SDK 验证无预读、周期快照、
 输出/请求体等价、取消、读取/解析/关闭异常及坏日志出口，不用线上模型请求代替契约测试。
+
+### 首字与工具轮次之间的等待
+
+用 `run_id` 关联同一次执行，结合 `request_index`、调用 ID 和时间戳还原模型与工具的起止及中间等待。
+
+- `agent_run_phase` 的 `stream_*`、`prepare_*` 阶段用于拆分 HTTP 请求进入路由后的请求体校验及依赖准备、会话与应用解析、Runner 构建、历史和输入准备。`model_node_entered`、`tool_node_entered` 是节点时间点，`tool_validate` 记录工具参数处理的耗时。
+- `sdk_first_thinking`／`sdk_first_text`／`sdk_first_tool_call` 是 Runner 看到首个非空思考／正文或首个工具调用的时间点，`sse_first_*` 是 HTTP 层准备发出相应事件的时间点。两组累计值分别从 Runner 和 HTTP 路由入口起算，对照时使用日志时间戳。供应商 `model_api_stream_first_byte` 只代表传输层首包，浏览器收到和渲染首字还需客户端取证。
+- `message_persistence_timing` 按触发 Hook 记录等待写锁、组装消息、存储事务和发布事件的耗时。SSE 工具调用与结果写入用 `phase=tool_call/tool_result` 和 `tool_call_id` 关联。`skipped` 表示本次合并跳过写入。与模型、工具执行的并行区间按时间线核对，避免重复加总。
+- `sdk_result_ready`、`completion_*`、`finish_run_event`、`sse_first_final` 和 `agent_stream_closed` 用于拆分生成结束后的历史保存、会话收尾、最终帧准备和连接关闭。
 
 统一入口是 `deep_agent.diagnostics.emit`；Agent 代码可沿用 `agent.observability.log_event`。
 先在 `diagnostics/schema.py` 注册稳定事件名与兜底中文摘要，通过 `diagnostics/messages.py` 从已校验字段生成可读正文，再提交白名单中的标识、数值、阶段和错误分类；未知字段直接丢弃。
@@ -207,6 +225,10 @@ JSON/SSE 解析失败可能仅表现为 `closed`，需结合模型请求失败�
 沙箱以正常工具返回承载脚本错误时，保留原事件和级别，正文注明脚本执行失败，附加字段只提取既有状态和错误码。
 Agent 名称取本轮已加载配置，字段限定为最多100个名称字符，不额外访问数据库；
 不将提示词、完整工具参数、返回正文或异常原文写入日志。
+
+跨组件调用失败时，负责处理该失败的一层记录 `error_stack`。该字段只包含异常类型及
+`文件名:行号:函数名`，最多三组异常并限制帧数和长度。日志排除异常消息、源码文本、局部变量及请求和响应内容。
+重试日志保留尝试次数和等待或耗时，最终失败日志保留既有请求、任务或会话标识。
 
 查询返回的 `message` 和 `summary` 都是文件中实际写入的正文；附加 `key=value` 独立返回。
 列表只显示正文，会话标识显示前8位且不省略。详情用中文标签和原始值，未知标量字段保留原名；

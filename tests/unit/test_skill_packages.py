@@ -151,9 +151,11 @@ class SkillPackageTests(unittest.TestCase):
         skills = list_builtin_skills()
         self.assertEqual(
             {item.code for item in skills},
-            {"deepagent-diagnostics", "deepfos-readonly-analysis", "file-reading-verification"},
+            {"deepfos-readonly-analysis", "file-reading-verification"},
         )
-        self.assertTrue(all(item.resource_index for item in skills))
+        by_code = {item.code: item for item in skills}
+        self.assertEqual(by_code["deepfos-readonly-analysis"].resource_index, [])
+        self.assertTrue(by_code["file-reading-verification"].resource_index)
 
 
 if __name__ == "__main__":

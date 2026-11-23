@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from deep_agent.agent.headers import extract_forward_headers
+from deep_agent.agent.headers import extract_execution_context_headers, extract_forward_headers
 from deep_agent.options import DEFAULT_MCP_FORWARD_HEADERS, OPTION
 
 
@@ -21,6 +22,47 @@ def _request(headers: list[tuple[bytes, bytes]]) -> Request:
 
 
 class ForwardHeaderAllowlistTests(unittest.TestCase):
+    def test_execution_headers_use_fixed_allowlist_and_effective_console_context(self):
+        request = _request([
+            (b"authorization", b"Bearer execution-fixture"), (b"cookie", b"sid=fixture"),
+            (b"token", b"fixture-token"), (b"x-user-token", b"fixture-user-token"),
+            (b"x-tenant-id", b"tenant-fixture"), (b"user", b"trusted-user"),
+            (b"app", b"platform001"), (b"space", b"platform"),
+            (b"language", b"zh-cn"), (b"x-deep-agent-app", b"context007"),
+            (b"x-deep-agent-language", b"en-us"), (b"x-private", b"excluded"),
+            (b"x-deepfos-other", b"excluded"),
+        ])
+        with patch.object(type(OPTION.agent), "mcp_forward_request_headers", frozenset({"x-tenant-id"})):
+            self.assertEqual(extract_forward_headers(request), {"x-tenant-id": "tenant-fixture"})
+            self.assertEqual(extract_execution_context_headers(request), {
+                "authorization": "Bearer execution-fixture", "cookie": "sid=fixture",
+                "token": "fixture-token", "x-user-token": "fixture-user-token",
+                "x-tenant-id": "tenant-fixture", "user": "trusted-user",
+                "app": "context007", "space": "context", "language": "en-us",
+            })
+
+    def test_execution_headers_preserve_channel_owned_key_and_disabled_scope(self):
+        request = _request([
+            (b"authorization", b"Bearer browser"), (b"cookie", b"sid=browser"),
+            (b"token", b"browser-token"), (b"x-user-token", b"browser-user-token"),
+            (b"x-deepfos-key", b"forged-key"), (b"user", b"browser-user"),
+            (b"app", b"forged001"), (b"space", b"forged"),
+            (b"x-deep-agent-app", b"other001"), (b"language", b"en-us"),
+        ])
+        config = {"enabled": True, "app_id": "channel007", "api_key": "channel-key"}
+        account = SimpleNamespace(settings={"deepfos": config})
+        with patch.object(type(OPTION.agent), "mcp_forward_request_headers", frozenset({"x-tenant-id"})):
+            self.assertEqual(extract_execution_context_headers(request, channel_account=account), {
+                "app": "channel007", "space": "channel", "language": "en-us",
+                "x-deepfos-key": "channel-key",
+            })
+            config["enabled"] = False
+            self.assertEqual(extract_execution_context_headers(request, channel_account=account), {
+                "authorization": "Bearer browser", "cookie": "sid=browser",
+                "token": "browser-token", "x-user-token": "browser-user-token",
+                "user": "browser-user", "language": "en-us",
+            })
+
     def test_channel_space_key_overrides_inbound_auth_and_disabled_sends_no_key(self):
         request = _request([(b"cookie", b"browser=secret"), (b"authorization", b"Bearer browser"),
                             (b"user", b"browser-owner"), (b"x-deepfos-key", b"inbound-key"),
@@ -56,6 +98,8 @@ class ForwardHeaderAllowlistTests(unittest.TestCase):
         )
 
     def test_default_allowlist_when_empty(self) -> None:
+        previous = OPTION.agent.mcp_forward_request_headers
+        self.addCleanup(setattr, OPTION.agent, "mcp_forward_request_headers", previous)
         OPTION.agent.mcp_forward_request_headers = ""
         self.assertIn("authorization", OPTION.agent.mcp_forward_request_headers)
         self.assertIn("app", OPTION.agent.mcp_forward_request_headers)

@@ -8,6 +8,7 @@
 | `purify.min.js` | [cure53/DOMPurify](https://github.com/cure53/DOMPurify) | 3.4.15 | Apache-2.0 OR MPL-2.0 |
 | `highlight.min.js` | [highlightjs/highlight.js](https://github.com/highlightjs/highlight.js) | 11.11.1 | BSD-3-Clause |
 | `mermaid.min.js` | [mermaid-js/mermaid](https://github.com/mermaid-js/mermaid) | 11.17.0 | MIT |
+| `g2-5.4.8.min.js` | [antvis/G2](https://github.com/antvis/G2) | 5.4.8 | MIT |
 | `github-markdown-light.min.css`、`github-markdown-dark.min.css` | [sindresorhus/github-markdown-css](https://github.com/sindresorhus/github-markdown-css) | 5.8.1 | MIT |
 | `highlight-github-dark.min.css` | highlight.js `github-dark` theme | 11.11.1 | BSD-3-Clause |
 | `highlight-github.min.css` | highlight.js `github` theme（浅色主题用） | 11.11.1 | BSD-3-Clause |
@@ -34,3 +35,11 @@ Console 通过 `markdownTheme` 加载 GitHub Markdown CSS，`theme.js` 随界面
 DOMPurify 3.4.15 使用官方同名 tag 的 `dist/purify.min.js`，许可证见 `DOMPurify-LICENSE`。随着公式引入 MathML/SVG，同时更新 sanitizer 的 rawtext、命名空间与 DOM clobbering 防护；保持默认 `SAFE_FOR_XML`，不启用 HTML/SVG 事件或 KaTeX trust。脚注仍复用 marked-footnote 的 tokenizer，展示 ID 使用消息级数字命名空间，防止重复引用与原始标签碰撞。
 
 - `qrcode.js`：qrcode-generator 1.4.4（MIT），官方 npm 发布包，经 jsDelivr 获取；许可证 `qrcode-LICENSE`。仅在本地生成飞书授权二维码，不向第三方二维码服务发送授权链接。
+
+### G2 声明式图表（2026-11-05）
+
+`g2-5.4.8.min.js` 原样取自 npm `@antv/g2@5.4.8` 的 `dist/g2.min.js`，与电子表格助手锁定的运行库一致；许可证见 `g2-LICENSE`。它是新增的服务端静态交付资产，无需 npm 构建或 Python 依赖变更，部署包须一起携带。运行时不访问 CDN。
+
+运行库 SHA256：`7e7d346cab68c002a889dc6145bfc1f9ae1391be82ce8d514fb106ef3a6e6412`（1,083,414 字节）；许可证 SHA256：`98edde832138822906fb3f365b59a9a54b3abf6e85e52de0f5f1fd804ff83ab7`。
+
+G2 只在完成的 `g2` JSON 围栏进入可见区域后加载，在无 `allow-same-origin` 的 sandbox frame 内运行；CSP 禁止网络连接、外部图片及动态求值。配置只通过结构化消息传递，不插入 frame HTML。主页面保留完整可复制配置和明确失败提示；普通 Markdown、代码与无图页面不加载 G2。

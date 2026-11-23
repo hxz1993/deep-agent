@@ -83,17 +83,17 @@ test("内置工具页只接受后端 builtin 分类工具包", () => {
 test("内置工具列表展示能力和工具且没有资源级状态或管理操作", () => {
   const ui = loadBuiltinToolsUi();
   const row = ui.toolCatalogDetails({
-    code: "builtin:general",
+    code: "builtin:ptc",
     category: "builtin",
-    label: "通用工具",
+    label: "程序编排",
     source: "builtin",
-    description: "进程内通用工具。",
-    tools: [{ name: "get_current_time", description: "获取当前 UTC 时间。" }],
+    description: "编排当前已授权工具。",
+    tools: [{ name: "run_code", description: "执行编排代码。" }],
   });
 
-  assert.match(row, /通用工具/);
-  assert.match(row, /builtin:general/);
-  assert.match(row, /get_current_time/);
+  assert.match(row, /程序编排/);
+  assert.match(row, /builtin:ptc/);
+  assert.match(row, /run_code/);
   assert.doesNotMatch(row, /默认启用|默认关闭|启用|停用/);
   assert.doesNotMatch(row, /始终可用|有附件时可用/);
   assert.doesNotMatch(row, /编辑|删除|保存|checkbox|switch/);

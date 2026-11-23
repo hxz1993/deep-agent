@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import ssl
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any
 from urllib.parse import quote
 
+import certifi
+from fastmcp import __version__ as fastmcp_version
 from pydantic_ai import RunContext, ToolDefinition, messages
 from pydantic_ai.exceptions import ModelRetry, RunCancelled, ToolFailed
 from pydantic_ai.mcp import MCPToolset
@@ -15,8 +20,12 @@ from pydantic_core import SchemaValidator
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.observability import log_event
 from deep_agent.agent.tool_errors import native_error_details
+from deep_agent.agent.tool_names import READ_ONLY_TOOL
 from deep_agent.capabilities.mcp.errors import classify_terminal_mcp_request_failure
-from deep_agent.mcp_request_context import resolve_mcp_headers
+from deep_agent.mcp_request_context import resolve_mcp_headers, resolve_mcp_request_context_mode
+from deep_agent.services.mcp_bound_app import (
+    bound_mcp_headers, is_platform_mcp_url, restricted_mcp_http_client, verify_bound_tool_args,
+)
 from deep_agent.schemas.mcp import McpToolSnapshot
 
 
@@ -27,6 +36,29 @@ _MCP_ARGS_VALIDATOR = SchemaValidator(
         "values_schema": {"type": "any"},
     }
 )
+
+
+@lru_cache(maxsize=1)
+def _load_default_tls_context(ca_file: str, file_version: tuple[int, ...]) -> ssl.SSLContext:
+    # file_version keys the cache to the process and the CA bundle on disk.
+    return ssl.create_default_context(cafile=ca_file)
+
+
+def _default_tls_context() -> ssl.SSLContext | None:
+    # FastMCP 3 uses legacy HTTPX's certifi default. Let other transport
+    # generations and explicitly configured TLS use their original defaults.
+    if not fastmcp_version.startswith("3.") or any(
+        os.environ.get(key) for key in ("SSL_CERT_FILE", "SSL_CERT_DIR", "SSLKEYLOGFILE")
+    ):
+        return None
+    ca_file = certifi.where()
+    try:
+        stat = os.stat(ca_file)
+    except OSError:
+        return None
+    return _load_default_tls_context(
+        ca_file, (os.getpid(), stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns),
+    )
 
 
 def _contains_cancellation(exc: BaseException) -> bool:
@@ -47,6 +79,7 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
     init_timeout: float
     max_retries: int
     request_headers: dict[str, str] | None = None
+    description: str | None = None
     _inner: MCPToolset[AgentDeps] | None = field(default=None, init=False, repr=False)
     _exit_stack: AsyncExitStack | None = field(default=None, init=False, repr=False)
     _connect_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
@@ -58,14 +91,33 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
         return f"mcp-snapshot-{quote(self.server_name, safe='')}"
 
     async def for_run(self, ctx: RunContext[AgentDeps]) -> SnapshotMcpToolset:
-        return SnapshotMcpToolset(
+        instance = SnapshotMcpToolset(
             server_name=self.server_name,
             config=self.config,
             snapshot=self.snapshot,
             init_timeout=self.init_timeout,
             max_retries=self.max_retries,
             request_headers=dict(ctx.deps.request_headers) or None,
+            description=self.description,
         )
+        if instance.is_bound:
+            ctx.deps.bound_mcp_connectors[self.server_name] = instance._ensure_connection
+        return instance
+
+    @property
+    def is_bound(self) -> bool:
+        return resolve_mcp_request_context_mode("url", self.config) == "bound_app"
+
+    def _target_metadata(self) -> dict[str, str]:
+        scope = self.config["request_context"]
+        return {
+            "name": self.server_name,
+            "app": scope.get("target_app_name") or scope["target_app_id"],
+            "app_id": scope["target_app_id"],
+            "space": scope.get("target_space_name") or scope["target_space_id"],
+            "space_id": scope["target_space_id"],
+            "usage": self.description or "",
+        }
 
     async def __aexit__(self, *args: Any) -> bool | None:
         await self._close_connection()
@@ -89,16 +141,33 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
     ) -> dict[str, ToolsetTool[AgentDeps]]:
         del ctx
         tools: dict[str, ToolsetTool[AgentDeps]] = {}
+        target = self._target_metadata() if self.is_bound else None
+        platform_server = is_platform_mcp_url(self.config.get("url"))
         for item in self.snapshot.definitions:
+            description = item.description
+            if target:
+                caption = (
+                    f"绑定 MCP {target['name']}，目标应用 {target['app']}（{target['app_id']}），"
+                    f"空间 {target['space']}（{target['space_id']}）。"
+                )
+                description = f"{description or ''}\n{caption}".strip()
+            task = item.task_support in {"optional", "required"}
+            # A third-party server's annotation cannot move its call past the
+            # durable boundary. The configured platform gateway owns its schema.
+            reads_only = platform_server and not task and (item.annotations or {}).get("readOnlyHint") is True
             tool_def = ToolDefinition(
                 name=item.name,
-                description=item.description,
+                description=description,
                 parameters_json_schema=item.input_schema,
                 return_schema=item.output_schema,
+                # The MCP server owns argument validation, including nested optional fields.
+                strict=False,
                 metadata={
+                    **({"deep_agent_mcp_target": target} if target else {}),
                     "title": item.title,
                     "annotations": item.annotations,
-                    "task": item.task_support in {"optional", "required"},
+                    "task": task,
+                    **({READ_ONLY_TOOL: True} if reads_only else {}),
                 },
             )
             tools[item.name] = ToolsetTool(
@@ -119,6 +188,8 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
         if self._connection_failure is not None:
             raise ToolFailed(self._connection_failure)
 
+        if self.is_bound:
+            verify_bound_tool_args(self.config, tool_args)
         try:
             inner = await self._ensure_connection(ctx)
             return await inner.call_tool(name, tool_args, ctx, tool)
@@ -162,11 +233,12 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
             if self._connection_failure is not None:
                 raise ToolFailed(self._connection_failure)
 
-            headers = resolve_mcp_headers(
-                "url",
-                self.config,
-                self.request_headers,
-            )
+            if self.is_bound:
+                if ctx is None:
+                    raise ToolFailed("绑定 MCP 缺少当前会话身份。")
+                headers = await bound_mcp_headers(self.config, ctx.deps)
+            else:
+                headers = resolve_mcp_headers("url", self.config, self.request_headers)
             # Record the effective transport scope, never header values or credentials.
             if ctx is not None:
                 lowered = {key.lower(): value for key, value in (headers or {}).items()}
@@ -179,16 +251,22 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
                     auth_context=".".join(key for key in ("authorization", "cookie", "token", "x-user-token", "x-deepfos-key")
                                           if lowered.get(key)) or "none",
                 )
-            inner = MCPToolset(
-                self.config["url"],
-                id=quote(self.server_name, safe=""),
-                headers=headers,
-                include_instructions=False,
-                init_timeout=self.init_timeout,
-                max_retries=self.max_retries,
-            )
             stack = AsyncExitStack()
             try:
+                if self.is_bound:
+                    client = restricted_mcp_http_client(self.config["url"], headers)
+                    stack.push_async_callback(client.aclose)
+                    transport_options = {"http_client": client}
+                else:
+                    transport_options = {"headers": headers, "verify": _default_tls_context()}
+                inner = MCPToolset(
+                    self.config["url"],
+                    id=quote(self.server_name, safe=""),
+                    include_instructions=False,
+                    init_timeout=self.init_timeout,
+                    max_retries=self.max_retries,
+                    **transport_options,
+                )
                 await stack.enter_async_context(inner)
             except BaseException:
                 await stack.aclose()

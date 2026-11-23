@@ -24,7 +24,8 @@ except ImportError:  # Windows is not a supported file-locking deployment target
 
 from deep_agent.core.paths import REPO_ROOT
 from deepfos_platform.lib.context import get_request_id
-from .schema import EVENTS, ISSUE_CODES, MAX_RECORD_BYTES, safe_fields
+from deepfos_platform.log import format_exception_stack
+from .schema import EVENTS, EXCEPTION_EVENTS, ISSUE_CODES, MAX_RECORD_BYTES, safe_fields
 from .text import format_record
 
 FILE_PATTERN = re.compile(r"da-[a-f0-9]{16}-(?:api|gateway)-[0-9]+-[a-f0-9]{32}-[0-9]{6}\.(?:log|jsonl)\Z")
@@ -401,8 +402,14 @@ def shutdown() -> None:
             pass
 
 
-def emit(event: str, *, level: str = "INFO", **fields) -> None:
+def emit(event: str, *, level: str = "INFO", exception: BaseException | None = None, **fields) -> None:
     try:
+        fields.pop("error_stack", None)
+        if exception is not None:
+            if event in EXCEPTION_EVENTS:
+                fields["error_stack"] = format_exception_stack(exception)
+            if fields.get("error_type") is None:
+                fields["error_type"] = type(exception).__name__
         if _runtime is not None:
             _runtime.emit(event, level=level, **fields)
         elif event in EVENTS:

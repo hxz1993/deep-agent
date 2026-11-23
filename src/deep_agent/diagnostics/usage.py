@@ -69,7 +69,7 @@ def _project(calls, *, dimension):
 
 
 class UsageQueries(SessionBoundMixin):
-    async def collect(self, filters: SessionFilters):
+    async def collect(self, filters: SessionFilters, *, include_metadata=True):
         """Fetch narrow indexed rows, then de-duplicate before any aggregation."""
         seen = {}
         cursor = None
@@ -116,14 +116,14 @@ class UsageQueries(SessionBoundMixin):
             calls = list(seen.values())
             model_ids = {call.get("model_id") for _, call in calls if call.get("model_id")}
             models = {}
-            if model_ids:
+            if include_metadata and model_ids:
                 rows = (await db.execute(select(LlmModel.id, LlmModel.name, LlmModel.model,
                     LlmProvider.provider_type, LlmProvider.name.label("provider_name"), LlmProvider.id.label("provider_id"))
                     .outerjoin(LlmProvider, LlmProvider.id == LlmModel.provider_id)
                     .where(LlmModel.id.in_(model_ids)))).all()
                 models = {row.id: {"name": row.name, "model_name": row.model,
                     "provider_type": row.provider_type, "provider_name": row.provider_name, "provider_id": row.provider_id} for row in rows}
-            agents = dict((await db.execute(select(Agent.id, Agent.name))).all())
+            agents = dict((await db.execute(select(Agent.id, Agent.name))).all()) if include_metadata else {}
         snapshots = {}
         for _, call in calls:
             key = call.get("model_id") or _key("model", call, {})
@@ -132,6 +132,17 @@ class UsageQueries(SessionBoundMixin):
                     "provider_name": call.get("provider_name"), "provider_id": call.get("provider_id"),
                     "deleted": bool(call.get("model_id") and call.get("model_id") not in models)}
         return calls, models, snapshots, agents
+
+    async def detail_report(self, filters: SessionFilters, *, dimension):
+        if dimension not in DIMENSIONS:
+            raise DiagnosticQueryError("无效的明细维度")
+        calls, models, snapshots, agents = await self.collect(filters)
+        summary = _empty()
+        for _, call in calls:
+            _add(summary, call)
+        return {"range": filters.public_range(), "summary": summary,
+            "groups": {dimension: _project(calls, dimension=dimension)},
+            "models": models, "model_snapshots": snapshots, "agents": agents}
 
     async def report(self, filters: SessionFilters):
         calls, models, snapshots, agents = await self.collect(filters)
@@ -159,7 +170,7 @@ class UsageQueries(SessionBoundMixin):
     async def sessions(self, filters: SessionFilters, *, dimension: str, key: str,
                        offset: int = 0, limit: int = 10):
         if dimension not in DIMENSIONS: raise DiagnosticQueryError("无效的明细维度")
-        calls, _, _, _ = await self.collect(filters)
+        calls, _, _, _ = await self.collect(filters, include_metadata=False)
         groups = defaultdict(_empty)
         metadata = {}
         for event, call in calls:

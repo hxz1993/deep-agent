@@ -40,6 +40,8 @@ console/
 ```
 
 Console 使用原生 HTML、CSS 和 JavaScript ES Modules，不需要 npm 构建，随同一份后端源码目录发布。
+
+回复中的 `g2` 围栏使用本地 AntV G2 5.4.8 展示图表，格式与电子表格助手一致：严格 JSON，使用 `{"type":"g2","config":{...}}` 或直接配置对象，仅支持内联数据。流式期间显示占位，完成后按可见区域加载；支持普通柱、线、环图及财务 Skill 的多图层组合，默认展示图表，可切换到同一份 JSON 配置并复制，两种视图不并列展示。配置错误或超限时就地提示，不执行 JavaScript 或远程数据请求。
 后端将 `console/` 挂载到 `/console/`，将 `console/vendor/` 挂载到 `/vendor/`，浏览器地址保持不变。
 `console/` 是唯一前端源码目录，旧 `frontend/` 已移除。前端测试仍放在 `tests/frontend/console/`，
 它是测试分类目录，不是产品源码的兼容入口。

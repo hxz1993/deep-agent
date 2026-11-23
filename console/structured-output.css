@@ -13,3 +13,5 @@
 .structured-output-text details > div { padding: 0 12px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .structured-output-failed { color: var(--danger); font-size: var(--ui-font-helper); margin: 12px; }
 .trajectory-kind.output { color: var(--accent); background: var(--accent-soft, var(--bg-soft)); }
+
+.structured-output-state { color: var(--text-dim); font-size: var(--ui-font-helper); }

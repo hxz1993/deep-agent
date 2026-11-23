@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
+import { sessionAppQuery } from "../../../console/session-app-filter.js";
 
 const source = await readFile(new URL("../../../console/chat.js", import.meta.url), "utf8");
 function harness(fetch) {
@@ -10,7 +11,7 @@ function harness(fetch) {
   const requests = [];
   const search = { value: "" };
   const context = vm.createContext({
-    state: { agentId: "agent-a" }, URLSearchParams, AbortController, setTimeout, clearTimeout,
+    state: { agentId: "agent-a", sessionAppFilter: "all" }, window: {}, sessionAppQuery, URLSearchParams, AbortController, setTimeout, clearTimeout,
     document: { getElementById: () => search },
     el: { sessionList: { scrollTop: 0 } },
     serviceUrl: (url) => url,
@@ -18,7 +19,7 @@ function harness(fetch) {
     renderSessions() {}, requestAnimationFrame() {},
     mergeSessionsFromBackend: (rows, options) => merges.push({ rows, options }),
   });
-  vm.runInContext(source.slice(source.indexOf("let sessionPage ="), source.indexOf("function autoGrow()")), context);
+  vm.runInContext(source.slice(source.indexOf("let sessionPage ="), source.indexOf("/* --------------------------- 会话管理")), context);
   return { context, merges, urls, requests, search };
 }
 const response = (items, total) => ({ ok: true, json: async () => ({ items, total }) });
@@ -103,8 +104,10 @@ test("连续输入仅发最后一次请求且检索分页保留query", async () 
   await new Promise((resolve) => setTimeout(resolve, 280));
   assert.equal(urls.length, 1);
   assert.equal(new URLSearchParams(urls[0].split("?")[1]).get("query"), "销售");
+  assert.equal(new URLSearchParams(urls[0].split("?")[1]).get("include_active_runs"), "true");
   await context.loadMoreSessions();
   assert.equal(new URLSearchParams(urls[1].split("?")[1]).get("query"), "销售");
+  assert.equal(new URLSearchParams(urls[1].split("?")[1]).get("include_active_runs"), "true");
   assert.match(urls[1], /offset=1/);
 });
 
@@ -141,4 +144,33 @@ test("不足一屏不显示到底提示，一屏历史在滚动后显示且不�
   rows = [];
   context.maybeLoadMoreSessions();
   assert.equal(footer.hidden, true);
+});
+
+test("默认跨App；App筛选与搜索叠加，切换取消迟到页并重置滚动，切Agent恢复全部", async () => {
+  const pending = [];
+  const { context, urls, merges, requests, search } = harness(() => new Promise(resolve => pending.push(resolve)));
+  const initial = context.syncSessionsFromBackend();
+  assert.equal(new URLSearchParams(urls[0].split("?")[1]).get("app_scope"), "all");
+  context.el.sessionList.scrollTop = 100;
+  context.state.sessionAppFilter = "app:budget001";
+  search.value = "预算";
+  const filtered = context.syncSessionsFromBackend();
+  const params = new URLSearchParams(urls[1].split("?")[1]);
+  assert.equal(params.get("app_id"), "budget001");
+  assert.equal(params.get("query"), "预算");
+  assert.equal(params.get("offset"), "0");
+  assert.equal(context.el.sessionList.scrollTop, 0);
+  assert.equal(requests[0].signal.aborted, true);
+  pending[0](response([{ session_id: "stale" }], 1)); await initial;
+  assert.equal(merges.length, 0);
+  pending[1](response([{ session_id: "ok" }], 1)); await filtered;
+  context.state.sessionAppFilter = "unassigned";
+  const unassigned = context.syncSessionsFromBackend();
+  assert.equal(new URLSearchParams(urls[2].split("?")[1]).get("app_scope"), "unassigned");
+  assert.equal(new URLSearchParams(urls[2].split("?")[1]).has("app_id"), false);
+  pending[2](response([], 0)); await unassigned;
+  context.state.agentId = "agent-b";
+  const switched = context.syncSessionsFromBackend();
+  assert.equal(context.state.sessionAppFilter, "all");
+  pending[3](response([], 0)); await switched;
 });

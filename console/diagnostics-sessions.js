@@ -1,26 +1,24 @@
-import { channelOriginPresentation } from "./session-display.js?v=20260929-release0124";
+import { renderSessionSource } from "./session-display.js?v=session-source-rows";
 import { DIAGNOSTIC_PERIODS as PERIODS, diagnosticRangeHelpHtml, bindDiagnosticRangeDismiss } from "./diagnostic-range-control.js?v=20261019-release0138";
 import { renderUserIdentity } from "./user-identity.js?v=20260917-release01010";
 import { escapeHtml as e, icon, icons, localInput, selectHtml, bindDiagnosticSelects, diagnosticRequest } from "./diagnostics-ui.js?v=20261019-release0138";
 import { diagnosticTime } from "./diagnostics.js?v=20261019-release0138";
 import { diagnosticTarget, channelEntryFilters, sessionRange, sessionDrilldown, overviewFilters } from "./diagnostics-navigation.js?v=20261019-release0138";
-import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=20260917-release01010";
-import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20261019-release0138";
-import { createReadonlySessionView } from "./diagnostic-detail.js?v=20261103-trajectory-files";
+import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=session-source-column";
+import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20261112-busy-retry";
+import { createReadonlySessionView } from "./diagnostic-detail.js?v=diagnostic-run-observer";
+import { createSessionObserver, historyThroughRun } from "./session-observer.js?v=20260912-21";
+import { createHistoryFollower } from "./history-follower.js?v=20260912-21";
 import { ensureSessionViewTemplate } from "./session-view-shell.js?v=20261025-readonly-load2";
 
 export const SESSION_STATUSES = { running: "进行中", pending: "待操作", waiting: "待操作", completed: "已完成", stopped: "已停止", error: "异常", failed: "异常", unknown: "未确认", not_started: "未开始" };
 const PAGE_SIZE = 50;
+const OVERVIEW_SECTIONS = ["metrics", "trend", "agents", "activity"];
 const button = (label, action, extra = "", kind = "") => `<button type="button" class="btn diagnostics-button ${kind}" data-session-action="${action}" ${extra}>${label}</button>`;
 const empty = message => `<div class="diagnostics-empty">${e(message)}</div>`;
 export function userCardHtml(id, profiles = {}) {
   const user = profiles[id] || {}, name = user.username || user.display_name || id || "未记录";
   return `<span class="diagnostic-user diagnostic-username" title="${e(id)}">${e(name)}</span>`;
-}
-export function sessionAgentIconHtml(item) {
-  const origin = channelOriginPresentation(item);
-  if (!origin) return `<span class="diagnostic-agent-icon">${icon("bot")}</span>`;
-  return `<span class="diagnostic-agent-icon diagnostic-channel-icon" title="${e(origin.accountName === "未记录" ? origin.platform : origin.accountName)}" aria-label="${e(origin.accountName === "未记录" ? origin.platform : origin.accountName)}"><img src="${origin.logo}" width="20" height="20" alt="${e(origin.platform)}" /></span>`;
 }
 export function shortQuestionTime(value) {
   const full = diagnosticTime(value);
@@ -42,9 +40,10 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   const userReader = createSessionReader(diagnosticRequest);
   let userTimer = null, userMatches = [], userAfter = null, userSearchQuery = "", userSearchBusy = false, userSearchSucceeded = false;
   const reader = createSessionReader(diagnosticRequest), contextReader = createSessionReader(diagnosticRequest), eventsReader = createSessionReader(diagnosticRequest);
-  const state = { active: false, route: null, filters: {}, data: null, listTotal: null, busy: false, error: "", users: {}, agents: new Map(), channelAgents: new Set(), showUsers: false, showAgents: false };
+  const state = { active: false, route: null, filters: {}, data: null, listTotal: null, busy: false, error: "", users: {}, agents: new Map(), channelAgents: new Set(), showUsers: false, showAgents: false, overviewStatus: {}, overviewErrors: {} };
   let detail = null, detailData = null, selectBinding = null, scrollToUsers = false, eventsLoading = false, trendObserver = null;
   let detailMountGeneration = 0;
+  let liveObservation = null;
   let releaseColumns = () => {}, columnWidths = null, listFilters = {};
   const disconnectTrend = () => { trendObserver?.disconnect(); trendObserver = null; };
   function observeTrend() {
@@ -63,7 +62,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
     resize();
     if (typeof ResizeObserver !== "undefined") { trendObserver = new ResizeObserver(resize); trendObserver.observe(host); }
   }
-  const cancelReaders = () => { clearTimeout(userTimer); userReader.cancel(); releaseColumns(); disconnectTrend(); reader.cancel(); contextReader.cancel(); eventsReader.cancel(); eventsLoading = false; };
+  const cancelReaders = () => { stopObservation(); clearTimeout(userTimer); userReader.cancel(); releaseColumns(); disconnectTrend(); reader.cancel(); contextReader.cancel(); eventsReader.cancel(); eventsLoading = false; };
   const publishFilters = () => replace(diagnosticTarget(state.route.view, state.filters));
   const scrollRegions = { scroll: ".diagnostic-session-scroll", tableScroll: ".diagnostic-session-table-scroll", questionsScroll: ".diagnostic-question-list", errorsScroll: ".diagnostic-dashboard-side > section:first-child", usersScroll: "#diagnosticActiveUsers", agentsScroll: ".diagnostic-agent-bars" };
   const captureScroll = () => Object.fromEntries(Object.entries(scrollRegions).map(([key, selector]) => [key, root.querySelector(selector)?.scrollTop || 0]));
@@ -108,20 +107,46 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
       ${button(`${icon("rss")}渠道详情`, "channels", 'title="渠道详情" aria-label="渠道详情"', "diagnostic-channel-entry")}${viewSwitchHtml()}</div></div>`;
   }
   function chipsHtml() { return [state.filters.has_questions === "true" || state.filters.has_questions === true ? ["has_questions", "范围内有提问"] : null, state.filters.has_execution_error === "true" || state.filters.has_execution_error === true ? ["has_execution_error", "范围内有执行异常"] : null].filter(Boolean).map(([key, label]) => `<button type="button" class="diagnostic-filter-chip" data-clear-session="${key}">${label}${icon("x")}</button>`).join(""); }
+  const overviewPlaceholder = (section, fallback) => state.overviewErrors[section]
+    ? `<div class="diagnostics-notice" data-kind="error" role="alert">${e(state.overviewErrors[section])} ${button("重试", "retry-overview", `data-overview-section="${section}"`, "text")}</div>`
+    : empty(state.overviewStatus[section] === "loading" ? "正在加载…" : fallback);
+  function patchOverview(section) {
+    if (!state.active || state.route?.view !== "overview") return;
+    const selectors = {metrics:["[data-overview-panel=metrics]"], trend:[".diagnostic-chart-section"], agents:[".diagnostic-agent-section"], activity:[".diagnostic-recent", ".diagnostic-dashboard-side"]};
+    const existing = section && root.querySelector(selectors[section][0]);
+    if (section && !existing) { render(); return; }
+    if (section) {
+      const scroll = captureScroll(), template = document.createElement("template");
+      template.innerHTML = overviewHtml(state.data);
+      if (section === "trend") disconnectTrend();
+      for (const selector of selectors[section]) root.querySelector(selector)?.replaceWith(template.content.querySelector(selector));
+      if (section === "agents") {
+        template.innerHTML = filtersHtml();
+        const selector = '[data-diagnostic-control="agent_id"]';
+        root.querySelector(selector)?.replaceWith(template.content.querySelector(selector));
+      }
+      if (section === "trend") observeTrend();
+      restoreScroll(scroll); icons();
+    }
+    root.setAttribute("aria-busy", String(state.busy));
+    const status = root.querySelector(".diagnostic-loading");
+    if (status) status.textContent = state.busy ? "正在加载…" : "";
+    for (const control of root.querySelectorAll?.('#diagnosticSessionFilters button[type="submit"], button[form="diagnosticSessionFilters"][type="submit"], [data-session-action="retry-overview"]') || []) control.disabled = state.busy;
+  }
   function overviewHtml(data) {
     const metrics = data?.metrics || {}, questions = data?.recent_questions || [], errors = data?.recent_errors || [], users = data?.active_users || [], agents = data?.agents || [];
     const max = Math.max(1, ...agents.map(agent => agent.question_count));
     const stats = [["session_count", "会话数", "messages-square", "blue"], ["question_count", "提问数", "message-circle-more", "purple"], ["active_user_count", "活跃用户", "user-round", "green"], ["error_session_count", "含异常会话", "triangle-alert", "red"]];
-    return `<div class="diagnostic-stats">${stats.map(([key, label, glyph, tone]) => `
-      <button type="button" data-stat="${key}" ${!data ? "disabled" : ""}>
+    return `<div data-overview-panel="metrics">${state.overviewErrors.metrics ? overviewPlaceholder("metrics", "") : ""}<div class="diagnostic-stats">${stats.map(([key, label, glyph, tone]) => `
+      <button type="button" data-stat="${key}" ${!data?.metrics ? "disabled" : ""}>
         <span class="diagnostic-stat-icon ${tone}">${icon(glyph)}</span>
         <span><small>${label}</small><strong>${metrics[key] == null ? "—" : Number(metrics[key]).toLocaleString()}</strong></span>
         <span class="diagnostic-stat-arrow">${icon("arrow-up-right")}</span>
-      </button>`).join("")}</div>
+      </button>`).join("")}</div></div>
       <div class="diagnostic-dashboard">
-        <section class="diagnostic-chart-section"><header><h2>提问趋势</h2><span title="${e(state.filters.timezone)}">提问数 · ${e(state.filters.timezone)}</span></header><div class="diagnostic-trend-host">${questionTrendHtml(data?.trend)}</div></section>
+        <section class="diagnostic-chart-section"><header><h2>提问趋势</h2><span title="${e(state.filters.timezone)}">提问数 · ${e(state.filters.timezone)}</span></header><div class="diagnostic-trend-host">${state.overviewStatus.trend === "loading" || state.overviewErrors.trend ? overviewPlaceholder("trend", "") : questionTrendHtml(data?.trend)}</div></section>
         <section class="diagnostic-agent-section"><header><h2>Agent 分布</h2><span>提问数</span></header>
-          <div class="diagnostic-agent-bars">${agents.slice(0, state.showAgents ? agents.length : 8).map((agent, index) => `<button type="button" data-agent-drill="${e(agent.agent_id)}" data-tone="${index % 3}"><span title="${e(agent.agent_name || agent.agent_id)}">${e(agent.agent_name || agent.agent_id)}</span><span class="diagnostic-bar-track"><i style="width:${Math.max(0, Math.min(100, agent.question_count / max * 100))}%"></i></span><b>${Number(agent.question_count)}</b></button>`).join("") || empty("暂无提问")}</div>
+          <div class="diagnostic-agent-bars">${agents.slice(0, state.showAgents ? agents.length : 8).map((agent, index) => `<button type="button" data-agent-drill="${e(agent.agent_id)}" data-tone="${index % 3}"><span title="${e(agent.agent_name || agent.agent_id)}">${e(agent.agent_name || agent.agent_id)}</span><span class="diagnostic-bar-track"><i style="width:${Math.max(0, Math.min(100, agent.question_count / max * 100))}%"></i></span><b>${Number(agent.question_count)}</b></button>`).join("") || overviewPlaceholder("agents", "暂无提问")}</div>
           ${agents.length > 8 ? button(state.showAgents ? "收起" : `展开全部 ${agents.length} 个 Agent`, "agents", "", "text") : ""}
         </section>
         <section class="diagnostic-recent"><header><h2>最近提问</h2>${button(`查看全部${icon("arrow-right")}`, "all-questions", "", "text")}</header>
@@ -129,11 +154,11 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
             <span class="diagnostic-question-icon">${icon("message-circle-more")}</span>
             <span class="diagnostic-question-copy"><strong title="${e(question.summary)}">${e(question.summary || "附件 / 上下文输入")}</strong><span class="diagnostic-question-meta"><span title="${e(question.agent_name || question.agent_id)}">${e(question.agent_name || question.agent_id)}</span><span aria-hidden="true">·</span>${userCardHtml(question.user_id, state.users)}<span aria-hidden="true">·</span><time title="${e(diagnosticTime(question.created_at))}">${e(shortQuestionTime(question.created_at))}</time></span></span>
             <span class="diagnostic-question-arrow">${icon("arrow-right")}</span>
-          </button>`).join("") || empty("当前范围暂无提问")}</div>
+          </button>`).join("") || overviewPlaceholder("activity", "当前范围暂无提问")}</div>
         </section>
         <div class="diagnostic-dashboard-side">
-          <section><header><h2>最近异常</h2></header>${errors.map((error, index) => `<button type="button" class="diagnostic-error-item" data-error-index="${index}"><span class="diagnostic-error-icon">${icon("triangle-alert")}</span><span class="diagnostic-error-copy"><strong>${e(error.message || error.summary || error.code || "执行异常")}</strong><small><span title="${e(error.agent_name || error.agent_id)}">${e(error.agent_name || error.agent_id)}</span><time title="${e(diagnosticTime(error.created_at))}">${e(shortQuestionTime(error.created_at))}</time></small></span></button>`).join("") || empty("当前范围没有执行异常")}</section>
-          <section id="diagnosticActiveUsers" tabindex="-1"><header><h2>平台活跃用户(提问)</h2>${users.length > 5 ? button(state.showUsers ? "收起" : `展开${icon("arrow-right")}`, "users", "", "text") : ""}</header>${users.slice(0, state.showUsers ? 20 : 5).map((user, index) => `<button type="button" class="diagnostic-active-user" data-user-drill="${e(user.user_id)}"><span class="diagnostic-user-rank">${index + 1}</span><span class="diagnostic-ranking-identity"><span class="diagnostic-identity-icon">${icon("user-round")}</span>${renderUserIdentity(state.users[user.user_id] || {}, {userId:user.user_id, compact:true, copyable:false})}</span><span class="diagnostic-user-count" title="范围内提问数">${Number(user.question_count)}</span></button>`).join("") || empty("暂无活跃账号")}</section>
+          <section><header><h2>最近异常</h2></header>${errors.map((error, index) => `<button type="button" class="diagnostic-error-item" data-error-index="${index}"><span class="diagnostic-error-icon">${icon("triangle-alert")}</span><span class="diagnostic-error-copy"><strong>${e(error.message || error.summary || error.code || "执行异常")}</strong><small><span title="${e(error.agent_name || error.agent_id)}">${e(error.agent_name || error.agent_id)}</span><time title="${e(diagnosticTime(error.created_at))}">${e(shortQuestionTime(error.created_at))}</time></small></span></button>`).join("") || overviewPlaceholder("activity", "当前范围没有执行异常")}</section>
+          <section id="diagnosticActiveUsers" tabindex="-1"><header><h2>平台活跃用户(提问)</h2>${users.length > 5 ? button(state.showUsers ? "收起" : `展开${icon("arrow-right")}`, "users", "", "text") : ""}</header>${users.slice(0, state.showUsers ? 20 : 5).map((user, index) => `<button type="button" class="diagnostic-active-user" data-user-drill="${e(user.user_id)}"><span class="diagnostic-user-rank">${index + 1}</span><span class="diagnostic-ranking-identity"><span class="diagnostic-identity-icon">${icon("user-round")}</span>${renderUserIdentity(state.users[user.user_id] || {}, {userId:user.user_id, compact:true, copyable:false})}</span><span class="diagnostic-user-count" title="范围内提问数">${Number(user.question_count)}</span></button>`).join("") || overviewPlaceholder("activity", "暂无活跃账号")}</section>
         </div>
       </div>`;
   }
@@ -149,10 +174,11 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
         </div>
       </form>
       <div class="diagnostic-session-table-scroll"><div class="diagnostic-session-table" role="table" aria-label="会话查询列表">
-        <div class="diagnostic-session-row diagnostic-session-columns" role="row">${["会话", "Agent", "用户", "App ID", "状态", "最近活动"].map((label, i) => `<span role="columnheader">${label}${i === 5 ? icon("arrow-down") : `<span class="diagnostic-column-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="调整${label}列宽" aria-valuemin="${COLUMN_BOUNDS[i][0]}" aria-valuemax="${COLUMN_BOUNDS[i][1]}" data-resize-column="${i}"></span>`}</span>`).join("")}</div>
+        <div class="diagnostic-session-row diagnostic-session-columns" role="row">${["会话", "Agent", "会话来源", "用户", "App ID", "状态", "最近活动"].map((label, i, labels) => `<span role="columnheader">${label}${i === labels.length - 1 ? icon("arrow-down") : `<span class="diagnostic-column-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="调整${label}列宽" aria-valuemin="${COLUMN_BOUNDS[i][0]}" aria-valuemax="${COLUMN_BOUNDS[i][1]}" data-resize-column="${i}"></span>`}</span>`).join("")}</div>
         ${items.map(item => `<div class="diagnostic-session-row" role="row" tabindex="0" data-session-id="${e(item.session_id)}">
           <div class="diagnostic-session-name" role="cell"><div class="diagnostic-session-title"><strong title="${e(item.title || "未命名会话")}">${e(item.title || "未命名会话")}</strong></div><div class="diagnostic-session-id"><code title="${e(item.session_id)}">${e(String(item.session_id).slice(0, 8))}</code><button type="button" class="diagnostic-copy-separator" data-copy-session="${e(item.session_id)}" aria-label="复制 Session ID" title="复制 Session ID：${e(item.session_id)}">${icon("copy")}</button><p title="${e(item.recent_question?.summary || "当前范围暂无提问")}">${e(item.recent_question?.summary || "当前范围暂无提问")}</p></div></div>
-          <span class="diagnostic-agent-name" role="cell">${sessionAgentIconHtml(item)}<span title="${e(item.agent_name || item.agent_id)}">${e(item.agent_name || item.agent_id || "未记录")}</span></span>
+          <span class="diagnostic-agent-name" role="cell"><span class="diagnostic-session-icon">${icon("bot")}</span><span class="diagnostic-agent-title" title="${e(item.agent_name || item.agent_id)}">${e(item.agent_name || item.agent_id || "未记录")}</span></span>
+          <span class="diagnostic-session-source" role="cell">${renderSessionSource(item)}</span>
           <span role="cell">${renderUserIdentity(state.users[item.user_id] || {}, {userId:item.user_id, copyable:false})}</span>
           <span class="diagnostic-session-app" role="cell" title="${e(item.app_id || "")}">${e(item.app_id || "—")}</span>
           <span role="cell"><span class="diagnostic-status ${e(item.latest_status)}">${e(SESSION_STATUSES[item.latest_status] || "未确认")}</span></span>
@@ -192,15 +218,39 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
     else state.filters.limit = PAGE_SIZE;
     state.listTotal = pageChange ? state.data?.total ?? state.listTotal : null;
     try { state.filters = sessionRange(state.filters); } catch (error) { reader.cancel(); state.busy = false; state.data = null; state.error = error.message; render(); return; }
-    publishFilters(); const scope = reader.begin(); state.busy = true; state.error = ""; state.data = null; restoreScroll(); render();
+    publishFilters(); const scope = reader.begin(); state.busy = true; state.error = ""; state.data = null;
+    state.overviewStatus = state.route.view === "overview" ? Object.fromEntries(OVERVIEW_SECTIONS.map(key => [key, "loading"])) : {};
+    state.overviewErrors = {}; restoreScroll(); render();
+    if (state.route.view === "overview") {
+      const queue = [...OVERVIEW_SECTIONS];
+      // Match the server's two-heavy-query budget; do not fan out all panels at once.
+      const worker = async () => {
+        while (queue.length && scope.current() && state.active) await loadOverviewSection(scope, queue.shift());
+      };
+      await Promise.all([worker(), worker()]);
+      if (scope.current() && state.active) { state.busy = false; patchOverview(); }
+      return;
+    }
     try {
-      const suffix = state.route.view === "overview" ? "/overview" : "";
-      const data = await scope.get(`api/v1/diagnostics/sessions${suffix}?${buildSessionQuery(state.filters, state.route.view === "overview")}`);
+      const data = await scope.get(`api/v1/diagnostics/sessions?${buildSessionQuery(state.filters)}`);
       if (!scope.current() || !state.active) return;
       state.data = data; rememberProfiles(data);
     } catch (error) { if (scope.current() && state.active) state.error = sessionQueryError(error); }
     finally { if (scope.current() && state.active) { state.busy = false; render(); } }
   }
+  async function loadOverviewSection(scope, section) {
+    try {
+      const data = await scope.get(`api/v1/diagnostics/sessions/overview?${buildSessionQuery(state.filters, true)}&section=${section}`);
+      if (!scope.current() || !state.active) return;
+      state.data = {...state.data, ...data}; rememberProfiles(data); state.overviewStatus[section] = "ready";
+      delete state.overviewErrors[section];
+    } catch (error) {
+      if (!scope.current() || !state.active) return;
+      state.overviewStatus[section] = "error"; state.overviewErrors[section] = sessionQueryError(error);
+    }
+    patchOverview(section);
+  }
+
   const openSession = (id, focus = {}) => navigate(diagnosticTarget("detail", focus, id));
   const drill = extra => navigate(diagnosticTarget("list", sessionDrilldown(state.filters, extra)));
   async function mountDetail(saved) {
@@ -231,17 +281,128 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
       view.load(detailData); view.restore?.(saved.detailSnapshot);
       await view.prepareRender?.();
       if (!state.active || detail !== view) return;
+      const id = state.route.id, scope = reader.begin();
+      const session = await scope.get(`api/v1/diagnostics/sessions/${encodeURIComponent(id)}`);
+      if (!scope.current() || !state.active || detail !== view) return;
+      const savedSession = detailData.session;
+      if (session.active_run || savedSession.active_run || session.run_id !== savedSession.run_id
+        || session.last_activity_at !== savedSession.last_activity_at) {
+        await loadDetail(session);
+        return;
+      }
       if (state.route.filters.view === "trajectory" || (detailData.focus.runId && !detailData.focus.eventId)) void loadEvents();
       if (!detailData.historyError && !detailData.contextComplete) void loadContext();
     } catch (error) { if (state.active && detail === view) view.setError?.(sessionQueryError(error)); }
     finally { if (state.active && detail === view) view.setLoading?.(false); }
   }
-  async function loadDetail() {
+  function stopObservation() {
+    const previous = liveObservation;
+    liveObservation = null;
+    previous?.observer.stop();
+    previous?.fallback?.stop();
+  }
+
+  function followCurrentRun(scope, id) {
+    const model = detailData, view = detail;
+    const runId = model.session.active_run?.run_id;
+    if (!runId) return false;
+    const base = `api/v1/diagnostics/sessions/${encodeURIComponent(id)}`;
+    const live = { runId, baselineSequence: null, fallback: null, observer: null };
+    const current = () => liveObservation === live && scope.current() && state.active && detail === view;
+    const readHistory = signal => diagnosticRequest(`${base}/history`, signal);
+    function showHistory(history, replay) {
+      model.history = historyThroughRun(history, runId, { replay, baselineSequence: live.baselineSequence });
+      model.historyError = null;
+      model.focus.view = state.route.filters.view || "conversation";
+      view.load(model);
+    }
+    function finish(session, history) {
+      stopObservation();
+      eventsReader.cancel();
+      eventsLoading = false;
+      model.session = session;
+      model.contextComplete = false;
+      model.eventsComplete = false;
+      model.eventsError = null;
+      model.preserveLive = false;
+      showHistory(history, false);
+      if (model.focus.view === "trajectory" || model.events.length) void loadEvents();
+      void loadContext();
+    }
+
+    live.observer = createSessionObserver({
+      runId,
+      isCurrent: current,
+      connect: signal => window.daFetch(
+        window.serviceUrl(`${base}/live?run_id=${encodeURIComponent(runId)}`),
+        { signal, headers: { Accept: "text/event-stream" }, includeContext: false, reportStatus: false },
+      ),
+      async onSync(frame, signal) {
+        live.baselineSequence = frame.baseline_sequence;
+        live.fallback?.stop();
+        live.fallback = null;
+        const history = await readHistory(signal);
+        if (!current() || signal.aborted) return;
+        model.events = historyThroughRun({ items: model.events }, runId, {
+          replay: true, baselineSequence: live.baselineSequence,
+        }).items;
+        model.preserveLive = false;
+        showHistory(history, true);
+        model.preserveLive = true;
+      },
+      async onEvent(frame, signal) {
+        if (frame.event === "session_event_appended" && frame.data?.event?.event_type === "user/message") {
+          const history = await readHistory(signal);
+          if (!current() || signal.aborted) return;
+          showHistory(history, true);
+        }
+        view.ingestLiveFrame(frame);
+      },
+      async onEnd(_frame, signal) {
+        const [session, history] = await Promise.all([diagnosticRequest(base, signal), readHistory(signal)]);
+        if (current() && !signal.aborted) finish(session, history);
+      },
+      onFallback(error) {
+        if (!current() || live.fallback || [401, 403, 404].includes(error?.status)) {
+          if (current() && [401, 403, 404].includes(error?.status)) stopObservation();
+          return;
+        }
+        model.preserveLive = false;
+        live.fallback = createHistoryFollower({
+          isCurrent: current,
+          intervalMs: 2000,
+          historyIntervalMs: 3000,
+          async readStatus(signal) {
+            const session = await diagnosticRequest(base, signal);
+            const active = session.active_run;
+            return { status: active?.run_id === runId ? active.status : "idle", run_id: active?.run_id, session };
+          },
+          readHistory,
+          onHistory(history, status) {
+            if (status.status === "idle") finish(status.session, history);
+            else showHistory(history, false);
+          },
+          onError(failure) {
+            if ([401, 403, 404].includes(failure?.status)) stopObservation();
+          },
+        });
+        void live.fallback.start();
+      },
+    });
+    liveObservation = live;
+    void live.observer.start();
+    return true;
+  }
+
+  async function loadDetail(initialSession = null) {
+    stopObservation();
     contextReader.cancel(); eventsReader.cancel(); eventsLoading = false;
-    const scope = reader.begin(), id = state.route.id, focus = { view: state.route.filters.view || "conversation", eventId: state.route.filters.event_id, runId: state.route.filters.run_id };
+    const scope = reader.begin(), id = state.route.id;
+    const { view, event_id, run_id, turn_id } = state.route.filters;
+    const focus = { view: view || "conversation", eventId: event_id, runId: run_id, turnId: turn_id };
     detailData = null; detail.setLoading?.(true);
     try {
-      const session = await scope.get(`api/v1/diagnostics/sessions/${encodeURIComponent(id)}`);
+      const session = initialSession || await scope.get(`api/v1/diagnostics/sessions/${encodeURIComponent(id)}`);
       if (!scope.current() || state.route.id !== id || !state.active) return;
       rememberProfiles(session);
       detailData = { session, history: null, events: [], eventsComplete: false, users: session.users || {}, focus };
@@ -256,8 +417,9 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
       await detail.prepareRender?.();
       if (!scope.current() || state.route.id !== id || !state.active) return;
       if (detailData.historyError || detailData.eventsError) detail.setError?.({ history: detailData.historyError, events: detailData.eventsError });
-      if (state.route.filters.view === "trajectory" || (focus.runId && !focus.eventId)) void loadEvents();
-      if (!detailData.historyError) void loadContext();
+      if (state.route.filters.view === "trajectory" || (focus.runId && !focus.eventId && !focus.turnId)) void loadEvents();
+      const following = followCurrentRun(scope, id);
+      if (!following && !detailData.historyError) void loadContext();
     } catch (error) { if (scope.current() && state.active) detail.setError?.(sessionQueryError(error)); }
     finally { if (scope.current() && state.active) detail.setLoading?.(false); }
   }
@@ -268,7 +430,13 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
     try {
       const events = await eventsReader.readEvents(scope, id, (count, complete) => { if (scope.current() && !complete) detail.setLoading?.(`已读取 ${count} 条轨迹，继续读取…`, { section: "events" }); });
       if (!scope.current() || !state.active || state.route.id !== id || !detailData) return;
-      Object.assign(detailData, { events, eventsComplete: true, eventsError: null }); detailData.focus.view = state.route.filters.view || "conversation"; detail.load(detailData);
+      const live = liveObservation;
+      const visibleEvents = live && detailData.preserveLive
+        ? historyThroughRun({ items: events }, live.runId, { replay: true, baselineSequence: live.baselineSequence }).items
+        : events;
+      Object.assign(detailData, { events: visibleEvents, eventsComplete: true, eventsError: null });
+      detailData.focus.view = state.route.filters.view || "conversation";
+      detail.load(detailData);
     } catch (error) { if (scope.current() && state.active && detailData) { detailData.eventsError = sessionQueryError(error); detail.setError?.(detailData.eventsError, { section: "events" }); } }
     finally { if (scope.current()) eventsLoading = false; }
   }
@@ -303,6 +471,16 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
     const target = event.target.closest("button,[data-session-id],[data-day-index]"); if (!target || !root.contains(target)) return;
     if (target.dataset.sessionAction === "retry-detail" && state.active && state.route?.view === "detail" && !detail) { void mountDetail(null); return; }
     if (state.route?.view === "detail") return;
+    if (target.dataset.sessionAction === "retry-overview") {
+      const section = target.dataset.overviewSection;
+      if (!state.busy && OVERVIEW_SECTIONS.includes(section)) {
+        const scope = reader.begin(); state.busy = true; state.overviewStatus[section] = "loading";
+        delete state.overviewErrors[section]; patchOverview(section);
+        await loadOverviewSection(scope, section);
+        if (scope.current() && state.active) { state.busy = false; patchOverview(); }
+      }
+      return;
+    }
     if (target.dataset.copySession) {
       event.stopPropagation();
       if (target.disabled) return;
@@ -435,7 +613,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
       detailMountGeneration += 1;
       cancelReaders(); state.active = true; state.route = route; detail?.destroy(); detail = null; state.busy = false; state.error = "";
       if (route.view === "detail") return mountDetail(saved);
-      state.filters = { offset: 0, ...route.filters, limit: PAGE_SIZE }; state.data = saved?.data || null; state.listTotal = null;
+      state.filters = { offset: 0, ...route.filters, limit: PAGE_SIZE }; state.data = saved?.overviewComplete === false ? null : saved?.data || null; state.overviewStatus = {}; state.overviewErrors = {}; state.listTotal = null;
       if (saved) {
         Object.assign(state, { filters: { ...saved.filters, limit: PAGE_SIZE }, showUsers: saved.showUsers, showAgents: saved.showAgents });
         if (Number(saved.filters?.limit || PAGE_SIZE) !== PAGE_SIZE) state.data = null;
@@ -446,7 +624,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
       if (state.data) { rememberProfiles(state.data); render(); restoreScroll(saved); } else void loadCurrent();
     },
     deactivate() { detailMountGeneration += 1; state.active = false; cancelReaders(); selectBinding?.close(); detail?.destroy(); detail = null; },
-    snapshot() { return state.route?.view === "detail" ? { detailData, detailSnapshot: detail?.snapshot?.() } : { filters: { ...state.filters }, data: state.data, showUsers: state.showUsers, showAgents: state.showAgents, ...captureScroll() }; },
+    snapshot() { return state.route?.view === "detail" ? { detailData, detailSnapshot: detail?.snapshot?.() } : { filters: { ...state.filters }, data: state.data, overviewComplete: !state.busy && !Object.keys(state.overviewErrors).length, showUsers: state.showUsers, showAgents: state.showAgents, ...captureScroll() }; },
     clear() { detailMountGeneration += 1; state.active = false; cancelReaders(); detail?.destroy(); detail = null; detailData = null; state.data = null; state.users = {}; listFilters = {}; columnWidths = null; state.agents.clear(); state.channelAgents.clear(); root.replaceChildren(); },
   };
 }

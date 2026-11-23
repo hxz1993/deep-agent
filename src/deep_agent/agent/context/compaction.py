@@ -31,6 +31,7 @@ from pydantic_ai.tools import RunContext
 from pydantic_core import to_jsonable_python
 from loguru import logger
 
+from deep_agent.agent.tool_names import WIRE_NAMES, without_present_history
 from deep_agent.agent.context.budget import (
     ContextBudget,
     OutputTokenSample,
@@ -49,6 +50,7 @@ from deep_agent.agent.context.handoff import (
     safe_tool_args_preview,
     project_tool_evidence,
 )
+from deep_agent.agent.observability import observe_run_phase
 from deep_agent.options import OPTION
 from deep_agent.usage import response_call
 
@@ -315,7 +317,8 @@ def _deterministic_evidence_text(messages: list[ModelMessage]) -> str:
     calls: dict[str, BaseToolCallPart] = {}
     evidence: list[dict[str, Any]] = []
     for message in messages:
-        for part in message.parts:
+        aliases = (message.metadata or {}).get(WIRE_NAMES) or {}
+        for index, part in enumerate(message.parts):
             if isinstance(part, BaseToolCallPart) and part.tool_call_id:
                 calls[part.tool_call_id] = part
             elif isinstance(part, (BaseToolReturnPart, RetryPromptPart)) and part.tool_call_id:
@@ -326,6 +329,7 @@ def _deterministic_evidence_text(messages: list[ModelMessage]) -> str:
                 item = project_tool_evidence({
                     "call_id": part.tool_call_id,
                     "tool_name": part.tool_name or (call.tool_name if call else None),
+                    "wire_name": aliases.get(str(index)),
                     "args_preview": safe_tool_args_preview(call.args_as_dict(), 384) if call is not None else None,
                     "outcome": outcome,
                     "result_complete": bool(metadata.get("inline_fallback") is not None
@@ -677,7 +681,7 @@ def _summary_materials(
         cutoff,
     )
     previous_evidence = _anchor_evidence_contents(summary_source)
-    to_summarize = _strip_summary_and_system(summary_source)
+    to_summarize = _strip_summary_and_system(without_present_history(summary_source))
     pruned: list[dict[str, Any]] = []
     generated_evidence = tuple(
         item
@@ -771,17 +775,24 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
         state: ContextRunState = ctx.deps.context_state
         state.request_index += 1
         messages = list(request_context.messages)
-        budget = await asyncio.to_thread(
-            build_context_budget,
-            messages,
-            context_window_tokens=self.context_window_tokens,
-            max_output_tokens=self.max_output_tokens,
-            estimator=state.estimator,
-            output_history=state.raw_history,
-            additional_output_samples=state.output_samples,
-            request_parameters=request_context.model_request_parameters,
-            estimate_scope="full_model_request",
-        )
+        timing = {
+            "session_id": getattr(ctx.deps, "session_id", None),
+            "run_id": getattr(ctx.deps, "run_id", None) or getattr(ctx, "run_id", None),
+            "agent_id": getattr(ctx.deps, "agent_id", None),
+            "request_index": getattr(ctx, "run_step", None),
+        }
+        with observe_run_phase("model_context_budget", **timing):
+            budget = await asyncio.to_thread(
+                build_context_budget,
+                messages,
+                context_window_tokens=self.context_window_tokens,
+                max_output_tokens=self.max_output_tokens,
+                estimator=state.estimator,
+                output_history=[],
+                additional_output_samples=state.output_samples,
+                request_parameters=request_context.model_request_parameters,
+                estimate_scope="full_model_request",
+            )
         state.last_budget = budget
         self.last_budget = budget
         state.pending_request_estimate = budget.estimated_request_tokens
@@ -798,14 +809,12 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
         if not budget.enabled:
             return request_context
 
-        if state.refresh_raw_history is not None:
-            state.raw_history = await state.refresh_raw_history(None)
-        protected = _protected_messages(messages, state.raw_history)
-        protected_estimate = _request_estimate(
-            state.estimator,
-            protected,
-            request_context,
-        )
+        # The current user/media references are fixed at admission. The SDK
+        # provides the growing model-visible request, and output_samples holds
+        # the rolling response samples from admitted history and this Run.
+        with observe_run_phase("model_context_protected_estimate", **timing):
+            protected = _protected_messages(messages, state.raw_history)
+            protected_estimate = _request_estimate(state.estimator, protected, request_context)
         if (
             budget.usable_request_tokens is not None
             and protected_estimate > budget.usable_request_tokens
@@ -819,6 +828,9 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
         if trigger is None or budget.estimated_request_tokens <= trigger:
             return request_context
 
+        if state.checkpoint_history is not None:
+            # Record the source facts before publishing the compaction Event.
+            await state.checkpoint_history(ctx)
         telemetry.triggered = True
         telemetry.trigger_count += 1
         await state.begin_compaction("pressure")
@@ -872,6 +884,10 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
                 target_met=telemetry.candidate_valid,
             )
 
+        # Request-context changes apply to this request only in Pydantic AI 2.68.
+        # Keep subsequent steps on the committed projection, as Harness does.
+        if compacted is not messages:
+            ctx.messages[:] = compacted
         request_context.messages = compacted
         after = _request_estimate(state.estimator, compacted, request_context)
         # Provider usage describes the request that was actually sent after
@@ -1061,7 +1077,7 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
             build_context_budget, [*request_context.messages, response],
             context_window_tokens=self.context_window_tokens,
             max_output_tokens=self.max_output_tokens,
-            estimator=state.estimator, output_history=state.raw_history,
+            estimator=state.estimator, output_history=[],
             additional_output_samples=state.output_samples,
             request_parameters=request_context.model_request_parameters,
         )
@@ -1083,8 +1099,8 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
     ) -> tuple[list[ModelMessage], int]:
         """Build a handoff bounded by the usable request budget."""
 
-        if state.refresh_raw_history is not None:
-            state.raw_history = await state.refresh_raw_history(messages)
+        if state.refresh_compaction_history is not None:
+            state.raw_history, messages = await state.refresh_compaction_history(messages)
         compacted = list(messages)
         estimated_tokens = _request_estimate(
             state.estimator,

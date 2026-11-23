@@ -4,12 +4,18 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_serializer
 
+from deep_agent.conversation.models import ConversationOutputFile
 from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.context_reference import ContextReference, validate_context_references
 from deep_agent.time import UtcDatetime
 
 
 class ChatRequest(BaseModel):
+    reasoning_effort: str | None = Field(default=None, min_length=1, max_length=64)
+    remote_task_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,64}$",
+        description="Select a waiting remote Agent task in this conversation for this reply.")
+    remote_question_id: str | None = Field(default=None, min_length=1, max_length=512,
+        description="Only answer the selected remote task if this question is still pending.")
     agent_id: str | None = Field(
         default=None,
         description=(
@@ -104,6 +110,7 @@ class ChatResponse(BaseModel):
     run_id: str | None = None
     output: Any
     output_info: dict[str, Any] | None = None
+    output_files: list[ConversationOutputFile] | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_serializer(mode="wrap")
     def _omit_disabled_output_info(self, handler):
@@ -167,6 +174,8 @@ class SessionInfo(BaseModel):
     source_id: str | None = Field(default=None, description="Source instance ID, not necessarily a channel account.")
     app_id: str | None = Field(default=None, description="App recorded when the session was created.")
     space_id: str | None = Field(default=None, description="Space recorded when the session was created.")
+    app_name: str | None = Field(default=None, description="Visible current App name, when available.")
+    space_name: str | None = Field(default=None, description="Visible current Space name, when available.")
     session_id: str
     message_count: int
     turn_count: int = Field(default=0, description="Distinct conversation turns in this session.")
@@ -180,8 +189,33 @@ class SessionInfo(BaseModel):
     updated_at: UtcDatetime | None = Field(default=None, description="Last conversation activity time (UTC).")
 
 
+class SessionListItem(SessionInfo):
+    active_run_id: str | None = Field(
+        default=None, exclude_if=lambda value: value is None,
+        description="Current execution on the serving instance, when requested.",
+    )
+
+
 class SessionListResponse(BaseModel):
-    items: list[SessionInfo]
+    items: list[SessionListItem]
     total: int = Field(description="Total sessions matching the filters.")
     limit: int
     offset: int
+
+
+class SessionAgentFilterOption(BaseModel):
+    agent_id: str
+    session_count: int
+
+
+class SessionAppFilterOption(BaseModel):
+    app_id: str
+    app_name: str | None = None
+    session_count: int
+
+
+class SessionFilterOptionsResponse(BaseModel):
+    agents: list[SessionAgentFilterOption]
+    apps: list[SessionAppFilterOption]
+    unassigned_count: int
+    total: int

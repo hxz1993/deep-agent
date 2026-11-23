@@ -11,6 +11,7 @@ from pydantic_ai.messages import (
 )
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from deep_agent.db.serialization import StoredUserPromptPart
 from deep_agent.db.conversation import SqlConversationCoordinator
 from deep_agent.db.dialect import DbDialect
 from deep_agent.db.models import Agent, Base, LlmModel, LlmProvider
@@ -226,7 +227,7 @@ class SessionEventStoreTests(unittest.IsolatedAsyncioTestCase):
         raw = [
             ModelRequest(
                 parts=[
-                    UserPromptPart(
+                    StoredUserPromptPart(
                         content=[
                             "first",
                             {

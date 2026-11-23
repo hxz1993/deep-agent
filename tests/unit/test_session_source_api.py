@@ -7,12 +7,10 @@ from pydantic_ai.messages import ModelRequest, UserPromptPart
 
 from deep_agent.core.context import get_context
 from deep_agent.db.models import ChatSession
-from tests.unit.test_session_list import SessionListApiTests
+from tests.helpers.session_list import SessionListFixture
 
 
-class SessionSourceApiTests(unittest.TestCase):
-    setUp = SessionListApiTests.setUp
-    tearDown = SessionListApiTests.tearDown
+class SessionSourceApiTests(SessionListFixture, unittest.TestCase):
 
     def test_source_filter_is_persisted_and_owner_scoped(self):
         async def seed():

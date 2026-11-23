@@ -13,19 +13,29 @@ from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.tool_output_limits import build_tool_output_limits
 from deep_agent.agent.history_tools import build_history_toolset
 from deep_agent.agent.spec import DEFAULT_INSTRUCTIONS, AgentSpec
+from deep_agent.agent_service.output import PUBLICATION_UI_INSTRUCTIONS, PublicationProtocol
 from deep_agent.models.context_window import ContextWindowModel
+from deep_agent.models.reasoning import (
+    DEFAULT_EFFORT,
+    ReasoningEffortError,
+    bound_agent_effort,
+    effective_agent_effort,
+    reasoning_settings,
+)
 from deep_agent.models.provider_registry import (
     ProviderRuntimeError,
     effective_base_url,
     load_provider_for_model,
     validate_provider_config,
 )
-from deep_agent.capabilities.catalog import invalid_tool_package_codes
 from deep_agent.capabilities.codes import canonical_tool_package_codes
 from deep_agent.capabilities.display_names import build_tool_display_name_map
-from deep_agent.capabilities.mcp.resolver import load_mcp_rows, resolve_mcp_toolsets
+from deep_agent.capabilities.mcp.resolver import load_mcp_rows, load_mcp_tool_packages, resolve_mcp_toolsets
 from deep_agent.capabilities.mcp.resources import build_mcp_resource_toolset
-from deep_agent.capabilities.ui.registry import prepare_ui_tool_packages_for_spec
+from deep_agent.capabilities.ui.registry import (
+    UiToolCatalog, load_ui_tool_catalog, prepare_ui_tool_packages_for_spec, runnable_ui_tool_package_codes,
+)
+from deep_agent.services.integration_app_runtime import RunAppContext
 from deep_agent.skills.runtime import ResolvedSkills, resolve_skills_for_run
 from deep_agent.skills.script_tool import build_skill_script_toolset
 from deep_agent.skills.tools import build_skill_resource_toolset
@@ -34,7 +44,7 @@ from deep_agent.files.image_view.runtime import build_view_image_runtime
 from deep_agent.documents.runtime import build_document_runtime
 from deep_agent.documents.settings import DOCUMENT_PACKAGE_CODE, load_document_parsing_config
 from deep_agent.core.context import AppContext
-from deep_agent.channels.instructions import channel_instructions
+from deep_agent.channels.instructions import CHANNEL_UI_INSTRUCTIONS, channel_instructions
 from deep_agent.channels.outbound import ChannelRunContext
 from deep_agent.core.exceptions import AgentModelNotConfiguredError, AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.options import OPTION
@@ -52,7 +62,7 @@ async def _provider_for_model(ctx: AppContext, llm_row):
 
 
 def _model_settings_for_spec(spec: AgentSpec) -> ModelSettings | None:
-    values: ModelSettings = {}
+    values: ModelSettings = dict(spec.reasoning_settings or {})
     if spec.max_output_tokens is not None:
         values["max_tokens"] = spec.max_output_tokens
     if not values:
@@ -137,6 +147,10 @@ async def build_runner_for_agent(
     request_headers: dict[str, str] | None = None,
     channel_type: str | None = None,
     channel_context: ChannelRunContext | None = None,
+    reasoning_effort: str | None = None,
+    expected_provider_id: str | None = None,
+    app_context: RunAppContext | None = None,
+    publication_protocol: PublicationProtocol | None = None,
 ) -> AgentRunner:
     """Assemble a per-request AgentRunner from a database agent configuration."""
     row = await ctx.stores.agent.get_by_id(agent_id)
@@ -149,15 +163,46 @@ async def build_runner_for_agent(
     llm_row = await ctx.stores.llm_model.get_by_id(effective_model_id)
     if llm_row is None:
         raise LlmModelNotFoundError(effective_model_id)
+    if expected_provider_id is not None and llm_row.provider_id != expected_provider_id:
+        raise ReasoningEffortError("原模型的供应商已变更")
 
     provider = await _provider_for_model(ctx, llm_row)
     spec = AgentSpec.from_row(row, llm_row, provider=provider)
+    if reasoning_effort is not None:
+        bound_agent_effort(reasoning_effort, llm_row, provider)
+    effort = reasoning_effort or effective_agent_effort(row, llm_row, provider) or DEFAULT_EFFORT
+    spec.reasoning_effort = effort
+    if effort != DEFAULT_EFFORT:
+        spec.reasoning_settings = reasoning_settings(llm_row, provider, effort)
     entry_instructions = channel_instructions(channel_type)
     if entry_instructions:
         spec = replace(spec, instructions=f"{spec.instructions}\n\n{entry_instructions}")
     if capabilities is not None:
         spec.capabilities = canonical_tool_package_codes(capabilities)
-    runner = await _build_runner_from_spec(spec, ctx, request_headers=request_headers, channel_context=channel_context)
+    if app_context is not None:
+        instructions = (
+            f"{spec.instructions}\n\n"
+            f"当前会话应用上下文：app_id={app_context.app_id}，space_id={app_context.space_id}。"
+        )
+        if app_context.skill_scope is not None:
+            instructions += (
+                "\n同一业务口径优先采用当前应用的专用提示词和 Skill。通用 Skill 仍可用，"
+                "并继续遵守平台授权和基础约束。"
+            )
+            if app_context.prompt_append:
+                instructions += f"\n\n当前应用追加提示词：\n{app_context.prompt_append}"
+        spec = replace(spec, instructions=instructions)
+    published_run = publication_protocol in ("a2a", "mcp")
+    if published_run or channel_type or channel_context is not None:
+        clarification = PUBLICATION_UI_INSTRUCTIONS if published_run else CHANNEL_UI_INSTRUCTIONS
+        spec = replace(
+            spec,
+            capabilities=[code for code in spec.capabilities if not code.startswith("ui:")],
+            instructions=f"{spec.instructions}\n\n{clarification}",
+        )
+    runner = await _build_runner_from_spec(
+        spec, ctx, request_headers=request_headers, channel_context=channel_context, app_context=app_context,
+    )
     async def load_output_config():
         current = await ctx.stores.agent.get_by_id(agent_id)
         if current is None:
@@ -183,6 +228,7 @@ async def _build_runner_from_spec(
     *,
     request_headers: dict[str, str] | None = None,
     channel_context: ChannelRunContext | None = None,
+    app_context: RunAppContext | None = None,
 ) -> AgentRunner:
     spec = replace(
         spec,
@@ -190,21 +236,41 @@ async def _build_runner_from_spec(
     )
     if spec.provider_config is not None:
         validate_provider_config(spec.provider_config)
-    invalid_packages = await invalid_tool_package_codes(
-        spec.capabilities, ctx.registry, ctx.stores
-    )
+    selected = set(spec.capabilities)
+    available = set(ctx.registry.codes()) | {"ui:builtin"}
+    from deep_agent.remote_agents.contracts import CONNECTION_PREFIX, REMOTE_AGENT_PROTOCOLS
+
+    remote_agent_capabilities = None
+    if any(code.startswith(CONNECTION_PREFIX) for code in selected) and ctx.stores.remote_agent is not None:
+        from deep_agent.remote_agents.harness import remote_capabilities
+
+        connections = await ctx.stores.remote_agent.selected(spec.capabilities)
+        available.update(CONNECTION_PREFIX + row.id for row in connections)
+        # Retired transports should not disable an Agent's other tools.
+        connections = [row for row in connections if row.config.get("protocol") in REMOTE_AGENT_PROTOCOLS]
+        if connections:
+            remote_agent_capabilities = remote_capabilities(ctx.get_remote_agents(), connections)
+    mcp_selected = any(code.startswith("mcp:") for code in selected)
+    mcp_rows = await load_mcp_rows(ctx.stores) if mcp_selected else []
+    mcp_packages = await load_mcp_tool_packages(ctx.stores, rows=mcp_rows) if mcp_selected else []
+    available.update(package.code for package in mcp_packages)
+
+    ui_catalog = UiToolCatalog(tools=[], packages={})
+    if any(code.startswith("ui:") and code != "ui:builtin" for code in selected):
+        ui_catalog = await load_ui_tool_catalog(ctx.stores)
+        available.update(await runnable_ui_tool_package_codes(ctx.stores, catalog=ui_catalog))
+    invalid_packages = sorted(selected - available)
     if invalid_packages:
         from deep_agent.core.exceptions import ToolPackageError
 
         raise ToolPackageError(
             "Unknown or unavailable tool packages: " + ", ".join(invalid_packages)
         )
-    mcp_rows = await load_mcp_rows(ctx.stores)
-
-    dynamic_ui_packages, ui_tool_hints = await prepare_ui_tool_packages_for_spec(
-        ctx.stores,
-        spec,
-    )
+    dynamic_ui_packages, ui_tool_hints = ([], {})
+    if any(code.startswith("ui:") for code in selected):
+        dynamic_ui_packages, ui_tool_hints = await prepare_ui_tool_packages_for_spec(
+            ctx.stores, spec, catalog=ui_catalog,
+        )
     tool_display_names = build_tool_display_name_map(
         ctx.registry,
         capabilities=spec.capabilities,
@@ -212,20 +278,22 @@ async def _build_runner_from_spec(
         ui_packages=dynamic_ui_packages,
     )
 
-    mcp_toolsets = await resolve_mcp_toolsets(ctx.stores, spec, mcp_rows=mcp_rows)
+    mcp_toolsets = await resolve_mcp_toolsets(ctx.stores, spec, mcp_rows=mcp_rows, mcp_packages=mcp_packages)
     mcp_resource_toolset = build_mcp_resource_toolset(spec, mcp_rows)
     resolved_skills = await resolve_skills_for_run(
         ctx.stores,
         spec.skills,
         runtime=ctx.skill_runtime,
-        request_headers=request_headers or {},
+        app_id=app_context.app_id if app_context else None,
+        scope_ref=app_context.skill_scope if app_context else None,
+        app_skill_codes=app_context.skill_codes if app_context else (),
     )
     script_execution_available = _skill_script_execution_available(
         spec,
         ctx,
         resolved_skills,
     )
-    skill_resource_toolset = build_skill_resource_toolset(resolved_skills.resources)
+    skill_resource_toolset = build_skill_resource_toolset({skill.code: skill for skill in resolved_skills.items})
     file_export_toolset = build_file_export_toolset()
     skill_script_toolset = (
         build_skill_script_toolset(
@@ -295,13 +363,21 @@ async def _build_runner_from_spec(
     history_toolset = build_history_toolset(ctx.store)
     channel_toolset = None
     if channel_context is not None:
+        from deep_agent.channels.doc_tool import build_channel_doc
         from deep_agent.channels.message_tool import build_channel_message_toolset
         from deep_agent.channels.registry import default_registry
         from deep_agent.services.channel_gateway_client import ChannelGatewayClient
         account = await ctx.stores.channel.get_account(channel_context.account_id)
         caps = default_registry().message_capabilities(account.channel_type)
         channel_toolset = build_channel_message_toolset(ctx.stores.channel, ChannelGatewayClient(), channel_context, caps)
-        spec = replace(spec, instructions=spec.instructions + "\n本轮已提供channel_message：向当前聊天发图片、文件和已有音视频使用此内置工具，无需MCP；媒体使用会话file_id。普通回答由渠道自动投递。工具已确认发送的内容不要重复贴出；发送结果未知时不得盲目补发。")
+        channel_toolset.add_function(build_channel_doc(account.channel_type, caps))
+        spec = replace(
+            spec,
+            instructions=(
+                f"{spec.instructions}\n需要另发渠道消息时，参照 channel_message 的工具说明。"
+                "用户询问当前渠道用法或收发限制时，如有渠道说明工具 channel_doc，调用它并以返回的说明为准。"
+            ),
+        )
 
     web_runtime = None
     if WEB_PACKAGE_CODE in spec.capabilities:
@@ -354,6 +430,7 @@ async def _build_runner_from_spec(
         web_toolset=(web_runtime.toolset if web_runtime is not None else None),
         document_toolset=(document_runtime.toolset if document_runtime else None),
         document_lifecycle=(document_runtime.lifecycle if document_runtime else None),
+        remote_agent_capabilities=remote_agent_capabilities,
     )
     if spec.context_window_tokens is not None and agent.model is not None:
         agent.model = ContextWindowModel(agent.model, spec.context_window_tokens)
@@ -368,6 +445,7 @@ async def _build_runner_from_spec(
         ui_tool_hints=ui_tool_hints,
         tool_display_names=tool_display_names,
         model_settings=_model_settings_for_spec(spec),
+        reasoning_effort=spec.reasoning_effort,
         context_window_tokens=spec.context_window_tokens,
         max_output_tokens=spec.max_output_tokens,
         model_tags=spec.tags,

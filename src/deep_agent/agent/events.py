@@ -10,7 +10,6 @@ from pydantic_ai.messages import (
     OutputToolResultEvent,
     PartDeltaEvent,
     PartStartEvent,
-    RetryPromptPart,
     TextPart,
     TextPartDelta,
     ThinkingPart,
@@ -22,7 +21,9 @@ from pydantic_ai.messages import (
     NativeToolSearchCallPart,
     NativeToolSearchReturnPart,
 )
+from deep_agent.agent.history import is_tool_retry
 from deep_agent.agent.tool_output_limits import tool_result_artifacts
+from deep_agent.remote_agents.contracts import tool_metadata as remote_agent_metadata
 from deep_agent.agent.planning import is_planning_tool, plan_snapshot_from_part
 from deep_agent.web.images import safe_web_image_value, web_image_tool_value, view_image_tool_value
 
@@ -224,6 +225,9 @@ def _map_tool_return_part(part: ToolReturnPart) -> dict[str, Any] | None:
         sources = part.metadata.get("sources")
         if isinstance(sources, list):
             payload["sources"] = _to_jsonable(sources)
+    remote = remote_agent_metadata(part.tool_name, part.metadata)
+    if remote is not None:
+        payload["metadata"] = {"remote_agent": remote}
     return payload
 
 
@@ -297,7 +301,7 @@ def _map_part_event(
 
 @map_event.register(FunctionToolResultEvent)
 def _map_function_tool_result(event: FunctionToolResultEvent) -> dict[str, Any] | None:
-    if isinstance(event.part, RetryPromptPart):
+    if is_tool_retry(event.part):
         return tool_call_removed(
             event.part.tool_name,
             event.part.tool_call_id,

@@ -33,8 +33,8 @@ class SkillDeleteRuntimeRaceTests(unittest.IsolatedAsyncioTestCase):
     async def test_late_delete_cleanup_keeps_reinstalled_runtime(self):
         original_delete = self.stores.skill_package.delete
 
-        async def delete_then_reinstall(code):
-            result = await original_delete(code)
+        async def delete_then_reinstall(code, **kwargs):
+            result = await original_delete(code, **kwargs)
             await self.stores.skill_package.create(self.record.model_copy(update={'platform_file_id': 'new-file'}))
             return result
 

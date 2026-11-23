@@ -448,7 +448,7 @@ async function sessionReview() {
   if (screenOnly) return;
   await check("list: bounded column resizing keeps headers and rows aligned", async () => {
     const handle = first('[data-resize-column="0"]');
-    assert.equal(await page.locator('[data-resize-column]').count(), 5);
+    assert.equal(await page.locator('[data-resize-column]').count(), 6);
     const readWidths = () => first('.diagnostic-session-columns').evaluate(node => [...node.children].map(child => child.getBoundingClientRect().width));
     const original = await readWidths(); const box = await handle.boundingBox();
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();

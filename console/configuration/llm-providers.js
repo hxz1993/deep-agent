@@ -48,6 +48,7 @@ const PROVIDER_BRANDS = {
   minimax: { src: "./assets/provider-logos/minimax.ico", tone: "minimax" },
   stepfun: { src: "./assets/provider-logos/stepfun.svg", tone: "stepfun" },
   google: { src: "./assets/provider-logos/google-gemini.png", tone: "google" },
+  xai: { src: "./assets/provider-logos/xai.svg", tone: "xai" },
   openai_compatible: { src: "./assets/provider-logos/openai-compatible.svg", tone: "compatible" },
 };
 
@@ -111,6 +112,13 @@ function setProviderAuthState(message, status = "idle") {
   text.closest(".provider-auth-status").dataset.state = status;
 }
 
+function setProviderAuthorizationLink(url = "") {
+  const link = document.getElementById("llmProviderAuthorizationLink");
+  link.classList.toggle("hidden", !url);
+  if (url) link.href = url;
+  else link.removeAttribute("href");
+}
+
 function syncProviderAccessMode(mode, { editing = false } = {}) {
   providerAdminState.accessMode = mode;
   const subscription = mode === "subscription";
@@ -144,6 +152,7 @@ function syncProviderAccessMode(mode, { editing = false } = {}) {
 }
 
 async function cancelProviderAuthorization() {
+  setProviderAuthorizationLink();
   const flowId = providerAdminState.flowId;
   providerAdminState.flowId = null;
   providerAdminState.verified = false;
@@ -205,12 +214,14 @@ const llmProvidersAdmin = {
     if (!host) return;
     host.querySelectorAll("[data-model-test-result]").forEach((element) => {
       const result = providerAdminState.modelTests.get(element.dataset.modelTestResult);
-      const labels = { pending: "等待测试", testing: "测试中…", success: "成功", error: "失败" };
+      const labels = { pending: "等待测试", testing: "测试中…", success: "成功" };
       element.className = `provider-model-test-result ${result?.status || ""}`;
-      element.textContent = result ? `${labels[result.status]}${Number.isFinite(result.elapsed_ms) ? ` · ${(result.elapsed_ms / 1000).toFixed(1)}s` : ""}` : "";
-      element.title = result?.message || "";
+      element.textContent = result?.status === "error"
+        ? result.message || "未返回详细原因，请重试或检查服务日志"
+        : result ? `${labels[result.status]}${Number.isFinite(result.elapsed_ms) ? ` · ${(result.elapsed_ms / 1000).toFixed(1)}s` : ""}` : "";
+      element.title = "";
       element.tabIndex = result ? 0 : -1;
-      element.setAttribute("aria-label", result ? `${element.textContent}，${result.message || ""}` : "");
+      element.setAttribute("aria-label", element.textContent);
     });
     const button = host.querySelector("[data-provider-test-models]");
     if (button) {
@@ -415,6 +426,7 @@ const llmProvidersAdmin = {
     const { choices } = window.DeepAgentProviderCatalog.buildProviderCatalogChoices({
       provider: providerCatalogPickerState.provider,
       catalogModels: source?.models || [],
+      catalogProviderId: source?.provider_id,
       existingModels: providerModels(providerCatalogPickerState.provider?.id),
     });
     providerCatalogPickerState.choices = choices;
@@ -453,8 +465,9 @@ const llmProvidersAdmin = {
       const modalities = (choice.payload.input_modalities || []).map((item) => labels[item] || item).join("、") || "文本";
       return `<label class="provider-catalog-choice ${choice.added || created ? "is-added" : ""}">
         <input type="checkbox" name="providerCatalogChoice" value="${escapeHtml(choice.id)}" ${disabled ? "disabled" : ""} ${picker.selectedIds.has(choice.id) ? "checked" : ""} />
-        <span class="provider-catalog-choice-copy"><code title="${escapeHtml(choice.model)}">${escapeHtml(choice.model)}</code><small>${escapeHtml(modalities)} · ${escapeHtml(context)}</small>${choice.error ? `<small class="provider-catalog-choice-error">${escapeHtml(choice.error)}</small>` : ""}</span>
-        <span class="badge ${choice.added || created ? "on" : ""}">${created ? "本次已添加" : choice.added ? "已添加" : choice.error ? "添加失败" : "可添加"}</span>
+        <span class="provider-catalog-choice-copy"><code title="${escapeHtml(choice.model)}">${escapeHtml(choice.model)}</code><small>${escapeHtml(modalities)} · ${escapeHtml(context)}</small></span>
+        ${choice.error ? `<span class="provider-catalog-choice-error">${escapeHtml(choice.error)}</span>` :
+          `<span class="badge ${choice.added || created ? "on" : ""}">${created ? "本次已添加" : choice.added ? "已添加" : "可添加"}</span>`}
       </label>`;
     }).join("") : `<div class="provider-model-empty">${generic && !picker.sourceId ? "请先选择目录供应商" : picker.query ? "未找到匹配模型" : "目录中暂无模型"}</div>`;
     host.querySelectorAll('input[name="providerCatalogChoice"]').forEach((input) => {
@@ -684,20 +697,30 @@ document.addEventListener("DOMContentLoaded", () => {
     const form = document.getElementById("llmProviderForm");
     const providerId = form.dataset.providerId || null;
     AdminFormFeedback.clear(form);
-    const tab = window.open("about:blank", "_blank");
+    const button = document.getElementById("llmProviderStartAuthorization");
+    button.disabled = true;
+    let tab;
     try {
+      try { tab = window.open("about:blank", "_blank"); } catch (_) { /* Use the link below. */ }
       await cancelProviderAuthorization();
       const result = await apiFetch("/api/v1/llm-providers/codex/authorization", {
         method: "POST", body: JSON.stringify({ provider_id: providerId }),
       });
       providerAdminState.flowId = result.flow_id;
       providerAdminState.verified = false;
-      setProviderAuthState("授权页面已打开，请回填完整回调地址", "pending");
-      if (tab) tab.location.replace(result.authorization_url);
-      else showToast("浏览器拦截了新标签，请允许弹窗后重试", true);
+      setProviderAuthorizationLink(result.authorization_url);
+      setProviderAuthState("请打开授权页面，登录后回填完整回调地址", "pending");
+      if (tab && !tab.closed) {
+        try {
+          tab.opener = null;
+          tab.location.replace(result.authorization_url);
+        } catch (_) { tab.close(); }
+      }
     } catch (error) {
       tab?.close();
       AdminFormFeedback.show(form, error);
+    } finally {
+      button.disabled = false;
     }
   });
   document.getElementById("llmProviderVerifyAuthorization")?.addEventListener("click", async () => {
@@ -710,6 +733,7 @@ document.addEventListener("DOMContentLoaded", () => {
         body: JSON.stringify({ provider_id: form.dataset.providerId || null, callback_url: document.getElementById("llmProviderCallbackUrl").value.trim() }),
       });
       providerAdminState.verified = true;
+      setProviderAuthorizationLink();
       document.getElementById("llmProviderCallbackUrl").value = "";
       setProviderAuthState(`验证成功 ${result.account_hint}，点击保存后生效`, "connected");
     } catch (error) { AdminFormFeedback.show(form, error); }

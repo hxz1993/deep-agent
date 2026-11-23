@@ -49,6 +49,30 @@ class DiagnosticsQueryTests(unittest.TestCase):
         self.assertEqual(self.search(q=".*")["items"], [])
         self.assertEqual(self.search(session_id="another")["items"], [])
 
+    def test_agent_tasks_are_searchable_by_id_without_recording_content_or_headers(self):
+        events = [
+            ("published_agent_task", "publication_id", "mcp", "task"),
+            ("remote_agent_operation", "connection_id", "codex", "artifact_upload"),
+        ]
+        rows = []
+        for index, (event, id_field, protocol, phase) in enumerate(events, start=1):
+            rows.append(self.record(index, event=event, **{id_field: f"config-{index}"},
+                                    task_id=f"task-{index}", protocol=protocol, phase=phase,
+                                    status="failed", duration_ms=123, artifact_count=2, run_id="run-1",
+                                    error_type="TimeoutError", headers={"token": "PRIVATE"},
+                                    prompt="PRIVATE", tool="PRIVATE", file_name="PRIVATE",
+                                    download_url="https://example.test/PRIVATE"))
+        log = self.write(rows)
+        self.assertNotIn("PRIVATE", log.read_text())
+        for index, (event, id_field, protocol, phase) in enumerate(events, start=1):
+            with self.subTest(event=event):
+                item, = self.search(q=f"task-{index}", session_id="session-one")["items"]
+                self.assertEqual(item[id_field], f"config-{index}")
+                self.assertEqual(item["event"], event)
+                self.assertEqual(item["artifact_count"], 2)
+                for term in (protocol, phase, "failed", "123ms", "TimeoutError"):
+                    self.assertIn(term, item["message"])
+
     def test_cursor_snapshot_ignores_append_and_no_duplicates(self):
         path = self.write([self.record(1), self.record(2), self.record(3)])
         first = self.search(limit=1)

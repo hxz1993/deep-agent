@@ -16,7 +16,7 @@ from sqlalchemy import (
     func,
     select,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, column_property, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, column_property, mapped_column, query_expression, relationship
 
 from deep_agent.db.ids import (
     AGENT_ID_LENGTH,
@@ -58,6 +58,7 @@ class LlmModel(Base):
     context_window_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     max_output_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     tags: Mapped[list[str] | None] = mapped_column(JSONType, nullable=True)
+    reasoning_options: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -170,6 +171,7 @@ class Agent(Base):
         String(AGENT_ID_LENGTH),
         nullable=True,
     )
+    reasoning_effort: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     capabilities: Mapped[list[str]] = mapped_column(JSONType, nullable=False, default=list)
     ui_tool_selection: Mapped[dict[str, list[str]]] = mapped_column(JSONType, nullable=False, default=dict)
     skills: Mapped[list[str]] = mapped_column(JSONType, nullable=False, default=list)
@@ -204,6 +206,23 @@ class IntegrationSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+class IntegrationScopedSettings(Base):
+    __tablename__ = "integration_scoped_settings"
+    __table_args__ = (
+        UniqueConstraint("integration_code", "scope_type", "scope_key", name="uq_integration_scoped_settings_scope"),
+        Index("ix_integration_scoped_settings_tenant", "integration_code", "scope_type", "tenant_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    integration_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    scope_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    scope_key: Mapped[str] = mapped_column(KeyText, nullable=False)
+    tenant_id: Mapped[str] = mapped_column(KeyText, nullable=False)
+    settings: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class GlobalSetting(Base):
     __tablename__ = "global_settings"
 
@@ -230,6 +249,7 @@ class SkillPackage(Base):
     __tablename__ = "skill_packages"
 
     code: Mapped[str] = mapped_column(KeyText, primary_key=True)
+    scope_ref: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     label: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -295,6 +315,8 @@ class ChatSession(Base):
         default=1,
         server_default="1",
     )
+    # Loaded only by message writers, in the same query that locks the session.
+    event_head_id: Mapped[str | None] = query_expression()
     created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         UtcTimestamp(),
@@ -345,6 +367,20 @@ class UiToolDefinition(Base):
         nullable=False,
     )
     package: Mapped[UiToolPackage] = relationship("UiToolPackage", primaryjoin="foreign(UiToolDefinition.package_code) == UiToolPackage.code", lazy="joined")
+
+
+class RemoteAgentConnection(Base):
+    __tablename__ = "remote_agent_connections"
+    __table_args__ = (UniqueConstraint("name", name="uq_remote_agent_connections_name"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    config: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    inspection: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
 
 
 class ChatSessionEvent(Base):
@@ -564,3 +600,19 @@ class ChannelMessageRun(Base):
     created_at: Mapped[datetime] = mapped_column(
         UtcTimestamp(), server_default=func.now(), nullable=False
     )
+
+
+class AgentPublication(Base):
+    __tablename__ = "agent_publications"
+    __table_args__ = (UniqueConstraint("code", name="uq_agent_publications_code"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    description: Mapped[str] = mapped_column(String(240), nullable=False)
+    agent_id: Mapped[str] = mapped_column(String(AGENT_ID_LENGTH), nullable=False, index=True)
+    scope: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(UtcTimestamp(), nullable=False, server_default=func.now())

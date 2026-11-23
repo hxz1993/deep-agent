@@ -3,8 +3,9 @@ from __future__ import annotations
 import re
 
 from httpx2 import DecodingError
-from pydantic_ai.exceptions import UsageLimitExceeded
+from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UsageLimitExceeded
 from deep_agent.agent.context.compaction import ContextWindowExceededError
+from deep_agent.models.provider_errors import PROVIDER_QUOTA_MESSAGE, is_provider_quota_error
 
 _LIMIT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (
@@ -31,7 +32,13 @@ _LIMIT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 
 
 def format_stream_error(exc: Exception) -> str:
-    """Map pydantic_ai usage-limit errors to user-facing Chinese messages."""
+    """Map provider and run limit errors to user-facing Chinese messages."""
+    if is_provider_quota_error(exc):
+        return PROVIDER_QUOTA_MESSAGE
+    if isinstance(exc, ModelHTTPError):
+        return f"模型服务返回 HTTP {exc.status_code}，本轮已停止。"
+    if isinstance(exc, ModelAPIError):
+        return "模型服务请求失败，本轮已停止。请检查供应商配置或稍后重试。"
     if isinstance(exc, DecodingError):
         return "模型响应传输解码失败，本轮已停止。这不是结构化输出格式校验错误，请重试。"
     if isinstance(exc, UsageLimitExceeded):

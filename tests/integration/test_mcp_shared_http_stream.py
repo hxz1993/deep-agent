@@ -100,7 +100,7 @@ class McpSharedHttpStreamTests(unittest.IsolatedAsyncioTestCase):
         install_test_user_header(app)
         app.include_router(api_router)
         test_model = TestModel(
-            call_tools=["echo_fixture_reverse"],
+            call_tools=["mcp__echo_fixture__reverse"],
             custom_output_text="shared-http-ok",
         )
 

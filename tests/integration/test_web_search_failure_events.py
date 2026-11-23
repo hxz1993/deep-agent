@@ -127,6 +127,6 @@ class WebSearchFailureEventsTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_missing_provider_reference_persists_failure_and_allows_final_answer(self) -> None:
         await self._assert_failure_continues({
-            "mode": "provider", "provider": "kimi", "credential_source": "llm_provider",
-            "llm_provider_id": "deleted-search-provider", "model": "legacy-kimi-model",
+            "mode": "provider", "provider": "deepseek", "credential_source": "llm_provider",
+            "llm_provider_id": "deleted-search-provider", "model": "legacy-search-model",
         }, "Configured LLM provider no longer exists")

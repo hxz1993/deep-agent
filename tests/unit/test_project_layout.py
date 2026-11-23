@@ -83,7 +83,7 @@ class ProjectLayoutTest(unittest.TestCase):
             "src/deep_agent/channels/gateway", "deploy/jenkins",
             "src/deep_agent/agent_packages/builtin",
             "src/deep_agent/ptc", "src/deep_agent/web",
-            "src/deep_agent/models", "src/deep_agent/capabilities/general",
+            "src/deep_agent/models", "src/deep_agent/agent_service",
         ):
             with self.subTest(path=name):
                 path = REPO_ROOT / name
@@ -175,7 +175,7 @@ class ProjectLayoutTest(unittest.TestCase):
             "migrations/env.py", "deploy/gunicorn.conf.py", "deploy/docker-compose.yml",
             "src/deepagent_files.py",
             "tests/helpers/models.py",
-            "src/deep_agent/builtin_skills/deepagent-diagnostics/SKILL.md",
+            "src/deep_agent/builtin_skills/deepfos-readonly-analysis/SKILL.md",
         ):
             with self.subTest(resource=name):
                 path = REPO_ROOT / name
@@ -219,17 +219,17 @@ class ProjectLayoutTest(unittest.TestCase):
             from deep_agent.models import OpenAICompatibleVideoChatModel
             from deep_agent.models.provider_registry import ProviderRuntimeConfig
             from deep_agent.models.models_dev import ModelsDevBundle
-            from deep_agent.capabilities.general import build_native_tool_package
+            from deep_agent.capabilities.environment import build_environment_toolset
             print(json.dumps({value.__name__: value.__module__ for value in (
                 OpenAICompatibleVideoChatModel, ProviderRuntimeConfig,
-                ModelsDevBundle, build_native_tool_package,
+                ModelsDevBundle, build_environment_toolset,
             )}))
         """)
         self.assertEqual(actual, {
             "OpenAICompatibleVideoChatModel": "deep_agent.models.openai_compatible_video",
             "ProviderRuntimeConfig": "deep_agent.models.provider_registry",
             "ModelsDevBundle": "deep_agent.models.models_dev",
-            "build_native_tool_package": "deep_agent.capabilities.general.builtin",
+            "build_environment_toolset": "deep_agent.capabilities.environment",
         })
 
     def test_mcp_subprocess_constants_do_not_load_runtime_or_configuration(self):
@@ -281,7 +281,7 @@ class ProjectLayoutTest(unittest.TestCase):
                         values[target.id] = ast.literal_eval(statement.value)
             if "revision" in values:
                 revision_chain[values["revision"]] = values["down_revision"]
-        self.assertEqual(revision_chain, {"001": None, "002": "001", "003": "002", "004": "003", "005": "004", "006": "005", "007": "006", "008": "007", "009": "008", "010": "009", "011": "010", "012": "011", "013": "012"})
+        self.assertEqual(revision_chain, {"001": None, "002": "001", "003": "002", "004": "003", "005": "004", "006": "005", "007": "006", "008": "007", "009": "008", "010": "009", "011": "010", "012": "011", "013": "012", "014": "013", "015": "014", "016": "015"})
         configuration = configparser.ConfigParser(defaults={"here": str(REPO_ROOT)})
         configuration.read(REPO_ROOT / "alembic.ini", encoding="utf-8")
         self.assertEqual(

@@ -439,11 +439,11 @@ async def parse_document(config: DocumentParsingRuntimeConfig, source: DocumentS
         _log(context, "document_parse_cancelled", provider_name=config.provider, phase="cancel")
         raise
     except TimeoutError as exc:
-        _log(context, "document_parse_failed", provider_name=config.provider, error_code="timeout")
+        _log(context, "document_parse_failed", provider_name=config.provider, error_code="timeout", exception=exc)
         raise DocumentParsingError("timeout", "解析等待超过900秒；远端任务可能仍在运行，未重新提交") from exc
     except DocumentParsingError as exc:
-        _log(context, "document_parse_failed", provider_name=config.provider, error_code=exc.code)
+        _log(context, "document_parse_failed", provider_name=config.provider, error_code=exc.code, exception=exc)
         raise
     except (KeyError, ValueError, TypeError, UnicodeError, OSError) as exc:
-        _log(context, "document_parse_failed", provider_name=config.provider, error_code="invalid_result")
+        _log(context, "document_parse_failed", provider_name=config.provider, error_code="invalid_result", exception=exc)
         raise DocumentParsingError("invalid_result", "供应商解析产物结构无效或无法读取") from exc

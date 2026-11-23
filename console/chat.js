@@ -1,17 +1,18 @@
 import { composerProviderIcon } from "./provider-icons.js?v=20261013-providers";
+import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from "./composer-input.js?v=20261117";
 import { contextOccupancyPresentation, tokenValue } from "./context-budget-presentation.js?v=20260923-usage-tab-2";
 import { renderPlanItems } from "./plan-view.js?v=20261103-view-image1";
 import { prepareSessionRender } from "./session-loading.js?v=20260918-release01012";
-import { savedSessionCounts, savedRunFacts, savedRunState } from "./session-presentation.js?v=20261103-trajectory-files";
+import { savedSessionCounts, savedRunFacts, savedRunState } from "./session-presentation.js?v=20261106-ptc-source";
 import { cacheTrajectorySummary } from "./cache-usage.js?v=20260923-usage-tab-2";
-import { createConversationPresenter } from "./conversation-presenter.js?v=20261103-view-image3";
+import { createConversationPresenter } from "./conversation-presenter.js?v=remote-tool-card-labels";
 import { buildChoiceResult, normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js?v=20260912-21";
 import {
   contextCompactionPresentation,
   parseSseBlock,
   readSse,
 } from "./protocol.js?v=20260912-21";
-import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260929-release0124";
+import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=session-source-rows";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import {
   applyAssistantPresentationActions,
@@ -19,12 +20,10 @@ import {
   assistantActionsFromSse,
   isPlanningToolEvent,
   planPanelState,
-  processDisclosureLabel,
-  toolResultPresentation,
 } from "./assistant-presentation.js?v=20261103-view-image1";
-import { createTrajectoryController } from "./trajectory.js?v=20261103-trajectory-files";
-import { attachmentPreviewUrl, bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20261103-view-image1";
-import { bindWebImagePreviewFallback, renderWebImagePreview } from "./web-image.js?v=20260912-21";
+import { createTrajectoryController } from "./trajectory.js?v=20261106-ptc-source";
+import { bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20261103-view-image1";
+import { bindWebImagePreviewFallback } from "./web-image.js?v=20260912-21";
 import { bindViewImagePreviews } from "./view-image.js?v=20261103-view-image3";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260912-21";
 import {
@@ -37,13 +36,19 @@ import {
   isModelSelectable,
   modelProvider,
   modelOptionLabel,
+  modelPickerLabel,
+  modelPickerModalityLabels,
   preserveCurrentModel,
   renderGroupedModelOptions,
-} from "./model-options.js?v=20260925-codex-1";
+} from "./model-options.js?v=0160-picker-shared";
 import { shouldFollowMessages } from "./message-scroll.js?v=20260912-21";
 import { boundedStreamRequest, verifyStreamStop } from "./stop-recovery.js?v=20260912-21";
-import { createHistoryFollower } from "./history-follower.js?v=20260912-21";
+import { appendThinkingMenu, effortLabel, eventEffort, historyEffort } from "./reasoning-ui.js?v=0160-picker-labels";
+import { positionModelPicker, renderModelPickerValue, revealModelPickerOption } from "./ui-select.js?v=remote-agent-filter-icons";
+import { createHistoryFollower } from "./history-follower.js?v=20261105-v01510";
+import { sameHistoryValue } from "./history-comparison.js?v=20261105-v01510";
 import { createSessionObserver, historyThroughRun } from "./session-observer.js?v=20260912-21";
+import { createSessionFilterOptionsController, sessionAppQuery } from "./session-app-filter.js?v=20261104-app-search";
 
 /* ------------------------------------------------------------------ *
  * deep-agent 前端 —— 适配 FastAPI /api/v1/chat/stream (SSE over POST)
@@ -150,10 +155,14 @@ const state = {
   uploadCapabilities: { kinds: [], labels: {}, max_count: 10, max_size_mb: 20 },
   llmModelId: "",
   modelManuallySelected: false,
+  reasoningOverrides: new Map(),
   sessionModelIds: {},
   sessionId: null,
+  remoteTaskReply: null,
   conversationId: null,
   sessions: [], // [{id, agentId, agentName, title}] — 仅来自 GET /api/v1/sessions
+  sessionAppFilter: "all",
+  sessionFilterOptions: { status: "idle", agents: [], apps: [] },
   streaming: false,
   observingRun: false,
   historyLoading: false,
@@ -184,12 +193,12 @@ const state = {
   messageAutoFollow: true,
   messageScrollFrame: null,
   modelMenuOpen: false,
-  composerDragDepth: 0,
   planSnapshot: null,
   planningCallIds: new Set(),
 };
 
 window.addEventListener("pagehide", () => {
+  sessionFilterOptions.dispose();
   clearTimeout(sessionSearchTimer);
   sessionPage.controller?.abort();
   state.historyFollower?.stop();
@@ -200,16 +209,9 @@ window.addEventListener("pagehide", () => {
   state.stopController?.abort();
   state.stopController = null;
   streamController?.abort();
-  for (const controller of state.backgroundStreams || []) controller.abort();
+  for (const controller of state.backgroundStreams?.keys() || []) controller.abort();
   state.backgroundStreams?.clear();
 });
-
-const LLM_MODALITY_LABELS = {
-  text: "文本",
-  image: "图像",
-  audio: "音频",
-  video: "视频",
-};
 
 const UPLOAD_KIND_ORDER = ["image", "text_file", "docx", "xlsx", "audio", "video"];
 /* ----------------------------- DOM ----------------------------- */
@@ -224,7 +226,6 @@ const el = {
   sessionList: $("sessionList"),
   capList: $("capList"),
   agentSelect: $("agentSelect"),
-  connStatus: $("connStatus"),
   sessionBadge: $("sessionBadge"),
   copySessionIdBtn: $("copySessionIdBtn"),
   chatTitle: $("chatTitle"),
@@ -234,6 +235,7 @@ const el = {
   contextBudgetBadge: $("contextBudgetBadge"),
   fileInput: $("fileInput"),
   attachmentPreview: $("attachmentPreview"),
+  remoteTaskReply: $("composerRemoteReply"),
   composerMeta: $("composerMeta"),
   composerModelTrigger: $("composerModelTrigger"),
   composerModelMenu: $("composerModelMenu"),
@@ -244,6 +246,8 @@ const el = {
   attachmentImageDialog: $("attachmentImageDialog"),
   attachmentImageDialogImage: $("attachmentImageDialogImage"),
   attachmentImageDialogName: $("attachmentImageDialogName"),
+  attachmentImageDialogError: $("attachmentImageDialogError"),
+  attachmentImageDialogOpen: $("attachmentImageDialogOpen"),
   attachmentImageDialogClose: $("attachmentImageDialogClose"),
   attachmentImageDialogPrevious: $("attachmentImageDialogPrevious"),
   attachmentImageDialogNext: $("attachmentImageDialogNext"),
@@ -423,6 +427,9 @@ function currentSessionSnapshot() {
     source_id: persisted?.source_id ?? null,
     appId: persisted?.appId ?? null,
     spaceId: persisted?.spaceId ?? null,
+    appName: persisted?.appName ?? null,
+    spaceName: persisted?.spaceName ?? null,
+    activeRunId: persisted?.activeRunId ?? null,
   });
 }
 
@@ -445,6 +452,9 @@ function mergeSessionsFromBackend(rows, { append = false, agentId = state.agentI
       source_id: row.source_id ?? null,
       appId: row.app_id ?? null,
       spaceId: row.space_id ?? null,
+      appName: row.app_name ?? null,
+      spaceName: row.space_name ?? null,
+      activeRunId: row.active_run_id ?? null,
     });
   });
 
@@ -498,6 +508,10 @@ function generateSessionId() {
 }
 
 function init() {
+  document.getElementById("clearComposerRemoteReply")?.addEventListener("click", () => {
+    setRemoteTaskReply(null);
+    el.input.focus();
+  });
   updateAdminLink();
 
   const agentFromUrl = new URLSearchParams(location.search).get("agent_id");
@@ -509,9 +523,16 @@ function init() {
   el.modelSelect?.addEventListener("change", () => {
     selectComposerModel(el.modelSelect.value);
   });
+  el.composerModelMenu?.classList.add("da-select-menu");
+  el.composerModelMenu?.setAttribute("popover", "manual");
   el.composerModelTrigger?.addEventListener("click", () => {
     setComposerModelMenuOpen(!state.modelMenuOpen);
   });
+  window.addEventListener("resize", positionComposerModelMenu);
+  window.addEventListener("hashchange", () => setComposerModelMenuOpen(false));
+  document.addEventListener("scroll", event => {
+    if (!el.composerModelMenu?.contains(event.target)) positionComposerModelMenu();
+  }, { capture: true, passive: true });
   el.copySessionIdBtn?.addEventListener("click", copyCurrentSessionId);
 
   $("newChatBtn").addEventListener("click", handleNewChatControl);
@@ -519,36 +540,12 @@ function init() {
     handleNewChatControl(e);
   });
   document.addEventListener("click", (e) => {
-    if (state.modelMenuOpen && !e.target.closest("#composerMeta")) {
+    if (state.modelMenuOpen && !e.composedPath().includes(el.composerMeta)) {
       setComposerModelMenuOpen(false);
     }
     if (el.newChatMenu?.classList.contains("hidden")) return;
     if (e.target.closest("#newChatMenu, #newChatBtn, #newChatBtnWide")) return;
     closeNewChatMenu();
-  });
-  document.addEventListener("click", (e) => {
-    if (!document.getElementById("workspaceGrid")?.contains(e.target)) return;
-    const button = e.target.closest("[data-copy-file-id]");
-    if (!button) return;
-    const fileId = button.dataset.copyFileId;
-    if (!fileId) return;
-    button.disabled = true;
-    copyTextToClipboard(fileId).then(() => {
-      button.classList.add("copied");
-      button.title = "File ID 已复制";
-      button.innerHTML = lucideIcon("check");
-      refreshLucideIcons();
-      window.setTimeout(() => {
-        if (!button.isConnected) return;
-        button.classList.remove("copied");
-        button.title = "复制 File ID";
-        button.innerHTML = lucideIcon("copy");
-        button.disabled = false;
-        refreshLucideIcons();
-      }, 1500);
-    }).catch(() => {
-      button.disabled = false;
-    });
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
@@ -557,6 +554,7 @@ function init() {
     }
   });
   el.attachmentImageDialogClose?.addEventListener("click", closeAttachmentImagePreview);
+  el.attachmentImageDialogImage?.addEventListener("error", () => el.attachmentImageDialogError?.classList.remove("hidden"));
   bindAttachmentImagePreviews({ root: document.getElementById("workspaceGrid"), openImage: openAttachmentImagePreview });
   const disposeViewImagePreviews = bindViewImagePreviews({ root: document.getElementById("workspaceGrid"), dialog: el.attachmentImageDialog, openImage: openAttachmentImagePreview });
   window.addEventListener("pagehide", disposeViewImagePreviews, { once: true });
@@ -583,13 +581,7 @@ function init() {
     setComposerPlanExpanded(!el.composerPlan.classList.contains("open"));
   });
 
-  el.input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      onSend();
-    }
-  });
-  el.input.addEventListener("input", autoGrow);
+  bindComposerInput(el.input, onSend);
   el.attachBtn?.addEventListener("click", () => {
     // Keep the native picker in the user gesture; refresh limits before selection
     // validation without delaying the click until transient activation expires.
@@ -597,7 +589,7 @@ function init() {
     el.fileInput?.click();
   });
   el.fileInput?.addEventListener("change", onFilesSelected);
-  el.input?.addEventListener("paste", onPaste);
+  bindComposerAttachments(el.input, el.composerDropZone, el.composerDropOverlay, uploadAttachmentBatch);
   el.messages?.addEventListener("scroll", () => {
     state.messageAutoFollow = state.messageAutoFollow
       ? shouldFollowMessages(el.messages)
@@ -606,10 +598,6 @@ function init() {
   el.messages?.addEventListener("wheel", (event) => {
     if (event.deltaY < 0) state.messageAutoFollow = false;
   }, { passive: true });
-  el.composerDropZone?.addEventListener("dragenter", onComposerDragEnter);
-  el.composerDropZone?.addEventListener("dragover", onComposerDragOver);
-  el.composerDropZone?.addEventListener("dragleave", onComposerDragLeave);
-  el.composerDropZone?.addEventListener("drop", onComposerDrop);
 
   // 聊天标题点击编辑
   el.chatTitle.addEventListener("click", () => {
@@ -674,7 +662,6 @@ function init() {
   document.getElementById("sessionSearchInput")?.addEventListener("input", scheduleSessionSearch);
   document.getElementById("sessionSearchInput")?.addEventListener("compositionend", scheduleSessionSearch);
   bindSessionListFeedback();
-  checkHealth();
   loadCapabilities();
   loadUploadCapabilities();
   window.addEventListener("document-parsing-settings-changed", () => { void loadUploadCapabilities({ force: true }); });
@@ -696,8 +683,25 @@ function init() {
     loadUiTools(state.agentId);
     if (agentFromUrl) newChat(agentFromUrl);
     else updateAgentSelectState();
-    await syncSessionsFromBackend();
+    await Promise.all([syncSessionsFromBackend(), refreshSessionFilterOptions()]);
   });
+}
+
+const sessionFilterOptions = createSessionFilterOptionsController({
+  async fetchOptions(agentId, signal) {
+    const params = new URLSearchParams({ agent_id: agentId });
+    const response = await daFetch(serviceUrl(`api/v1/sessions/filter-options?${params}`), { signal, reportStatus: false });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  },
+  changed(snapshot) {
+    state.sessionFilterOptions = snapshot;
+    window.DeepAgentConsoleWorkspace?.renderSessionFilters?.();
+  },
+});
+
+function refreshSessionFilterOptions(options) {
+  return sessionFilterOptions.refresh(state.agentId, options);
 }
 
 let sessionPage = { agentId: null, offset: 0, hasMore: true, loading: false, error: false };
@@ -711,8 +715,13 @@ function resetSessionPage() {
   clearTimeout(sessionSearchTimer);
   sessionSearchTimer = null;
   sessionPage.controller?.abort();
+  if (sessionPage.agentId !== state.agentId) {
+    state.sessionAppFilter = "all";
+    window.DeepAgentConsoleWorkspace?.renderSessionFilters?.();
+  }
   sessionPage = {
     agentId: state.agentId, query: sessionSearchQuery(), ids: new Set(),
+    appFilter: state.sessionAppFilter || "all",
     offset: 0, hasMore: true, loading: false, error: false, scheduled: false,
   };
   el.sessionList.scrollTop = 0;
@@ -735,6 +744,7 @@ function scheduleSessionSearch(event) {
 function syncSessionsFromBackend() {
   if (!state.agentId) return Promise.resolve();
   if (sessionPage.agentId === state.agentId && sessionPage.query === sessionSearchQuery()
+      && sessionPage.appFilter === (state.sessionAppFilter || "all")
       && sessionPage.loading && sessionPage.offset === 0) return sessionPage.promise;
   resetSessionPage();
   return loadMoreSessions();
@@ -749,7 +759,10 @@ async function loadMoreSessions() {
   renderSessions();
   const request = (async () => {
   try {
-    const params = new URLSearchParams({ agent_id: page.agentId, limit: "50", offset: String(page.offset) });
+    const params = new URLSearchParams({
+      agent_id: page.agentId, limit: "50", offset: String(page.offset), include_active_runs: "true",
+    });
+    for (const [key, value] of Object.entries(sessionAppQuery(page.appFilter))) params.set(key, value);
     if (page.query) params.set("query", page.query);
     const r = await daFetch(serviceUrl(`api/v1/sessions?${params}`), { signal: page.controller.signal });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -759,6 +772,7 @@ async function loadMoreSessions() {
     for (const row of rows) page.ids.add(row.session_id);
     mergeSessionsFromBackend(rows, { append: page.offset > 0, agentId: page.agentId });
     page.offset += rows.length;
+    page.total = Number(payload.total);
     page.hasMore = rows.length > 0 && page.offset < Number(payload.total);
   } catch (error) {
     if (page === sessionPage && error.name !== "AbortError") page.error = true;
@@ -838,11 +852,6 @@ function bindSessionListFeedback() {
   new ResizeObserver(updateSessionListFooter).observe(list);
 }
 
-function autoGrow() {
-  el.input.style.height = "auto";
-  el.input.style.height = Math.min(el.input.scrollHeight, 200) + "px";
-}
-
 /* --------------------------- 会话管理 --------------------------- */
 function normalizeAgentId(agentId) {
   return typeof agentId === "string" && agentId ? agentId : null;
@@ -917,10 +926,13 @@ function toggleNewChatMenu(anchor) {
   el.newChatMenu.querySelector(".new-chat-menu-item")?.focus();
 }
 
-// The POST connection owns execution. Keep consuming it when leaving the view;
-// aborting it here would cancel the server Run. Its callbacks lose UI ownership.
+// Keep consuming the POST when leaving the view so its final status can update
+// the session list. Release the message presenter for the new view.
 function detachChatView() {
   state.navigationRevision = (state.navigationRevision || 0) + 1;
+  state.sessionActivity?.stop();
+  state.sessionActivity = null;
+  state.backgroundStreams?.get(state.abortController)?.releasePresenter();
   state.abortController = null;
   state.stopController?.abort();
   state.stopController = null;
@@ -929,11 +941,13 @@ function detachChatView() {
   state.streamSessionConfirmed = false;
   state.streamRecoveryNote = null;
   state.awaitingHitl = false;
+  if (state.remoteTaskReply) setRemoteTaskReply(null);
   state.assistantPresenter?.dispose?.();
   setStreaming(false);
 }
 
 function newChat(agentId, { preserveDraft = false } = {}) {
+  const previousAgentId = state.agentId;
   const id = normalizeAgentId(agentId);
   closeNewChatMenu();
   detachChatView();
@@ -944,6 +958,7 @@ function newChat(agentId, { preserveDraft = false } = {}) {
   } else {
     ensureAgentSelected();
   }
+  if (previousAgentId !== state.agentId) state.sessionAppFilter = "all";
   loadUiTools(state.agentId);
   state.sessionId = null;
   state.sessionCache = null;
@@ -967,6 +982,7 @@ function newChat(agentId, { preserveDraft = false } = {}) {
   updateHitlInputState();
   updateComposerContextControls();
   renderSessions();
+  void refreshSessionFilterOptions();
   el.input.focus();
   if (sessionPage.agentId !== state.agentId) {
     el.sessionList.scrollTop = 0;
@@ -985,6 +1001,7 @@ function upsertSession(id, title, agentId, agentName) {
     if (agentName) existing.agentName = agentName;
     existing.updatedAt = now;
   } else {
+    const context = window.DeepAgentConsoleContext?.effectiveContext || {};
     state.sessions.push({
       ...normalized,
       agentName: agentName || agentNameById(normalized.agentId),
@@ -992,7 +1009,17 @@ function upsertSession(id, title, agentId, agentName) {
       createdAt: now,
       updatedAt: now,
       messageCount: state.modelMessageCount,
+      appId: context.app || null,
+      spaceId: context.space || null,
+      appName: context.app_name || null,
+      spaceName: context.space_name || null,
     });
+  }
+  if (sessionPage.agentId === normalized.agentId) {
+    const session = state.sessions.find(item => sessionLookupKey(item) === key);
+    if ((!sessionPage.query || (session?.title || "").includes(sessionPage.query) || id === sessionPage.query)
+      && (sessionPage.appFilter === "all" || (sessionPage.appFilter === "unassigned" && !session?.appId)
+        || sessionPage.appFilter === `app:${session?.appId}`)) sessionPage.ids?.add(id);
   }
   sortSessions();
   renderSessions();
@@ -1013,7 +1040,7 @@ function applySessionTitle(session, title) {
   ) {
     el.chatTitle.textContent = displayTitle;
   }
-  renderSessions();
+  if (!el.sessionList.querySelector(".session-title-input")) renderSessions();
 }
 
 function renderComposerSource() {
@@ -1033,18 +1060,18 @@ function renderSessions() {
   const scopedSessions = state.sessions.filter(
     (session) => (session.agentId || "") === (state.agentId || "")
       && !(sessionPage.scheduled || (sessionPage.loading && sessionPage.offset === 0))
-      && (!sessionPage.query || sessionPage.ids?.has(session.id)),
+      && sessionPage.ids?.has(session.id),
   );
   const panelTitle = document.getElementById("sessionPanelTitle");
   const panelSummary = document.getElementById("sessionPanelSummary");
   if (panelTitle) panelTitle.textContent = activeAgent?.name || "Agent 会话";
   if (panelSummary) {
-    panelSummary.textContent = `${scopedSessions.length} 个历史会话`;
+    panelSummary.textContent = `${sessionPage.total ?? scopedSessions.length} 个历史会话`;
     panelSummary.title = state.sessionId ? "已选择会话" : "尚未选择会话";
   }
   if (scopedSessions.length === 0) {
     if (!sessionPage.loading && !sessionPage.scheduled && !sessionPage.error) {
-      el.sessionList.innerHTML = `<li class="session-empty">${sessionPage.query ? "未找到匹配会话" : "该 Agent 暂无历史会话"}</li>`;
+      el.sessionList.innerHTML = `<li class="session-empty">${sessionPage.query || state.sessionAppFilter !== "all" ? "未找到匹配会话" : "该 Agent 暂无历史会话"}</li>`;
     }
   }
   for (const s of scopedSessions) {
@@ -1052,10 +1079,11 @@ function renderSessions() {
     li.className =
       "session-item" +
       (s.id === state.sessionId && (s.agentId || "") === (state.agentId || "") ? " active" : "");
+    li.dataset.sessionKey = sessionLookupKey(s);
     const activity = formatSessionActivity(s);
     const origin = channelOriginPresentation(s);
     const questionIcon = origin ? `<span class="session-channel-source" title="${escapeHtml(origin.description)}" aria-label="${escapeHtml(origin.description)}"><img src="${origin.logo}" alt="${escapeHtml(origin.platform)}" /></span>` : lucideIcon("message-circle-more");
-    li.innerHTML = `<span class="sid" title="${escapeHtml(`${s.title} · ${activity}`)}"><span class="session-title-row"><span class="session-title">${escapeHtml(s.title)}</span></span><span class="session-meta"><span class="session-stat-group"><span title="提问数">${questionIcon}${escapeHtml(String(s.turnCount || 0))}</span></span><span class="session-meta-dot" aria-hidden="true">·</span><span class="session-activity">${escapeHtml(activity)}</span></span></span><span class="session-actions"><span class="rename-btn" title="重命名" aria-label="重命名">${lucideIcon("pencil")}</span><span class="del" title="删除" aria-label="删除">${lucideIcon("trash-2")}</span></span>`;
+    li.innerHTML = `<span class="sid" title="${escapeHtml(`${s.title} · ${activity}`)}"><span class="session-title">${escapeHtml(s.title)}</span><span class="session-meta"><span class="session-stat-group"><span title="提问数">${questionIcon}${escapeHtml(String(s.turnCount || 0))}</span></span><span class="session-meta-dot" aria-hidden="true">·</span><span class="session-activity">${escapeHtml(activity)}</span></span></span><span class="session-actions"><span class="rename-btn" title="重命名" aria-label="重命名">${lucideIcon("pencil")}</span><span class="session-run-slot" title="正在生成" hidden><span class="spinner" role="img" aria-label="正在生成"></span></span><span class="del" title="删除" aria-label="删除">${lucideIcon("trash-2")}</span></span>`;
     li.querySelector(".sid").addEventListener("click", (e) => {
       if (e.target.closest(".session-title-input")) return;
       switchSession(s);
@@ -1083,7 +1111,50 @@ function renderSessions() {
   el.sessionList.appendChild(footer);
   el.sessionList.scrollTop = scrollTop;
   updateSessionListFooter();
+  updateSessionRunIndicators();
   refreshLucideIcons();
+}
+
+function updateSessionRunIndicators() {
+  const running = runningSessionKeys();
+  for (const row of el.sessionList.querySelectorAll("[data-session-key]")) {
+    const active = running.has(row.dataset.sessionKey);
+    row.classList.toggle("is-generating", active);
+    row.querySelector(".session-run-slot").hidden = !active;
+    row.querySelector(".del").hidden = active;
+  }
+}
+
+function runningSessionKeys() {
+  const running = new Set(Array.from(state.backgroundStreams?.values() || [], sessionLookupKey));
+  for (const session of state.sessions || []) {
+    if (session.activeRunId) running.add(sessionLookupKey(session));
+  }
+  if (state.observingRun && state.sessionId) running.add(sessionLookupKey({ id: state.sessionId, agentId: state.agentId }));
+  return running;
+}
+
+function clearListedSessionRun(session, runId) {
+  if (!runId) return;
+  const listed = state.sessions?.find(item => sessionLookupKey(item) === sessionLookupKey(session));
+  if (listed?.activeRunId === runId) {
+    listed.activeRunId = null;
+    updateSessionRunIndicators();
+  }
+}
+
+const MAX_CONSOLE_CHAT_STREAMS = 5;
+
+function hasConsoleChatSlot() {
+  if ((state.backgroundStreams?.size || 0) < MAX_CONSOLE_CHAT_STREAMS) return true;
+  showConsoleToast(`本页已有 ${MAX_CONSOLE_CHAT_STREAMS} 个会话正在生成，请等其中一个完成或停止后再发送。`, true);
+  return false;
+}
+
+function currentSessionHasProducer() {
+  if (!state.sessionId || !state.backgroundStreams?.size) return false;
+  return Array.from(state.backgroundStreams.values()).some(session =>
+    session.id === state.sessionId && session.agentId === state.agentId);
 }
 
 async function switchSession(s) {
@@ -1123,7 +1194,7 @@ async function loadAllSessionEvents(session, { signal } = {}) {
     items.push(...(Array.isArray(page.items) ? page.items : []));
     const next = Number(page.next_after_sequence);
     if (!Number.isInteger(next) || next <= afterSequence) {
-      return { response, data: { items, next_after_sequence: null } };
+      return { response, data: { session_id: session.id, items, next_after_sequence: null } };
     }
     afterSequence = next;
   }
@@ -1183,7 +1254,65 @@ async function loadSessionHistory(session, { signal, isCurrent = () => true } = 
     signal?.removeEventListener("abort", abort);
     await prepareSessionRender();
     if (state.historyController === controller && (state.historyReady || controller.signal.aborted)) globalThis.DeepAgentConsoleWorkspace?.setHistoryLoading?.(false);
+    if (current() && state.historyReady) watchSessionActivity(normalized);
   }
+}
+
+function watchSessionActivity(session) {
+  const key = sessionLookupKey(session);
+  const source = session.source_type || state.sessions.find((item) => sessionLookupKey(item) === key)?.source_type;
+  if (state.sessionActivity?.key === key || (source && source !== "internal")) return;
+  state.sessionActivity?.stop();
+  const controller = new AbortController();
+  let retry = null;
+  let pending = false;
+  let syncing = false;
+  const current = () => !controller.signal.aborted && state.sessionId === session.id && state.agentId === session.agentId;
+
+  async function reconcile() {
+    if (!current() || !pending || syncing || state.streaming || state.historyLoading || state.abortController) return;
+    pending = false;
+    syncing = true;
+    stopHistoryObservation();
+    const history = state.historyController = new AbortController();
+    const stillCurrent = () => current() && state.historyController === history && !history.signal.aborted && !state.abortController;
+    state.historyLoading = true;
+    updateHitlInputState();
+    try {
+      await observeSessionHistory(session, history, stillCurrent);
+    } finally {
+      syncing = false;
+      if (stillCurrent()) {
+        state.historyLoading = false;
+        updateHitlInputState();
+        refresh();
+      }
+    }
+  }
+
+  function refresh() {
+    queueMicrotask(() => { void reconcile().catch(() => {}); });
+  }
+
+  async function subscribe() {
+    try {
+      const response = await daFetch(sessionApiUrl(session, "/activity"), {
+        signal: controller.signal, headers: { Accept: "text/event-stream" }, reportStatus: false,
+      });
+      if ([401, 403, 404].includes(response.status)) return;
+      if (response.ok && response.body) await readSse(response.body, ({ event, data }) => {
+        if (!current() || event !== "session_activity" || !data) return;
+        // The current observer or sender reconciles a Run it already rendered.
+        if (data.run_id && (data.run_id === state.observedRunId || data.run_id === state.lastRunMetrics?.run_id)) return;
+        pending = true;
+        refresh();
+      });
+    } catch { /* A reconnected activity stream starts with the current state. */ }
+    if (current()) retry = setTimeout(() => { void subscribe(); }, 2000);
+  }
+
+  state.sessionActivity = { key, refresh, stop() { controller.abort(); clearTimeout(retry); } };
+  void subscribe();
 }
 
 function stopHistoryObservation() {
@@ -1194,6 +1323,7 @@ function stopHistoryObservation() {
   state.historyController = null;
   state.historyLoading = false;
   state.historyObservationPending = false;
+  state.observedRunId = null;
   if (state.observingRun) {
     state.stopController?.abort();
     state.stopController = null;
@@ -1206,6 +1336,7 @@ function stopHistoryObservation() {
 }
 
 async function observeSessionHistory(session, controller, current) {
+  const listedRunId = session.activeRunId;
   let status;
   try {
     status = await boundedStreamRequest(async (signal) => {
@@ -1221,11 +1352,13 @@ async function observeSessionHistory(session, controller, current) {
   }
   if (!current()) return;
   if (status.status === "idle" || !status.run_id) {
+    if (listedRunId) clearListedSessionRun(session, listedRunId);
     return observePersistedSessionHistory(session, controller, current, {
       snapshotOnly: true, readOnly: status.status !== "idle",
     });
   }
   const runId = status.run_id;
+  state.observedRunId = runId;
   let baselineSequence = null;
   let assistant = null;
   let fallback = null;
@@ -1308,6 +1441,7 @@ async function observeSessionHistory(session, controller, current) {
     onEnd: async (_data, signal) => {
       await readHistory(signal);
       if (!current() || signal.aborted) return;
+      if (state.sessions?.length) clearListedSessionRun(session, runId);
       setObservedStatus(false);
       void refreshTrajectory(controller.signal).catch(() => {});
       void loadContextStatus(session, { signal: controller.signal, isCurrent: current });
@@ -1320,7 +1454,10 @@ async function observeSessionHistory(session, controller, current) {
       if (!current() || fallback) return;
       discardPreview();
       fallback = await observePersistedSessionHistory(session, controller, current, {
-        runId, baselineSequence, register: false, onIdle: () => observer.stop(),
+        runId, baselineSequence, register: false, onIdle: () => {
+          if (state.sessions?.length) clearListedSessionRun(session, runId);
+          observer.stop();
+        },
       });
     },
   });
@@ -1364,6 +1501,8 @@ async function observePersistedSessionHistory(session, controller, current, {
   };
   const follower = createHistoryFollower({
     isCurrent: current,
+    // Only the persisted fallback is throttled; ordinary SSE/Live stays immediate.
+    historyIntervalMs: 3000,
     readStatus: async (signal) => {
       if (snapshotOnly) return { status: "idle", read_only: readOnly };
       const response = await daFetch(sessionApiUrl(session, "/run-status"), { signal });
@@ -1378,11 +1517,10 @@ async function observePersistedSessionHistory(session, controller, current, {
       const response = await daFetch(sessionApiUrl(session, "/history"), { signal });
       if (!response.ok) throw new Error(`历史 HTTP ${response.status}`);
       const history = historyThroughRun(normalizeConversationHistory(await response.json()), runId, { baselineSequence });
-      // Checkpoint updates retain their Sequence, so compare payloads rather
-      // than treating event_head_sequence as a change/version token.
-      const signature = JSON.stringify(history);
-      const changed = signature !== lastHistory || status.status !== lastStatus;
-      return { history, signature, changed };
+      // Checkpoints can update in place: compare actual payloads, never a head
+      // Sequence/status shortcut or another full serialized History copy.
+      const changed = status.status !== lastStatus || !sameHistoryValue(history, lastHistory);
+      return { history, changed };
     },
     onStatus: (status) => {
       state.historyLoading = false;
@@ -1397,12 +1535,13 @@ async function observePersistedSessionHistory(session, controller, current, {
       }
       if (status.status === "idle") onIdle?.();
     },
-    onHistory: async ({ history, signature, changed }, status) => {
+    onHistory: async ({ history, changed }, status) => {
       if (changed) {
         applyObservedHistory(history, status);
         refreshTrajectory();
+        // Keep one authoritative rendered snapshot, not every equal re-read.
+        lastHistory = status.status === "idle" ? null : history;
       }
-      lastHistory = signature;
       lastStatus = status.status;
       lastError = null;
       if (status.status === "idle") void loadContextStatus(session, { signal: controller.signal, isCurrent: current });
@@ -1420,7 +1559,10 @@ async function observePersistedSessionHistory(session, controller, current, {
     },
   });
   if (register) state.historyFollower = follower;
-  controller.signal.addEventListener("abort", () => follower.stop(), { once: true });
+  controller.signal.addEventListener("abort", () => {
+    lastHistory = null;
+    follower.stop();
+  }, { once: true });
   await follower.start();
   return follower;
 }
@@ -1438,7 +1580,7 @@ function updateObservedSessionMetrics(session, events) {
     const facts = savedRunFacts(events.filter(event => (event.run_id ?? null) === saved.run_id));
     const previous = state.lastRunMetrics?.run_id === saved.run_id ? state.lastRunMetrics : {};
     state.lastRunUsage = facts.usage;
-    state.lastRunMetrics = { ...previous, ...facts, ...saved, detailed: false };
+    state.lastRunMetrics = { ...previous, ...facts, ...saved, reasoning_effort: eventEffort(events, saved.run_id), detailed: false };
     selected.modelName = [...events].reverse().find(event => event.event_type === "assistant/message" && event.payload?.message?.model_name)?.payload.message.model_name || null;
   }
   if (selected.messageCount === messageCount && selected.turnCount === turnCount) return;
@@ -1449,6 +1591,7 @@ function updateObservedSessionMetrics(session, events) {
 }
 
 function applyObservedHistory(history, status) {
+  trajectory?.setConversationHistory(history.items);
   const latestAssistant = [...history.items].reverse().find((item) => item.kind === "assistant_message");
   if (state.lastRunMetrics?.run_id !== latestAssistant?.run_id) state.lastRunUsage = null;
   state.conversationId = latestAssistant?.conversation_id || null;
@@ -1456,6 +1599,7 @@ function applyObservedHistory(history, status) {
     usage: latestAssistant.usage || null,
     conversation_id: latestAssistant.conversation_id || null,
     model_name: latestAssistant.model_name || null,
+    reasoning_effort: historyEffort(history.items, latestAssistant.turn_id),
     provider_name: latestAssistant.provider_name || null,
     run_id: latestAssistant.run_id,
     status: latestAssistant.status || "completed",
@@ -1473,7 +1617,9 @@ function applyObservedHistory(history, status) {
 async function loadContextStatus(session, { signal, isCurrent = () => true } = {}) {
   const target = normalizeSession(session);
   const revision = state.navigationRevision || 0;
+  const requestRevision = state.contextStatusRequestRevision = (state.contextStatusRequestRevision || 0) + 1;
   const current = () => isCurrent() && !signal?.aborted
+    && state.contextStatusRequestRevision === requestRevision
     && (state.navigationRevision || 0) === revision
     && state.sessionId === target.id && state.agentId === target.agentId;
   const lastCompaction = state.contextStatus?.last_compaction;
@@ -1537,7 +1683,7 @@ function updateComposerContextControls() {
     }
   }
 
-  if (el.attachBtn) el.attachBtn.disabled = state.streaming || state.awaitingHitl;
+  if (el.attachBtn) el.attachBtn.disabled = state.streaming;
 }
 
 function createContextCompactionRow(beforeNode = null) {
@@ -1696,6 +1842,7 @@ async function refreshCurrentHistory(options = {}) {
 function renderHistory(items, { updating = false, running = false } = {}) {
   state.modelMessageCount = items.filter((item) => ["user_message", "assistant_message"].includes(item.kind)).length;
   let lastDayKey = null;
+  const livePresenter = state.assistantPresenter;
   state.assistantPresenter = null;
   const presentationNodes = projectConversationItems(items);
   const previous = state.historyRendered;
@@ -1717,9 +1864,9 @@ function renderHistory(items, { updating = false, running = false } = {}) {
       }
     }
     const active = running && index === presentationNodes.length - 1 && node.type === "assistant";
-    const signature = JSON.stringify({ node, date, active, readOnly: running });
+    const snapshot = { node, date, active, readOnly: running };
     const old = previous[index];
-    if (old?.signature === signature) {
+    if (old && sameHistoryValue(old.snapshot, snapshot)) {
       next.push(old);
       desired.push(...old.elements);
       if (old.presenter) state.assistantPresenter = old.presenter;
@@ -1764,7 +1911,7 @@ function renderHistory(items, { updating = false, running = false } = {}) {
       elements.push(assistant.row);
       state.assistantPresenter = assistant;
     }
-    next.push({ signature, elements, presenter });
+    next.push({ snapshot, elements, presenter });
     desired.push(...elements);
   }
   const retained = new Set(next);
@@ -1772,6 +1919,14 @@ function renderHistory(items, { updating = false, running = false } = {}) {
     if (retained.has(old)) continue;
     old.presenter?.dispose?.();
     old.elements.forEach((element) => element.remove());
+  }
+  // A history read can follow a completed POST stream. Its live rows are
+  // outside historyRendered; replace them while keeping system notices.
+  const historyRows = new Set(desired);
+  for (const element of Array.from(el.messages.children)) {
+    if (historyRows.has(element) || !element.matches(".date-separator, .msg-row.user, .assistant-answer")) continue;
+    if (element === livePresenter?.row) livePresenter.dispose?.();
+    element.remove();
   }
   desired.forEach((element, index) => {
     const existing = el.messages.children[index];
@@ -1792,7 +1947,7 @@ function renderHistory(items, { updating = false, running = false } = {}) {
 }
 
 function restoreHistoryDisclosure(oldRow, nextRow) {
-  globalThis.DeepAgentMarkdown?.restoreCodeState?.(nextRow, globalThis.DeepAgentMarkdown?.captureCodeState?.(oldRow));
+  const codeState = globalThis.DeepAgentMarkdown?.captureCodeState?.(oldRow);
   for (const selector of [".assistant-process", ".assistant-thinking", ".tool-block"]) {
     const oldBlocks = [...oldRow.querySelectorAll(selector)];
     for (const [index, block] of [...nextRow.querySelectorAll(selector)].entries()) {
@@ -1802,11 +1957,14 @@ function restoreHistoryDisclosure(oldRow, nextRow) {
       if (!previous?.dataset.disclosureTouched) continue;
       if (selector === ".tool-block" && previous.classList.contains("hitl-pending") !== block.classList.contains("hitl-pending")) continue;
       const open = previous.classList.contains("open");
-      block.classList.toggle("open", open);
+      if (selector === ".tool-block") setToolBlockExpanded(block, open);
+      else block.classList.toggle("open", open);
       if (previous.dataset.disclosureTouched) block.dataset.disclosureTouched = "1";
       block.querySelector("[aria-expanded]")?.setAttribute("aria-expanded", String(open));
     }
   }
+  // Expanded lazy tool bodies must exist before restoring their code controls.
+  globalThis.DeepAgentMarkdown?.restoreCodeState?.(nextRow, codeState);
 }
 
 const sessionDeletesInFlight = new Set();
@@ -1814,8 +1972,20 @@ async function deleteSession(session) {
   const normalized = normalizeSession(session);
   const key = sessionLookupKey(normalized);
   if (sessionDeletesInFlight.has(key)) return;
+  const stopFirst = () => showConsoleToast("请先停止生成，再删除会话。", true);
+  if (runningSessionKeys().has(key)) return stopFirst();
   sessionDeletesInFlight.add(key);
   try {
+    // Another client can own the run even if this row hasn't been opened here.
+    const run = await boundedStreamRequest(async (signal) => {
+      const response = await daFetch(sessionApiUrl(normalized, "/run-status"), { signal });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(typeof body?.detail === "string" ? body.detail : `无法确认运行状态（HTTP ${response.status}）`);
+      }
+      return response.json();
+    });
+    if (run?.status !== "idle" || runningSessionKeys().has(key)) return stopFirst();
     const response = await daFetch(sessionApiUrl(normalized), { method: "DELETE" });
     if (!response.ok) {
       const body = await response.json().catch(() => null);
@@ -1828,7 +1998,20 @@ async function deleteSession(session) {
     sessionDeletesInFlight.delete(key);
   }
   state.sessions = state.sessions.filter((s) => sessionLookupKey(s) !== key);
-  if (sessionPage.agentId === normalized.agentId) sessionPage.offset = Math.max(0, sessionPage.offset - 1);
+  const sameAgentPage = sessionPage.agentId === normalized.agentId;
+  const listed = sameAgentPage && sessionPage.ids?.has(normalized.id);
+  const reloadPage = sameAgentPage && sessionPage.loading;
+  if (listed || reloadPage) {
+    // A page fetched before DELETE must not resurrect the removed conversation.
+    // A refresh/filter may have started while DELETE was pending, leaving ids
+    // empty even though its in-flight response still contains the removed row.
+    sessionPage.controller?.abort();
+    const ids = new Set(sessionPage.ids);
+    ids.delete(normalized.id);
+    sessionPage = { ...sessionPage, ids, offset: Math.max(0, sessionPage.offset - (listed ? 1 : 0)),
+      total: sessionPage.total == null ? undefined : Math.max(0, sessionPage.total - (listed ? 1 : 0)),
+      loading: false, controller: null, promise: null };
+  }
   if (normalized.id === state.sessionId && (normalized.agentId || "") === (state.agentId || "")) {
     // DELETE has waited for the server run to stop. Detach any buffered SSE
     // before clearing the UI so late frames cannot restore the deleted session.
@@ -1842,6 +2025,8 @@ async function deleteSession(session) {
     newChat();
   }
   else renderSessions();
+  void refreshSessionFilterOptions({ force: true });
+  if (reloadPage) await loadMoreSessions();
 }
 
 /* --------------------------- 会话重命名 --------------------------- */
@@ -1883,7 +2068,7 @@ async function renameSession(session, newTitle) {
 }
 
 function startInlineEdit(session, titleElement) {
-  if (state.streaming) return;
+  if (titleElement.querySelector(".session-title-input")) return;
 
   const currentTitle = titleElement.textContent;
   const input = document.createElement("input");
@@ -1913,7 +2098,7 @@ function startInlineEdit(session, titleElement) {
       titleElement.textContent = newTitle || currentTitle;
       await renameSession(session, newTitle);
     } else {
-      titleElement.textContent = currentTitle;
+      titleElement.textContent = state.sessions.find(s => sessionLookupKey(s) === sessionLookupKey(session))?.title || currentTitle;
     }
   };
 
@@ -1929,24 +2114,7 @@ function startInlineEdit(session, titleElement) {
   });
 }
 
-/* --------------------------- 健康检查 / 能力 --------------------------- */
-async function checkHealth() {
-  setConn("pending", "检测中…");
-  try {
-    const r = await daFetch(serviceUrl("health"), { method: "GET" });
-    if (r.ok) setConn("ok", "已连接");
-    else setConn("err", `HTTP ${r.status}`);
-  } catch (_) {
-    setConn("err", "未连接");
-  }
-}
-
-function setConn(kind, text) {
-  el.connStatus.classList.toggle("ok", kind === "ok");
-  el.connStatus.classList.toggle("err", kind === "err");
-  el.connStatus.querySelector(".conn-text").textContent = text;
-}
-
+/* ------------------------------- 能力 ------------------------------- */
 async function loadAgents({ isCurrent = () => true } = {}) {
   if (!el.agentSelect) return;
   if (!state.agents.length) el.agentSelect.innerHTML = '<option value="">加载中…</option>';
@@ -2087,29 +2255,16 @@ function currentModelInfo() {
   return { presetName, modelId, modalities };
 }
 
-function nonTextModalityBadges(modalities = []) {
-  const supported = new Set(modalities.map((item) => String(item).toLowerCase()));
-  return ["image", "audio", "video"]
-    .filter((key) => supported.has(key))
-    .map((key) => `<span class="model-modality-badge">${escapeHtml(LLM_MODALITY_LABELS[key] || key)}</span>`)
-    .join("");
-}
-
-function composerModelLabel(model) {
-  return String(model?.name || model?.model || "模型").trim();
-}
-
-
-function selectComposerModel(modelId) {
+function selectComposerModel(modelId, { keepMenuOpen = false } = {}) {
   state.modelManuallySelected = true;
   if (!modelId || modelId === state.llmModelId) {
-    setComposerModelMenuOpen(false);
+    if (!keepMenuOpen) setComposerModelMenuOpen(false);
     return;
   }
   state.llmModelId = modelId;
   if (el.modelSelect) el.modelSelect.value = modelId;
   rememberSessionModel();
-  setComposerModelMenuOpen(false);
+  if (!keepMenuOpen) setComposerModelMenuOpen(false);
   updateComposerModelInfo();
   updateHitlInputState();
   if (state.sessionId) {
@@ -2117,11 +2272,29 @@ function selectComposerModel(modelId) {
   }
 }
 
+function positionComposerModelMenu() {
+  if (!state.modelMenuOpen) return;
+  if (!el.composerModelTrigger?.getClientRects().length) { setComposerModelMenuOpen(false); return; }
+  positionModelPicker(el.composerModelMenu, el.composerModelTrigger, el.composerModelMenu.firstElementChild);
+}
+
 function setComposerModelMenuOpen(open) {
-  state.modelMenuOpen = Boolean(open && !state.streaming && el.composerModelMenu);
-  el.composerModelMenu?.classList.toggle("hidden", !state.modelMenuOpen);
+  const menu = el.composerModelMenu;
+  const wasOpen = state.modelMenuOpen;
+  state.modelMenuOpen = Boolean(open && !state.streaming && menu);
   el.composerModelTrigger?.setAttribute("aria-expanded", String(state.modelMenuOpen));
   el.composerMeta?.classList.toggle("open", state.modelMenuOpen);
+  if (!menu) return;
+  if (state.modelMenuOpen) {
+    menu.classList.remove("hidden");
+    try { menu.showPopover?.(); } catch { /* Fixed-position fallback for older embedded browsers. */ }
+    positionComposerModelMenu();
+    if (!wasOpen) revealModelPickerOption(menu.firstElementChild, menu.querySelector('[aria-selected="true"]'), { center: true });
+  } else {
+    menu.querySelector('.reasoning-picker-options:not([hidden])')?.closeReasoningMenu?.();
+    if (menu.hidePopover && menu.matches(":popover-open")) menu.hidePopover();
+    menu.classList.add("hidden");
+  }
 }
 
 function uploadCapabilityText() {
@@ -2186,6 +2359,23 @@ async function loadUploadCapabilities({ force = false } = {}) {
   return pending;
 }
 
+function reasoningOverride(model) {
+  if (!model?.id) return null;
+  const effort = state.reasoningOverrides.get(model.id);
+  return effort === "default" || model.reasoning_efforts?.includes(effort) ? effort : null;
+}
+
+function selectedReasoningEffort(model) {
+  const override = reasoningOverride(model);
+  if (override) return override;
+  const choices = model?.reasoning_efforts || [];
+  const agent = currentAgent();
+  if (agent?.model_id === model?.id && agent?.reasoning_effort_bound !== false && choices.includes(agent?.reasoning_effort)) {
+    return agent.reasoning_effort;
+  }
+  return "default";
+}
+
 function updateComposerModelInfo() {
   if (!el.composerMeta) return;
   const info = currentModelInfo();
@@ -2211,12 +2401,13 @@ function updateComposerModelInfo() {
 
   const selected = selectedLlmModel();
   if (el.composerModelTrigger) {
-    const selectedLabel = selected ? composerModelLabel(selected) : (info?.presetName || "选择模型");
+    const selectedLabel = selected ? modelPickerLabel(selected) : (info?.presetName || "选择模型");
+    const value = el.composerModelTrigger.querySelector(".composer-model-trigger-label");
     el.composerModelTrigger.disabled = state.streaming || !state.llmModels.some(isModelSelectable);
-    el.composerModelTrigger.querySelector(".composer-model-trigger-label").textContent = selectedLabel;
+    renderModelPickerValue(value, selectedLabel, selected && effortLabel(selectedReasoningEffort(selected)));
     el.composerModelTrigger.querySelector(".composer-provider-icon").innerHTML = composerProviderIcon(modelProvider(selected));
     el.composerModelTrigger.title = selected
-      ? `${modelProvider(selected)?.name || "Provider"} · ${selectedLabel}`
+      ? `${modelProvider(selected)?.name || "Provider"} · ${value.textContent}`
       : "选择本会话使用的 LLM 模型";
   }
   if (el.composerModelMenu) {
@@ -2228,20 +2419,35 @@ function updateComposerModelInfo() {
       if (!groups.has(key)) groups.set(key, { provider, models: [] });
       groups.get(key).models.push(model);
     }
-    el.composerModelMenu.innerHTML = visible.length
+    const rows = visible.length
       ? [...groups.values()].map(({ provider, models }) => `<div role="group" aria-label="${escapeHtml(provider?.name || "未关联供应商")}">
           <div class="da-select-group"><span class="composer-provider-icon">${composerProviderIcon(provider)}</span>${escapeHtml(provider?.name || "未关联供应商")}</div>
           ${models.map((model) => {
           const active = model.id === state.llmModelId;
-          return `<button type="button" class="composer-model-option${active ? " active" : ""}" role="option" aria-selected="${active}" data-model-id="${escapeHtml(model.id)}">
-            <strong class="composer-model-option-name" title="${escapeHtml(composerModelLabel(model))}">${escapeHtml(composerModelLabel(model))}</strong>
-            <span class="composer-model-option-badges">${nonTextModalityBadges(model.input_modalities || [])}</span>
-            ${active ? `<span class="composer-model-check">${lucideIcon("check")}</span>` : ""}
+          return `<button type="button" class="da-select-option is-grouped composer-model-option" role="option" aria-selected="${active}" data-model-id="${escapeHtml(model.id)}">
+            ${active ? '<i class="reasoning-model-check" data-lucide="check" aria-hidden="true"></i>' : ""}
+            <span class="reasoning-model-option-name" title="${escapeHtml(modelOptionLabel(model))}">${escapeHtml(modelPickerLabel(model))}</span>
+            <span class="reasoning-model-option-badges">${modelPickerModalityLabels(model.input_modalities || []).map(label => `<span class="model-modality-badge">${escapeHtml(label)}</span>`).join("")}</span>
           </button>`;
         }).join("")}</div>`).join("")
       : '<div class="composer-model-empty">无可用模型</div>';
+    const scrollTop = el.composerModelMenu.firstElementChild?.scrollTop || 0;
+    el.composerModelMenu.innerHTML = `<div class="reasoning-model-list" id="composerModelList" role="listbox" aria-label="选择本会话模型">${rows}</div>`;
+    if (selected) appendThinkingMenu(el.composerModelMenu, selected.reasoning_efforts, selectedReasoningEffort(selected), effort => {
+      state.reasoningOverrides.set(selected.id, effort);
+      setComposerModelMenuOpen(false);
+      updateComposerModelInfo();
+      el.composerModelTrigger?.focus();
+    });
+    if (state.modelMenuOpen) {
+      positionComposerModelMenu();
+      el.composerModelMenu.firstElementChild.scrollTop = scrollTop;
+    }
     el.composerModelMenu.querySelectorAll("[data-model-id]").forEach((button) => {
-      button.addEventListener("click", () => selectComposerModel(button.dataset.modelId));
+      button.addEventListener("click", () => {
+        selectComposerModel(button.dataset.modelId, { keepMenuOpen: true });
+        el.composerModelMenu.querySelector('[aria-selected="true"]')?.focus({ preventScroll: true });
+      });
     });
   }
   const tooltip = uploadCapabilityText();
@@ -2326,14 +2532,27 @@ async function loadCapabilities() {
 }
 
 /* --------------------------- 发送 / 流式 --------------------------- */
+function setRemoteTaskReply(task) {
+  state.remoteTaskReply = task ? { id: task.id, name: task.name, questionId: task.question_id, sessionId: state.sessionId } : null;
+  if (!el.remoteTaskReply) return;
+  el.remoteTaskReply.hidden = !task;
+  el.remoteTaskReply.querySelector("#composerRemoteReplyLabel").textContent = task
+    ? `回复远程 Agent：${task.name || task.id}` : "";
+}
+
+function selectRemoteTaskReply(task) {
+  if (!state.sessionId || state.streaming || state.historyLoading || currentSessionHasProducer()) {
+    showConsoleToast("请等当前会话结束生成后再回复任务", true);
+    return;
+  }
+  setRemoteTaskReply(task);
+  el.input.focus();
+}
+
 async function onSend() {
   const text = el.input.value.trim();
   const attachments = state.pendingAttachments.slice();
-  if ((!text && attachments.length === 0) || state.streaming || state.historyLoading) return;
-  if (state.awaitingHitl) {
-    addSystemNote("请先完成上方待处理的交互。");
-    return;
-  }
+  if ((!text && attachments.length === 0) || state.streaming || state.historyLoading || currentSessionHasProducer()) return;
   if (!ensureAgentSelected()) {
     addSystemNote("请先选择 Agent。");
     return;
@@ -2342,18 +2561,20 @@ async function onSend() {
     showConsoleToast("当前 Agent 的模型已停用或不可用，请先选择可用模型", true);
     return;
   }
+  if (!hasConsoleChatSlot()) return;
 
   hideEmptyState();
   state.messageAutoFollow = true;
   el.input.value = "";
   clearPendingAttachments();
-  autoGrow();
+  resizeComposerInput(el.input);
 
   clearComposerPlan();
   const turnStartedAt = new Date().toISOString();
   addMessage("user", text, turnStartedAt, null, attachments);
   trajectory?.addUser({ content: text, attachments });
 
+  const pendingInteraction = state.awaitingHitl ? state.assistantPresenter : null;
   const assistant = createAssistantMessage(null, null, null, { startedAt: turnStartedAt });
   state.assistantPresenter = assistant;
   setStreaming(true);
@@ -2366,8 +2587,15 @@ async function onSend() {
     message: text || null,
     session_id: state.sessionId,
   };
+  if (state.remoteTaskReply?.sessionId === state.sessionId) {
+    payload.remote_task_id = state.remoteTaskReply.id;
+    if (state.remoteTaskReply.questionId) payload.remote_question_id = state.remoteTaskReply.questionId;
+    setRemoteTaskReply(null);
+  }
   const modelId = chatPayloadModelId();
   if (modelId) payload.model_id = modelId;
+  const effort = reasoningOverride(selectedLlmModel());
+  if (effort) payload.reasoning_effort = effort;
   rememberSessionModel();
   if (attachments.length) {
     payload.attachments = attachments.map((a) => ({
@@ -2377,15 +2605,16 @@ async function onSend() {
     }));
   }
   state.modelMessageCount += 1;
-  await runChatStream(payload, assistant);
+  await runChatStream(payload, assistant, pendingInteraction);
 }
 
-async function resumeDeferred(deferredResults) {
-  if (!state.sessionId) return;
-  if (state.streaming || state.historyLoading) {
+function resumeDeferred(deferredResults) {
+  if (!state.sessionId) return false;
+  if (state.streaming || state.historyLoading || currentSessionHasProducer()) {
     showConsoleToast("当前会话仍在生成，请先停止后再提交交互结果", true);
-    return;
+    return false;
   }
+  if (!hasConsoleChatSlot()) return false;
   state.awaitingHitl = false;
   state.messageAutoFollow = true;
   updateHitlInputState();
@@ -2405,20 +2634,26 @@ async function resumeDeferred(deferredResults) {
     deferred_tool_results: deferredResults,
   };
   const modelId = chatPayloadModelId();
-  if (modelId) payload.model_id = modelId;
+  if (modelId && !state.lastRunMetrics?.reasoning_effort) payload.model_id = modelId;
   rememberSessionModel();
-  await runChatStream(payload, assistant);
+  return runChatStream(payload, assistant);
 }
 
-async function runChatStream(payload, assistant) {
+async function runChatStream(payload, assistant, pendingInteraction = null) {
   state.completedAutomaticCompactionEvents = new Set();
   state.historyFollower?.stop();
   state.historyController?.abort();
   state.historyFollower = null;
   state.historyController = null;
   const streamController = new AbortController();
-  (state.backgroundStreams ||= new Set()).add(streamController);
-  const sourceSession = { id: payload.session_id, agentId: payload.agent_id || state.agentId };
+  const sourceSession = {
+    id: payload.session_id,
+    agentId: payload.agent_id || state.agentId,
+    releasePresenter: () => { assistant = null; },
+  };
+  const viewingSourceSession = () => state.sessionId === sourceSession.id && state.agentId === sourceSession.agentId;
+  (state.backgroundStreams ||= new Map()).set(streamController, sourceSession);
+  updateSessionRunIndicators();
   state.stopController?.abort();
   state.abortController = streamController;
   const current = () => state.abortController === streamController;
@@ -2454,18 +2689,38 @@ async function runChatStream(payload, assistant) {
       } catch { /* Non-JSON upstream errors keep their response text. */ }
       throw new Error(detail || `HTTP ${resp.status}`);
     }
-    if (current()) setConn("ok", "已连接");
+    if (current()) window.DeepAgentConsole?.setConnectionStatus?.("ok", "已连接");
 
     await readSse(resp.body, (evt) => {
       if (streamController.signal.aborted) return;
-      if (current()) handleEvent(evt, assistant);
-      else if (evt.event === "session") {
+      const type = evt.event || evt.data?.type;
+      if (type === "session") {
         sourceSession.id = evt.data.session_id || sourceSession.id;
+        sourceSession.agentId = evt.data.agent_id || sourceSession.agentId;
+        sourceSession.runId = evt.data.run_id || null;
+      }
+      if (current()) {
+        if (pendingInteraction && type === "session_event_appended" && evt.data?.persisted === true
+          && evt.data.event?.event_type === "user/message") {
+          pendingInteraction.skipPendingTools();
+          pendingInteraction = null;
+          state.awaitingHitl = false;
+          updateHitlInputState();
+        }
+        handleEvent(evt, assistant);
+      }
+      else if (type === "session") {
         upsertSession(sourceSession.id, null, sourceSession.agentId, agentNameById(sourceSession.agentId));
-      } else if (evt.event === "session_title") {
+        void refreshSessionFilterOptions({ force: true });
+        // Returning before the POST is admitted can see an idle run status.
+        // Now that the session frame has arrived, follow the admitted Run.
+        if (viewingSourceSession() && !state.abortController && !state.observingRun) {
+          void loadSessionHistory(sourceSession);
+        }
+      } else if (type === "session_title") {
         applySessionTitle(sourceSession, evt.data.title);
       }
-      if (["final", "error", "cancelled"].includes(evt.event || evt.data?.type)) {
+      if (["final", "error", "cancelled"].includes(type)) {
         // A real terminal frame needs no further socket bytes to finish.
         streamController.abort();
       }
@@ -2476,7 +2731,7 @@ async function runChatStream(payload, assistant) {
       // Transport cleanup (page unload/network teardown), not a user stop result.
       applyAssistantPresentationActions(assistant, assistantActionsFromSse("error"));
     } else {
-      setConn("err", "请求失败");
+      window.DeepAgentConsole?.setConnectionStatus?.("err", "请求失败");
       trajectory?.ingest({ event: "error", data: { message: e.message } });
       failAutomaticContextCompaction("上下文压缩后续请求失败，未生成压缩事件");
       clearComposerPlan();
@@ -2485,8 +2740,11 @@ async function runChatStream(payload, assistant) {
   } finally {
     streamController.signal.removeEventListener("abort", abortStop);
     state.backgroundStreams.delete(streamController);
+    if (sourceSession.runId) clearListedSessionRun(sourceSession, sourceSession.runId);
+    updateSessionRunIndicators();
     if (!current()) {
       streamController.abort();
+      if (viewingSourceSession()) updateHitlInputState();
       return;
     }
     state.stopController?.abort();
@@ -2501,6 +2759,9 @@ async function runChatStream(payload, assistant) {
       }
     }
     if (!current()) return;
+    if (state.awaitingHitl && pendingInteraction?.row.isConnected) {
+      state.assistantPresenter = pendingInteraction;
+    }
     if (state.streamRecoveryNote) addSystemNote(state.streamRecoveryNote);
     state.streamRecoveryNote = null;
     state.abortController = null;
@@ -2519,21 +2780,20 @@ async function runChatStream(payload, assistant) {
         && state.sessionId === session.id && state.agentId === session.agentId);
     }
     if (state.sessionId) await syncSessionsFromBackend();
+    if (viewingSourceSession() && sourceSession.runId) watchSessionActivity(sourceSession);
+    void refreshSessionFilterOptions({ force: true });
   }
 }
 
 function updateHitlInputState() {
   const modelUnavailable = selectedModelUnavailable();
-  const locked = state.awaitingHitl || modelUnavailable;
   if (el.input) {
-    el.input.placeholder = state.awaitingHitl
-      ? "请先完成上方交互…"
-      : modelUnavailable
-        ? "当前 Agent 模型不可用，请先切换模型…"
-        : "输入消息…";
-    el.input.disabled = locked;
+    el.input.placeholder = modelUnavailable
+      ? "当前 Agent 模型不可用，请先切换模型…"
+      : "输入消息…";
+    el.input.disabled = modelUnavailable;
   }
-  if (el.sendBtn) el.sendBtn.disabled = locked || state.historyLoading;
+  if (el.sendBtn) el.sendBtn.disabled = modelUnavailable || state.historyLoading || currentSessionHasProducer();
   updateComposerContextControls();
 }
 
@@ -2544,6 +2804,7 @@ async function stopStream() {
   const agentId = state.agentId;
   const streamController = state.abortController;
   if (!sessionId || !streamController) return;
+  const runId = state.backgroundStreams?.get(streamController)?.runId;
   const current = () => state.abortController === streamController
     && state.sessionId === sessionId && state.agentId === agentId
     && state.streaming && state.refreshHistoryAfterStream;
@@ -2558,8 +2819,10 @@ async function stopStream() {
   const result = await verifyStreamStop({
     signal: stopController.signal,
     isCurrent: current,
+    runId,
     request: (kind, signal) => daFetch(
-      sessionApiUrl({ id: sessionId, agentId }, kind === "cancel" ? "/cancel" : "/run-status"),
+      sessionApiUrl({ id: sessionId, agentId }, kind === "cancel" ? "/cancel" : "/run-status",
+        kind === "cancel" ? { run_id: runId } : {}),
       { method: kind === "cancel" ? "POST" : "GET", signal },
     ),
     onAccepted: () => showConsoleToast("正在停止当前生成并核验运行状态…"),
@@ -2583,6 +2846,7 @@ async function stopStream() {
 async function stopObservedRun() {
   const sessionId = state.sessionId;
   const agentId = state.agentId;
+  const runId = state.observedRunId;
   const historyController = state.historyController;
   const stopController = new AbortController();
   const current = () => state.historyController === historyController
@@ -2594,9 +2858,10 @@ async function stopObservedRun() {
   el.stopBtn.disabled = true;
   el.stopBtn.title = "正在停止…";
   const result = await verifyStreamStop({
-    signal: stopController.signal, isCurrent: current,
+    signal: stopController.signal, isCurrent: current, runId,
     request: (kind, signal) => daFetch(
-      sessionApiUrl({ id: sessionId, agentId }, kind === "cancel" ? "/cancel" : "/run-status"),
+      sessionApiUrl({ id: sessionId, agentId }, kind === "cancel" ? "/cancel" : "/run-status",
+        kind === "cancel" ? { run_id: runId } : {}),
       { method: kind === "cancel" ? "POST" : "GET", signal },
     ),
     onAccepted: () => showConsoleToast("正在停止当前生成并同步已保存内容…"),
@@ -2616,7 +2881,9 @@ async function stopObservedRun() {
 }
 
 function setStreaming(v) {
+  const changed = state.streaming !== v;
   state.streaming = v;
+  if (changed) updateSessionRunIndicators();
   if (v) setComposerModelMenuOpen(false);
   el.sendBtn.classList.toggle("hidden", v);
   el.stopBtn.classList.toggle("hidden", !v);
@@ -2635,6 +2902,7 @@ function setStreaming(v) {
   updateAgentSelectState();
   updateHitlInputState();
   updateComposerContextControls();
+  if (!v) state.sessionActivity?.refresh();
   if (!v && directoryDeletionDeferred) queueMicrotask(() => { void refreshConfiguration(); });
 }
 
@@ -2662,14 +2930,18 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
       const id = data.session_id;
       state.runCache = null;
       if (id) {
-        state.sessionId = id;
         state.conversationId = data.conversation_id || state.conversationId;
         state.lastRunMetrics = {
           conversation_id: state.conversationId,
           run_id: data.run_id || null,
           status: "running",
+          reasoning_effort: data.reasoning_effort || null,
           detailed: true,
         };
+        // Replay describes an existing run, so it must not touch the session's
+        // list activity or the model the user chose for the next message.
+        if (state.observingRun) break;
+        state.sessionId = id;
         state.streamSessionConfirmed = true;
         if (data.agent_id) {
           state.agentId = data.agent_id;
@@ -2682,6 +2954,7 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
         const isNewSession = !state.sessions.some((s) => sessionLookupKey(s) === sessionKey);
         const title = isNewSession ? lastUserText() || id.slice(0, 8) : null;
         upsertSession(id, title, state.agentId, agentNameById(state.agentId));
+        if (isNewSession) void refreshSessionFilterOptions({ force: true });
         if (isNewSession && el.chatTitle.textContent === "新对话") {
           el.chatTitle.textContent = (title || id.slice(0, 8)).slice(0, 40);
         }
@@ -2699,6 +2972,10 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
       break;
     case "session_event_appended":
     case "session_event_updated":
+      if (type === "session_event_appended" && data.event?.event_type === "user/message"
+        && data.event?.run_id === state.lastRunMetrics?.run_id) {
+        state.lastRunMetrics.reasoning_effort = data.event.payload?.message?.metadata?.reasoning_effort || null;
+      }
       updateAutomaticContextCompactionEvent(data);
       break;
     case "output":
@@ -2738,6 +3015,7 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
       state.conversationId = data.conversation_id || state.conversationId;
       state.lastRunMetrics = {
         ...(data.run_metrics || {}),
+        reasoning_effort: state.lastRunMetrics?.reasoning_effort || null,
         conversation_id: state.conversationId,
         run_id: data.run_id || data.run_metrics?.run_id || state.lastRunMetrics?.run_id || null,
         status: data.status || data.run_metrics?.status || "completed",
@@ -2791,6 +3069,7 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
       state.conversationId = data.conversation_id || state.conversationId;
       state.lastRunMetrics = {
         ...(data.run_metrics || {}),
+        reasoning_effort: state.lastRunMetrics?.reasoning_effort || null,
         conversation_id: state.conversationId,
         run_id: data.run_id || state.lastRunMetrics?.run_id || null,
         status: "cancelled",
@@ -2808,56 +3087,12 @@ function renderUsage(usage) {
 }
 
 /* --------------------------- 消息渲染 --------------------------- */
-function createMessageActions(...args) { return getConversationPresenter().createMessageActions(...args); }
-
 function addMessage(...args) { return getConversationPresenter().addMessage(...args); }
-
-function renderMessageContextRefs(...args) { return getConversationPresenter().renderMessageContextRefs(...args); }
-
-function renderMessageAttachments(...args) { return getConversationPresenter().renderMessageAttachments(...args); }
 
 async function onFilesSelected(e) {
   const files = Array.from(e.target.files || []);
   e.target.value = "";
   await uploadAttachmentBatch(files);
-}
-
-async function onPaste(e) {
-  const files = Array.from(e.clipboardData?.files || []);
-  if (!files.length) return;
-  e.preventDefault();
-  await uploadAttachmentBatch(files);
-}
-
-function setComposerDragging(active) {
-  el.composerDropZone?.classList.toggle("dragging", active);
-  el.composerDropOverlay?.setAttribute("aria-hidden", String(!active));
-}
-
-function onComposerDragEnter(event) {
-  if (!event.dataTransfer?.types?.includes("Files")) return;
-  event.preventDefault();
-  state.composerDragDepth += 1;
-  setComposerDragging(true);
-}
-
-function onComposerDragOver(event) {
-  if (!event.dataTransfer?.types?.includes("Files")) return;
-  event.preventDefault();
-  event.dataTransfer.dropEffect = "copy";
-}
-
-function onComposerDragLeave(event) {
-  event.preventDefault();
-  state.composerDragDepth = Math.max(0, state.composerDragDepth - 1);
-  if (state.composerDragDepth === 0) setComposerDragging(false);
-}
-
-async function onComposerDrop(event) {
-  event.preventDefault();
-  state.composerDragDepth = 0;
-  setComposerDragging(false);
-  await uploadAttachmentBatch(Array.from(event.dataTransfer?.files || []));
 }
 
 async function uploadAttachmentBatch(files) {
@@ -2956,6 +3191,14 @@ function renderAttachmentImagePreview() {
   const { items, index } = attachmentImageGallery;
   const attachment = items[index];
   if (!attachment) return;
+  el.attachmentImageDialogError?.classList.add("hidden");
+  const original = el.attachmentImageDialogOpen;
+  if (original) {
+    const isWebUrl = /^https?:\/\//i.test(attachment.previewUrl);
+    if (isWebUrl) original.href = attachment.previewUrl;
+    else original.removeAttribute("href");
+    original.hidden = !isWebUrl;
+  }
   el.attachmentImageDialogImage.src = attachment.previewUrl;
   el.attachmentImageDialogImage.alt = attachment.name || "图片附件";
   el.attachmentImageDialogName.textContent = `${attachment.name || "图片附件"}${items.length > 1 ? ` · ${index + 1} / ${items.length}` : ""}`;
@@ -2993,8 +3236,6 @@ function addSystemNote(text) {
   refreshLucideIcons();
   scrollToBottom();
 }
-
-function processElapsedSecondsBetween(...args) { return getConversationPresenter().processElapsedSecondsBetween(...args); }
 
 function createAssistantMessage(...args) { return getConversationPresenter().createAssistantMessage(...args); }
 
@@ -3237,8 +3478,7 @@ function renderStructuredForm(widgetEl, call, onSubmit) {
         : { value: control.value };
     }
     error.classList.add("hidden");
-    submit.disabled = true;
-    onSubmit([{ tool_call_id: call.tool_call_id, result: { confirmed: true, values } }]);
+    if (onSubmit([{ tool_call_id: call.tool_call_id, result: { confirmed: true, values } }]) !== false) submit.disabled = true;
   });
   widgetEl.appendChild(submit);
 }
@@ -3273,8 +3513,6 @@ function formatDateSeparator(iso) {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
-function formatMessageTime(...args) { return getConversationPresenter().formatMessageTime(...args); }
-
 function lastUserText() {
   const rows = el.messages.querySelectorAll(".msg-row.user .bubble");
   return rows.length ? rows[rows.length - 1].textContent : "";
@@ -3294,29 +3532,11 @@ function hasNonEmptyArgs(...args) { return getConversationPresenter().hasNonEmpt
 
 function pretty(...args) { return getConversationPresenter().pretty(...args); }
 
-function renderToolResult(...args) { return getConversationPresenter().renderToolResult(...args); }
-
-function findLocalFileResult(...args) { return getConversationPresenter().findLocalFileResult(...args); }
-
-function renderLocalFileDownload(...args) { return getConversationPresenter().renderLocalFileDownload(...args); }
-
-function renderToolResultArtifacts(...args) { return getConversationPresenter().renderToolResultArtifacts(...args); }
-
-function renderGeneratedFileArtifact(...args) { return getConversationPresenter().renderGeneratedFileArtifact(...args); }
-
-function formatArtifactBytes(...args) { return getConversationPresenter().formatArtifactBytes(...args); }
-
 function escapeHtml(...args) { return getConversationPresenter().escapeHtml(...args); }
 
 function initMarkdown() {
   window.DeepAgentMarkdown?.init();
 }
-
-function renderMarkdown(...args) { return getConversationPresenter().renderMarkdown(...args); }
-
-function renderMarkdownBody(...args) { return getConversationPresenter().renderMarkdownBody(...args); }
-
-function renderMarkdownDiagrams(...args) { return getConversationPresenter().renderMarkdownDiagrams(...args); }
 
 async function selectAgent(agentId) {
   if (!agentId || !state.agents.some((agent) => agent.id === agentId)) return false;
@@ -3334,7 +3554,7 @@ async function refreshAgentWorkspace() {
     && state.sessionId === previousSessionId;
   await loadAgents({ isCurrent: current });
   if (!current()) return false;
-  await syncSessionsFromBackend();
+  await Promise.all([syncSessionsFromBackend(), refreshSessionFilterOptions({ force: true })]);
   if (!current()) return false;
   if (state.agentId !== previousAgentId || !state.agents.some((agent) => agent.id === previousAgentId)) {
     newChat();
@@ -3354,6 +3574,9 @@ async function refreshAgentWorkspace() {
     } else if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     } else if (!state.abortController && !state.streaming && !state.observingRun && !state.awaitingHitl && !state.historyLoading) {
+      const info = await response.json();
+      if (!current()) return false;
+      mergeSessionsFromBackend([info], { append: true });
       const target = state.sessions.find((item) => sessionLookupKey(item) === sessionLookupKey(session));
       await switchSession(target || { ...session, title: el.chatTitle.textContent });
     }
@@ -3373,13 +3596,18 @@ window.DeepAgentConsoleChat = {
   parseSseBlock,
   readSse,
   syncSessionsFromBackend,
+  refreshSessionFilterOptions,
+  async setSessionAppFilter(value) {
+    state.sessionAppFilter = value;
+    await syncSessionsFromBackend();
+  },
   stopStream,
   async openSession(session) {
     await switchSession(session);
   },
   setComposerText(text) {
     el.input.value = String(text || "");
-    autoGrow();
+    resizeComposerInput(el.input);
     el.input.focus();
   },
   selectAgent,
@@ -3395,6 +3623,7 @@ function getConversationPresenter() {
     isUiToolCall, maybeAttachHitlWidget, renderHitlWidget, resumeDeferred,
     onContextReference: (ref, point) => window.DeepAgentConsoleWorkspace?.toggleContextReferenceInspector(ref, point),
     isContextReferenceSelected: (ref, point) => window.DeepAgentConsoleWorkspace?.isContextReferenceSelected(ref, point),
+    onRemoteTaskReply: selectRemoteTaskReply,
   });
 }
 

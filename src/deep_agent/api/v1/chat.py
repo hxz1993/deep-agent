@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import aclosing
@@ -12,24 +13,33 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.routing import APIRoute
 from loguru import logger
 from pydantic_ai import RunCancelled
+from pydantic_ai.exceptions import ModelHTTPError, ModelQuotaExceededError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from deep_agent.agent.deferred import (
     DeferredResultConflict, build_deferred_tool_results, validate_deferred_results,
 )
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.agent.observability import usage_dict
+from deep_agent.agent.file_delivery import RunFileDelivery
+from deep_agent.agent.observability import log_run_phase, observe_run_phase, usage_dict
 from deep_agent.agent.context.compaction import ContextWindowExceededError
-from deep_agent.agent.headers import extract_forward_headers
+from deep_agent.agent.headers import extract_execution_context_headers, extract_forward_headers
 from deep_agent.agent.run_identity import conversation_id_for, new_run_id
 from deep_agent.api.v1.deps import build_runner_for_agent
+from deep_agent.services.integration_app_runtime import RunAppContext, ensure_scoped_run_session, resolve_run_app
+from deep_agent.options import OPTION
 from deep_agent.api.v1.channel_auth import ChannelAccountDep, ChannelRequestUserDep
 from deep_agent.api.v1.stream_diagnostics import DiagnosticEventSourceResponse, transport_cancel_reason
+from deep_agent.conversation.file_links import ReplyFiles
 from deep_agent.core.context import AppContextDep
 from deep_agent.core.exceptions import AgentModelNotConfiguredError, AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.db.ids import normalize_agent_id
 from deep_agent.files.upload_settings import load_upload_settings
 from deep_agent.schemas.chat import ChatRequest, ChatResponse, StreamChatRequest
+from deep_agent.models.provider_errors import PROVIDER_QUOTA_CODE, PROVIDER_QUOTA_MESSAGE, is_provider_quota_error
+from deep_agent.models.provider_registry import ProviderRuntimeError
+from deep_agent.models.reasoning import DEFAULT_EFFORT, ReasoningEffortError
+from deep_agent.local_security import LOCAL_CURRENT_USERNAME_SCOPE_KEY
 
 
 class _ChatBodyValidationRoute(APIRoute):
@@ -39,6 +49,7 @@ class _ChatBodyValidationRoute(APIRoute):
         original = super().get_route_handler()
 
         async def handler(request: Request) -> Response:
+            request.state.chat_received_at = time.perf_counter()
             try:
                 return await original(request)
             except StarletteHTTPException as exc:
@@ -68,6 +79,9 @@ def _agent_deps(
     user: str | None,
     agent_id: str | None = None,
     request_headers: dict[str, str] | None = None,
+    execution_request_headers: dict[str, str] | None = None,
+    local_username: str | None = None,
+    app_context: RunAppContext | None = None,
 ) -> AgentDeps:
     conversation_id = conversation_id_for(agent_id, session_id)
     return AgentDeps(
@@ -77,11 +91,33 @@ def _agent_deps(
         conversation_id=conversation_id,
         run_id=new_run_id(),
         request_headers=dict(request_headers or {}),
+        execution_request_headers=(
+            dict(execution_request_headers) if execution_request_headers is not None else None
+        ),
+        local_username=local_username,
         file_store=ctx.file_store,
         upload_settings_store=getattr(ctx.stores, "global_setting", None),
-        app_id=(request_headers or {}).get("app"),
-        space_id=(request_headers or {}).get("space"),
+        app_id=app_context.app_id if app_context else (request_headers or {}).get("app"),
+        space_id=app_context.space_id if app_context else (request_headers or {}).get("space"),
     )
+
+
+def _apply_scoped_run_headers(app, forward_headers, execution_headers) -> None:
+    if app is None or app.skill_scope is None:
+        return
+    allowed = OPTION.agent.mcp_forward_request_headers
+    for name, value in (("app", app.app_id), ("space", app.space_id)):
+        execution_headers[name] = value
+        if any(rule == name or (rule.endswith("*") and name.startswith(rule[:-1])) for rule in allowed):
+            forward_headers[name] = value
+
+
+def _local_execution_username(request: Request, user: str) -> str | None:
+    # Channel authentication may replace the local adapter's owner. Never pair
+    # that different platform user with the developer's local display profile.
+    if user != request.headers.get("user"):
+        return None
+    return request.scope.get(LOCAL_CURRENT_USERNAME_SCOPE_KEY)
 
 
 async def _adopt_channel_session_scope(ctx, account, deps: AgentDeps) -> None:
@@ -104,6 +140,9 @@ async def _ensure_session_access(
     if resolved is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
     stored_agent_id, _ = resolved
+    source, _ = await ctx.stores.chat_session.get_source(stored_agent_id, session_id)
+    if source in {"a2a", "mcp", "http"}:
+        raise HTTPException(409, detail="请通过集成任务入口继续此会话")
     if agent_id is not None and stored_agent_id != agent_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
     return stored_agent_id
@@ -154,6 +193,10 @@ def _validate_chat_body(body: ChatRequest | StreamChatRequest, *, max_count: int
     has_context_refs = bool(body.context_refs)
     deferred = getattr(body, "deferred_tool_results", None)
     has_deferred = bool(deferred)
+    if body.remote_question_id and not body.remote_task_id:
+        raise HTTPException(422, "remote_question_id requires remote_task_id.")
+    if body.remote_task_id and (not body.session_id or not (has_message or has_attachments) or has_deferred):
+        raise HTTPException(422, "Remote task replies require an existing session and a message or attachments.")
     if not has_message and not has_attachments and not has_context_refs and not has_deferred:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -183,6 +226,23 @@ def _deferred_results(body: StreamChatRequest):
         return build_deferred_tool_results(body.deferred_tool_results)
     except DeferredResultConflict as exc:
         raise HTTPException(status_code=409, detail={"code": exc.code, "message": str(exc)}) from exc
+
+
+async def _prepare_remote_reply(ctx, deps, body) -> None:
+    if body.remote_task_id is None:
+        return
+    from deep_agent.remote_agents.contracts import CONNECTION_PREFIX, RemoteAgentError
+    from deep_agent.remote_agents.runtime import RequestScope
+
+    deps.remote_task_id = body.remote_task_id
+    deps.remote_question_id = body.remote_question_id
+    allowed = None if body.capabilities is None else frozenset(
+        code.removeprefix(CONNECTION_PREFIX) for code in body.capabilities if code.startswith(CONNECTION_PREFIX)
+    )
+    try:
+        await ctx.get_remote_agents().validate_reply(RequestScope.from_deps(deps, allowed))
+    except RemoteAgentError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 async def _current_channel_context(ctx, body, account):
@@ -250,21 +310,30 @@ async def chat(
     session_id = body.session_id or uuid.uuid4().hex
     request_headers = extract_forward_headers(request, channel_account=channel_account)
     request_headers["user"] = user
+    execution_request_headers = extract_execution_context_headers(request, channel_account=channel_account)
+    execution_request_headers["user"] = user
     agent_id = await _resolve_chat_agent_id(
         ctx, body, session_id=session_id, user=user
     )
     message_source = await _resolve_message_source(request, ctx, channel_account, session_id, agent_id, user)
+    app_context = await resolve_run_app(
+        request, ctx, agent_id=agent_id, session_id=body.session_id,
+        headers=execution_request_headers, channel_account=channel_account,
+    )
+    _apply_scoped_run_headers(app_context, request_headers, execution_request_headers)
     try:
         runner = await build_runner_for_agent(
             ctx,
             agent_id,
             model_id=body.model_id,
+            **({'reasoning_effort': body.reasoning_effort} if body.reasoning_effort is not None else {}),
             capabilities=body.capabilities,
             request_headers=request_headers,
+            **({"app_context": app_context} if app_context is not None else {}),
             channel_type=channel_account.channel_type if channel_account is not None else None,
             **({"channel_context": message_source} if message_source is not None else {}),
         )
-    except AgentModelNotConfiguredError as exc:
+    except (AgentModelNotConfiguredError, ReasoningEffortError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except (AgentNotFoundError, LlmModelNotFoundError) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -274,7 +343,13 @@ async def chat(
         user=user,
         agent_id=agent_id,
         request_headers=request_headers,
+        execution_request_headers=execution_request_headers,
+        local_username=_local_execution_username(request, user),
+        app_context=app_context,
     )
+    if channel_account is None:
+        deps.file_delivery = RunFileDelivery()
+    await _prepare_remote_reply(ctx, deps, body)
     try:
         active_run = ctx.active_runs.register(
             agent_id=agent_id, session_id=session_id, user_id=user,
@@ -286,6 +361,7 @@ async def chat(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     deps.cancellation_token = active_run.cancellation_token
     try:
+        await ensure_scoped_run_session(ctx, app_context, agent_id, session_id)
         if message_source is not None:
             await ctx.stores.channel.update_run(message_source.channel_run_id, agent_run_id=deps.run_id)
         await _adopt_channel_session_scope(ctx, channel_account, deps)
@@ -305,16 +381,31 @@ async def chat(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+    except (ModelHTTPError, ModelQuotaExceededError) as exc:
+        if not is_provider_quota_error(exc):
+            raise
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={"code": PROVIDER_QUOTA_CODE, "message": PROVIDER_QUOTA_MESSAGE},
+        ) from None
     except RunCancelled as exc:
         result = {"output": "", "usage": usage_dict(exc.usage), "status": "cancelled"}
     finally:
         ctx.active_runs.unregister(active_run)
+    output = result["output"]
+    files = ReplyFiles(
+        request, ctx.file_store, session_id, request_headers,
+        load_history=lambda: ctx.store.get_raw_history(session_id, agent_id=agent_id),
+    )
+    if isinstance(output, str) and not result.get("output_info"):
+        output = await files.text(output)
     return ChatResponse(
         session_id=session_id,
         conversation_id=deps.conversation_id,
         run_id=deps.run_id,
-        output=result["output"],
+        output=output,
         output_info=result.get("output_info"),
+        output_files=files.delivery(result.get("output_files"), result.get("_output_file_scope")),
         usage=result["usage"],
         status=result.get("status", "completed"),
         deferred=result.get("deferred"),
@@ -331,6 +422,8 @@ async def chat_stream(
     user: ChannelRequestUserDep,
     channel_account: ChannelAccountDep,
 ) -> DiagnosticEventSourceResponse:
+    handler_started_at = time.perf_counter()
+    request_started_at = getattr(request.state, "chat_received_at", handler_started_at)
     admission_generation = ctx.active_runs.generation
     max_count = (await load_upload_settings(getattr(ctx.stores, "global_setting", None))).max_count if body.attachments else 10
     _validate_chat_body(body, max_count=max_count)
@@ -339,48 +432,91 @@ async def chat_stream(
     message = body.message or ""
     request_headers = extract_forward_headers(request, channel_account=channel_account)
     request_headers["user"] = user
+    execution_request_headers = extract_execution_context_headers(request, channel_account=channel_account)
+    execution_request_headers["user"] = user
 
     agent_id = await _resolve_chat_agent_id(
         ctx, body, session_id=session_id, user=user
     )
     try:
-        await validate_deferred_results(ctx.store, session_id, deferred_tool_results)
+        pending_reasoning = await validate_deferred_results(ctx.store, session_id, deferred_tool_results)
     except DeferredResultConflict as exc:
         raise HTTPException(status_code=409, detail={"code": exc.code, "message": str(exc)}) from exc
+    model_id = body.model_id
+    effort = body.reasoning_effort
+    if pending_reasoning is not None:
+        if pending_reasoning.model_id is None:
+            raise HTTPException(status_code=409, detail="原会话模型不可确认，请重新发起请求")
+        if model_id not in {None, pending_reasoning.model_id} or effort not in {None, pending_reasoning.effort}:
+            raise HTTPException(status_code=409, detail="工具续跑须使用原模型和思考档位，请重新发起请求")
+        model_id, effort = pending_reasoning.model_id, pending_reasoning.effort
+    elif deferred_tool_results is not None:
+        effort = DEFAULT_EFFORT
     message_source = await _resolve_message_source(request, ctx, channel_account, session_id, agent_id, user)
+    app_started_at = time.perf_counter()
+    app_context = await resolve_run_app(
+        request, ctx, agent_id=agent_id, session_id=body.session_id,
+        headers=execution_request_headers, channel_account=channel_account,
+    )
+    app_resolved_at = time.perf_counter()
+    _apply_scoped_run_headers(app_context, request_headers, execution_request_headers)
     try:
         runner = await build_runner_for_agent(
             ctx,
             agent_id,
-            model_id=body.model_id,
+            model_id=model_id,
+            **({'reasoning_effort': effort} if effort is not None else {}),
+            **({'expected_provider_id': pending_reasoning.provider_id} if pending_reasoning is not None else {}),
             capabilities=body.capabilities,
             request_headers=request_headers,
+            **({"app_context": app_context} if app_context is not None else {}),
             channel_type=channel_account.channel_type if channel_account is not None else None,
             **({"channel_context": message_source} if message_source is not None else {}),
         )
-    except AgentModelNotConfiguredError as exc:
+    except (AgentModelNotConfiguredError, ReasoningEffortError) as exc:
+        if pending_reasoning is not None:
+            raise HTTPException(status_code=409, detail="原模型或思考档位已不可用，请重新发起请求") from exc
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except AgentNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except LlmModelNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except (LlmModelNotFoundError, ProviderRuntimeError) as exc:
+        if pending_reasoning is not None:
+            raise HTTPException(status_code=409, detail="原模型或思考档位已不可用，请重新发起请求") from exc
+        if isinstance(exc, LlmModelNotFoundError):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise
     deps = _agent_deps(
         ctx,
         session_id=session_id,
         user=user,
         agent_id=agent_id,
         request_headers=request_headers,
+        execution_request_headers=execution_request_headers,
+        local_username=_local_execution_username(request, user),
+        app_context=app_context,
     )
+    if channel_account is None:
+        deps.file_delivery = RunFileDelivery()
+    await _prepare_remote_reply(ctx, deps, body)
     session_data = {
         "session_id": session_id,
         "agent_id": agent_id,
         "conversation_id": deps.conversation_id,
         "run_id": deps.run_id,
+        **({'reasoning_effort': pending_reasoning.effort} if pending_reasoning is not None else {}),
     }
+    timing_ids = {"session_id": session_id, "run_id": deps.run_id,
+                  "agent_id": deps.agent_id, "agent_name": getattr(runner, "agent_name", None)}
+    admitted_at = time.perf_counter()
+    log_run_phase("stream_admission", request_started_at, ended_at=admitted_at, **timing_ids)
+    log_run_phase("stream_route_prepare", request_started_at, ended_at=handler_started_at, **timing_ids)
+    log_run_phase("stream_run_lookup", handler_started_at, ended_at=app_started_at, **timing_ids)
+    log_run_phase("stream_app_context", app_started_at, ended_at=app_resolved_at, **timing_ids)
+    log_run_phase("stream_runner_build", app_resolved_at, ended_at=admitted_at, **timing_ids)
 
     stream_run = None
 
-    async def event_generator():
+    async def run_events():
         nonlocal stream_run
         try:
             active_run = ctx.active_runs.register(
@@ -394,11 +530,16 @@ async def chat_stream(
                 request_owned=True,
             )
         except RuntimeError as exc:
-            yield {"event": "error", "data": json.dumps({"type": "error", "message": str(exc)}, ensure_ascii=False)}
+            yield "error", {"type": "error", "message": str(exc)}
             return
         stream_run = active_run
         live_key = (deps.agent_id, session_id, deps.user)
         try:
+            try:
+                await ensure_scoped_run_session(ctx, app_context, agent_id, session_id)
+            except HTTPException as exc:
+                yield "error", {"type": "error", "code": "session_app_changed", "message": exc.detail}
+                return
             # A rejected duplicate request must never replace the active source
             # run's identity. Bind only after exclusive run admission succeeds.
             if message_source is not None:
@@ -417,7 +558,8 @@ async def chat_stream(
             # Register the cancellable run first so an immediate stop cannot race
             # asynchronous history/input preparation and incorrectly return 404.
             ctx.session_live.publish(live_key, deps.run_id, "session", session_data)
-            yield {"event": "session", "data": json.dumps(session_data)}
+            log_run_phase("sse_session", request_started_at, **timing_ids)
+            yield "session", session_data
             await _adopt_channel_session_scope(ctx, channel_account, deps)
             await _current_channel_context(ctx, body, channel_account)
             async with aclosing(runner.run_stream(
@@ -434,12 +576,11 @@ async def chat_stream(
             )) as stream:
                 async for ev in stream:
                     ctx.session_live.publish(live_key, deps.run_id, ev["type"], ev)
-                    yield {"event": ev["type"], "data": json.dumps(ev, ensure_ascii=False)}
+                    yield ev["type"], ev
         except DeferredResultConflict as exc:
             # A concurrent resume can pass HTTP preflight before the first completes.
             # Reject only this request; do not persist an execution/error or final.
-            yield {"event": "error", "data": json.dumps(
-                {"type": "error", "code": exc.code, "message": str(exc)}, ensure_ascii=False)}
+            yield "error", {"type": "error", "code": exc.code, "message": str(exc)}
         except asyncio.CancelledError:
             active_run.observe_cancellation(transport_cancel_reason())
             raise
@@ -452,7 +593,8 @@ async def chat_stream(
             try:
                 with anyio.move_on_after(5, shield=True):
                     try:
-                        await ctx.event_persister.flush(session_id, agent_id=agent_id)
+                        with observe_run_phase("stream_cleanup_flush", **timing_ids):
+                            await ctx.event_persister.flush(session_id, agent_id=agent_id)
                     except Exception as exc:
                         # Runner reports write failures before its terminal frame.
                         logger.error("Stream cleanup persistence failed session={} error={}",
@@ -461,8 +603,58 @@ async def chat_stream(
                 ctx.session_live.end(live_key, deps.run_id)
                 ctx.active_runs.unregister(active_run)
 
+    async def project_events(source):
+        files = ReplyFiles(
+            request, ctx.file_store, session_id, request_headers,
+            load_history=lambda: ctx.store.get_raw_history(session_id, agent_id=agent_id),
+        )
+        seen_sse_phases: set[str] = set()
+        async with aclosing(source):
+            async for event_type, data in source:
+                async for projected in files.event(data, event_type=event_type):
+                    kind = projected.get("type", event_type)
+                    if kind not in seen_sse_phases and (
+                        kind in {"tool_call", "final", "error", "cancelled"}
+                        or (kind in {"text", "thinking"} and str(projected.get("delta") or "").strip())
+                    ):
+                        seen_sse_phases.add(kind)
+                        log_run_phase(f"sse_first_{kind}", request_started_at, **timing_ids)
+                    yield {"event": kind, "data": json.dumps(projected, ensure_ascii=False)}
+
+    fields = {**session_data, "agent_name": getattr(runner, "agent_name", None)}
+    if channel_account is None:
+        sending, receiving = anyio.create_memory_object_stream(1)
+
+        async def produce():
+            connected = True
+            with sending:
+                try:
+                    async with aclosing(run_events()) as source:
+                        async for event in source:
+                            if connected:
+                                try:
+                                    await sending.send(event)
+                                except anyio.BrokenResourceError:
+                                    connected = False
+                except Exception as exc:
+                    logger.error("Chat stream execution failed run_id={} error_type={}", deps.run_id, type(exc).__name__)
+                    try:
+                        await sending.send(("error", {"type": "error", "message": "执行失败，请查看 DeepAgent 诊断"}))
+                    except anyio.BrokenResourceError:
+                        pass
+
+        async def observe():
+            with receiving:
+                ctx.active_runs.start_background(produce())
+                async for event in receiving:
+                    yield event
+
+        return DiagnosticEventSourceResponse(
+            project_events(observe()), fields=fields, on_close=receiving.close,
+        )
+
     return DiagnosticEventSourceResponse(
-        event_generator(), fields={**session_data, "agent_name": getattr(runner, "agent_name", None)},
+        project_events(run_events()), fields=fields,
         active_run=lambda: stream_run if ctx.active_runs.get(
             agent_id=deps.agent_id, session_id=session_id,
         ) is stream_run else None,

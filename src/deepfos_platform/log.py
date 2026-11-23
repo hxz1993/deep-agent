@@ -1,12 +1,80 @@
 import logging
+import re
 import sys
+from collections import deque
+from types import TracebackType
 from typing import Any, Dict, Optional
 
 from loguru import logger
 
 from .lib.context import get_request_id
 
-__all__ = ["setup", "InterceptHandler", "logger_config"]
+__all__ = ["setup", "InterceptHandler", "logger_config", "safe_logger",
+           "format_exception_stack", "is_exception_stack"]
+
+
+_STACK_TOKEN = re.compile(r"[A-Za-z0-9_.<>-]{1,96}\Z")
+_STACK_FRAME = r"[A-Za-z0-9_.<>-]{1,96}:[0-9]{1,9}:[A-Za-z0-9_.<>-]{1,96}"
+_STACK_ENTRY = rf"[A-Za-z0-9_.<>-]{{1,96}}(?:@{_STACK_FRAME}(?:>{_STACK_FRAME}){{0,7}})?"
+_STACK = re.compile(rf"{_STACK_ENTRY}(?:;{_STACK_ENTRY}){{0,2}}\Z")
+_MAX_STACK_LENGTH = 2048
+
+
+def is_exception_stack(value: object) -> bool:
+    return type(value) is str and len(value) <= _MAX_STACK_LENGTH and _STACK.fullmatch(value) is not None
+
+
+def _stack_token(value: str) -> str:
+    return value if _STACK_TOKEN.fullmatch(value) else "unknown"
+
+
+def format_exception_stack(error: BaseException, traceback: TracebackType | None = None) -> str:
+    """Summarize exception types and frame locations without reading source or values."""
+    entries = []
+    seen = set()
+    pending = [error]
+    while pending and len(entries) < 3:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        frames = deque(maxlen=8 if not entries else 4)
+        frame = traceback if not entries and traceback is not None else current.__traceback__
+        while frame is not None:
+            code = frame.tb_frame.f_code
+            filename = code.co_filename.replace("\\", "/").rsplit("/", 1)[-1]
+            frames.append(f"{_stack_token(filename)}:{frame.tb_lineno}:{_stack_token(code.co_name)}")
+            frame = frame.tb_next
+        name = _stack_token(type(current).__name__)
+        entry = f"{name}@{'>'.join(frames)}" if frames else name
+        if sum(map(len, entries)) + len(entries) + len(entry) > _MAX_STACK_LENGTH:
+            break
+        entries.append(entry)
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend(reversed(current.exceptions[:3]))
+        cause = current.__cause__
+        cause = cause if cause is not None else current.__context__
+        if cause is not None:
+            pending.append(cause)
+    return ";".join(entries)
+
+
+def _redact_exception(record):
+    exception = record["exception"]
+    if exception is None:
+        return
+    record["exception"] = None
+    if exception.value is not None:
+        stack = format_exception_stack(exception.value, exception.traceback)
+        record["message"] += f" | error_stack={stack}"
+
+
+safe_logger = logger.patch(_redact_exception)
+
+
+def _patch_record(record):
+    record["extra"]["request-id"] = get_request_id()
+    _redact_exception(record)
 
 
 class InterceptHandler(logging.Handler):
@@ -25,7 +93,7 @@ class InterceptHandler(logging.Handler):
             frame = frame.f_back
             depth += 1
         depth += self._frame_back
-        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+        safe_logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
 
 
 def logger_config(
@@ -55,10 +123,10 @@ def logger_config(
                 "<level>{message}</level>"
             ),
             "colorize": level == "DEBUG",
-            # Exception frames may contain credentials or customer payloads.
             "diagnose": False,
+            "backtrace": False,
         }],
-        "patcher": lambda record: record["extra"].update({"request-id": get_request_id()}),
+        "patcher": _patch_record,
     }
 
 

@@ -21,7 +21,8 @@ from pydantic_ai.exceptions import ApprovalRequired, CallDeferred, ModelRetry, U
 from pydantic_ai.messages import ToolCallPart, ToolReturn, ToolReturnPart
 from pydantic_ai.tool_manager import ToolManager
 from pydantic_monty import (
-    AsyncMonty, MontyCrashedError, MontyRuntimeError, MontySyntaxError, MontyTypingError,
+    AsyncFunctionSnapshot, AsyncMonty, MontyComplete, MontyCrashedError,
+    MontyRuntimeError, MontySyntaxError, MontyTypingError,
 )
 from pydantic_ai_harness._monty_exec import is_sandbox_panic
 
@@ -29,13 +30,13 @@ from pydantic_ai_harness._monty_exec import is_sandbox_panic
 # Reuse its conversion and generated signatures rather than redefining either.
 from pydantic_ai_harness.code_mode._toolset import (
     _TOOL_RETURN_CONTENT_TA,
-    _describe_started_calls,
-    _global_mode_is_sequential,
     _is_duration_exhausted,
     _jsonable_for_sandbox,
     _resolve_resource_limits,
+    global_mode_is_sequential,
 )
 from deep_agent.ptc.limits import PTC_EXECUTION_SECONDS
+from deep_agent.ptc.diagnostics import current_collector
 
 
 @dataclass
@@ -47,9 +48,13 @@ class _Runtime:
     active: set[asyncio.Task[Any]] = field(default_factory=set)
     thread_calls: set[Future[Any]] = field(default_factory=set)
     callback_lock: Any = field(default_factory=threading.Lock)
+    # Source bodies already live in the outer tool-call events. Keep only the
+    # feed -> event association here, scoped to this REPL, including failed feeds.
+    sources: dict[str, tuple[str, int]] = field(default_factory=dict)
+    next_feed: int = 0
 
     async def cancel_callbacks(self) -> None:
-        # feed_run cancels its worker I/O, but does not join coroutine externals.
+        # Monty cancels its worker I/O, but does not join coroutine externals.
         # Join them before releasing their session or enclosing MCP connections.
         pending = list(self.active)
         for task in pending:
@@ -68,6 +73,8 @@ class _Runtime:
             await self.session_stack.aclose()
         self.session_stack = AsyncExitStack()
         self.session = None
+        self.sources.clear()
+        self.next_feed = 0
 
     async def close(self) -> None:
         await self.reset()
@@ -120,12 +127,14 @@ async def execute_code(toolset: Any, code: str, ctx: Any, tool: Any, execution: 
     )
     loop = asyncio.get_running_loop()
     parent_context = contextvars.copy_context()
-    serial = asyncio.Lock() if _global_mode_is_sequential(manager.get_parallel_execution_mode) else None
+    serial = asyncio.Lock() if global_mode_is_sequential(manager.get_parallel_execution_mode) else None
     completed: list[asyncio.Event] = []
     host_cancellation: asyncio.CancelledError | None = None
+    collector = current_collector.get()
+    source_location: dict[str, Any] | None = None
 
     async def invoke(alias: str, call_id: str, args: dict[str, Any], done: asyncio.Event,
-                     predecessors: list[asyncio.Event]) -> Any:
+                     predecessors: list[asyncio.Event], location: dict[str, Any] | None) -> Any:
         nonlocal host_cancellation
         task = asyncio.current_task()
         assert task is not None
@@ -133,6 +142,8 @@ async def execute_code(toolset: Any, code: str, ctx: Any, tool: Any, execution: 
         original = tool.sanitized_to_original.get(alias, alias)
         call = ToolCallPart(tool_name=original, args=args, tool_call_id=call_id)
         execution.nested_calls[call_id] = call
+        if collector is not None and location is not None:
+            collector.locate(call_id, original, location)
         try:
             for predecessor in predecessors:
                 await predecessor.wait()
@@ -189,7 +200,8 @@ async def execute_code(toolset: Any, code: str, ctx: Any, tool: Any, execution: 
             definition = tool.callable_defs[alias]
             predecessors = list(completed) if definition.sequential else []
             completed.append(done)
-        coroutine = invoke(alias, call_id, kwargs, done, predecessors)
+            location = source_location
+        coroutine = invoke(alias, call_id, kwargs, done, predecessors, location)
         if not definition.sequential:
             return coroutine
         # A sequential tool has a synchronous stub. Marshal its async execution
@@ -211,18 +223,44 @@ async def execute_code(toolset: Any, code: str, ctx: Any, tool: Any, execution: 
                 AsyncMonty(max_processes=1, request_timeout=PTC_EXECUTION_SECONDS),
             )
         if runtime.session is None:
+            limits = _resolve_resource_limits(toolset.resource_limits)
             runtime.session = await runtime.session_stack.enter_async_context(runtime.pool.checkout(
-                limits=_resolve_resource_limits(toolset.resource_limits, in_temporal_workflow=False),
+                limits=limits,
                 type_check=fresh and bool(tool.callable_defs),
                 type_check_stubs=(toolset._build_type_check_stubs(tool.callable_defs)
                                   if fresh and tool.callable_defs else None),
             ))
-        result = await runtime.session.feed_run(
+        filename = f"<python-input-{runtime.next_feed}>"
+        runtime.next_feed += 1
+        runtime.sources[filename] = (ctx.tool_call_id or "", len(code.encode("utf-8")))
+        snapshot = await runtime.session.feed_start(
             code,
             external_lookup={alias: partial(dispatch, alias) for alias in tool.callable_defs},
             print_callback=execution.capture.callback,
             os=toolset.os_access, mount=toolset.mount, skip_type_check=not fresh,
         )
+        # Use Monty's own automatic resolution for every suspension, including
+        # async futures and OS calls. Only inspect the call site; do not replace
+        # tool dispatch, replay code or change timing/parallel-execution policy.
+        while not isinstance(snapshot, MontyComplete):
+            source_location = None
+            try:
+                if isinstance(snapshot, AsyncFunctionSnapshot):
+                    position = snapshot.position
+                    source = runtime.sources.get(position.filename)
+                    if (source and source[0] and snapshot.function_name in tool.callable_defs
+                            and snapshot.object_id is None
+                            and 0 <= position.start < position.end <= source[1]):
+                        source_location = {
+                            "call_id": source[0], "filename": position.filename,
+                            "start": position.start, "end": position.end,
+                        }
+            except Exception:
+                # Optional diagnostics must never prevent an authorized call.
+                if collector is not None:
+                    collector.capture_error = True
+            snapshot = await snapshot.resume_auto()
+        result = snapshot.output
         state.has_executed_feed = True
         return _TOOL_RETURN_CONTENT_TA.validate_python(result) if result is not None else None
     except MontySyntaxError as exc:
@@ -238,17 +276,15 @@ async def execute_code(toolset: Any, code: str, ctx: Any, tool: Any, execution: 
             raise host_cancellation
         state.has_executed_feed = True
         message = f"Runtime error:\n{execution.capture.prepend_to(exc.display())}"
-        if execution.nested_calls:
-            message += "\n\n" + _describe_started_calls(execution.nested_calls, execution.nested_returns)
-        if _is_duration_exhausted(exc):
-            message += ("\n\nThe sandbox session exhausted max_duration_secs. Later calls share "
-                        "that allowance; restart: true discards REPL state. Inspect completed "
-                        "side effects before recreating state; do not blindly repeat writes.")
+        if _is_duration_exhausted(exc) or exc.display(format="msg").startswith("memory limit exceeded:"):
+            # Monty 1.5 warns that a resource trip can leave a half-mutated heap.
+            # Discard it instead of feeding further code into uncertain state.
+            await reset_runtime(toolset)
+            message += "\n\nThe sandbox exceeded its execution or memory limit and its REPL state was reset."
         raise ModelRetry(message) from exc
     except MontyCrashedError as exc:
         await reset_runtime(toolset)
-        raise ModelRetry("The sandbox worker stopped and its REPL state was reset. "
-                         "Inspect earlier tool side effects before continuing.") from exc
+        raise ModelRetry("The sandbox worker stopped and its REPL state was reset.") from exc
     except asyncio.CancelledError:
         await reset_runtime(toolset)
         raise
@@ -258,8 +294,7 @@ async def execute_code(toolset: Any, code: str, ctx: Any, tool: Any, execution: 
     except BaseException as exc:
         await reset_runtime(toolset)
         if is_sandbox_panic(exc):
-            raise ModelRetry("The sandbox aborted and its REPL state was reset. "
-                             "Inspect earlier tool side effects before continuing.") from exc
+            raise ModelRetry("The sandbox aborted and its REPL state was reset.") from exc
         raise
     finally:
         await runtime.cancel_callbacks()

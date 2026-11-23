@@ -57,12 +57,13 @@ async def resolve_mcp_toolsets(
     spec: AgentSpec,
     *,
     mcp_rows: list[McpServer] | None = None,
+    mcp_packages: list[ToolPackage] | None = None,
 ) -> list[Any]:
     if mcp_rows is None:
         mcp_rows = await stores.mcp.list_all()
-    packages = select_mcp_tool_packages(
-        await load_mcp_tool_packages(stores, rows=mcp_rows), spec
-    )
+    if mcp_packages is None:
+        mcp_packages = await load_mcp_tool_packages(stores, rows=mcp_rows)
+    packages = select_mcp_tool_packages(mcp_packages, spec)
     rows_by_name = {row.name: row for row in mcp_rows}
     resolved: list[Any] = []
     for package in packages:

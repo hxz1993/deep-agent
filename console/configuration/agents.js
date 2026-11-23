@@ -5,16 +5,18 @@ function chatUrlForAgent(id) {
 const CATEGORY_LABELS = {
   builtin: "内置",
   mcp: "MCP",
+  agent_connection: "远程 Agent",
   ui: "UI 工具",
 };
 
 const GROUP_LABELS = {
   builtin: "内置工具",
   mcp: "MCP",
+  agent_connection: "远程 Agent",
   ui: "UI 工具",
 };
 
-const GROUP_ORDER = ["builtin", "mcp", "ui"];
+const GROUP_ORDER = ["builtin", "mcp", "ui", "agent_connection"];
 let promptEstimateTimer = null;
 let promptEstimateRequestId = 0;
 let agentListView = "cards";
@@ -30,15 +32,16 @@ const agentDeletesInFlight = new Set();
 function loadAgentEditorCatalogs() {
   if (!agentEditorCatalogs) {
     // An editor must never interpret a failed directory request as an empty selection.
-    // Publish all three catalogs together, after every response has succeeded.
+    // Publish the catalogs together, after every response has succeeded.
     agentEditorCatalogs = Promise.all([
       apiFetch("/api/v1/llm-models?selectable_only=false"),
       apiFetch("/api/v1/tools"),
       apiFetch("/api/v1/skills"),
-    ]).then(([models, capabilities, skills]) => {
-      if (![models, capabilities, skills].every(Array.isArray)) throw new Error("Agent 编辑目录响应格式错误");
+      window.remoteAgentAdmin?.catalog() || [],
+    ]).then(([models, capabilities, skills, remoteAgents]) => {
+      if (![models, capabilities, skills, remoteAgents].every(Array.isArray)) throw new Error("Agent 编辑目录响应格式错误");
       state.llmModels = models;
-      state.capabilities = capabilities;
+      state.capabilities = [...capabilities, ...remoteAgents];
       state.skills = skills;
     })
       .finally(() => { agentEditorCatalogs = null; });
@@ -134,12 +137,14 @@ function renderAgentCapabilityCounts(agent) {
     ["builtin", "内置工具", "hammer", "个工具包"],
     ["ui", "UI 工具", "monitor-check", "个工具包"],
     ["mcp", "MCP", "plug", "个服务"],
+    ["agent_connection", "远程 Agent", "gamepad-2", "个远程 Agent"],
     ["skills", "Skill", "book-open-check", "个 Skill"],
   ];
   return `<div class="agent-capability-counts">${groups.map(([kind, label, icon, unit]) => {
     const count = kind === "skills" ? new Set(agent.skills || []).size : capabilities.filter(code => code.startsWith(`${kind}:`)).length;
     const description = `${label}：${count} ${unit}`;
-    return `<span class="agent-capability-count${count === 0 ? " is-empty" : ""}" title="${escapeHtml(description)}" aria-label="${escapeHtml(description)}"><i data-lucide="${icon}" aria-hidden="true"></i><span>${count}</span></span>`;
+    const glyph = `<i data-lucide="${icon}" aria-hidden="true"></i>`;
+    return `<span class="agent-capability-count${count === 0 ? " is-empty" : ""}" title="${escapeHtml(description)}" aria-label="${escapeHtml(description)}">${glyph}<span>${count}</span></span>`;
   }).join("")}</div>`;
 }
 
@@ -345,7 +350,7 @@ const agentsAdmin = {
     try {
       // Optional annotations are fetched alongside the directory, but never gate it.
       const accounts = apiFetch("/api/v1/channel-accounts").catch(() => null);
-      const agents = await apiFetch("/api/v1/agents");
+      const agents = await apiFetch("/api/v1/agents?include_updater=true");
       if (requestId !== agentsRefreshRequestId) return;
       showDbBanner(false);
       this.renderList(agents);
@@ -404,6 +409,20 @@ const agentsAdmin = {
   renderCapCard(cap, selectedSet) {
     const checked = isCapabilitySelected(cap, selectedSet);
     const displayName = cap.label || capDisplayName(cap.code, cap.category);
+    if (cap.category === "agent_connection") {
+      const description = cap.description || "";
+      const safeName = escapeHtml(displayName).replaceAll('"', "&quot;");
+      return `<article class="cap-card kind-agent_connection">
+        <div class="cap-card-header">
+          <label class="cap-switch"><input type="checkbox" role="switch" name="cap" value="${escapeHtml(cap.code)}"
+            aria-label="${safeName}" ${checked ? "checked" : ""}><span class="cap-switch-ui"></span></label>
+          <div class="cap-card-info">
+            <div class="cap-card-title">${window.remoteAgentAdmin?.inspectionState(cap.inspection, true) || ""}<strong>${escapeHtml(displayName)}</strong>${window.remoteAgentAdmin?.driverBadge(cap.protocol) || ""}</div>
+            ${description ? `<p class="cap-card-desc">${escapeHtml(description)}</p>` : ""}
+          </div>
+        </div>
+      </article>`;
+    }
     const kindLabel = cap.category === "ui" ? "UI" : capKindLabel(cap);
     const toolCount = Number(cap.tool_count ?? cap.tools?.length ?? 0);
     const toolIcon = cap.category === "ui" ? "monitor-check" : cap.category === "mcp" ? "wrench" : "hammer";
@@ -432,7 +451,13 @@ const agentsAdmin = {
     const container = document.getElementById("agentCapGroups");
     if (!container) return;
 
-    const caps = state.capabilities || [];
+    const caps = [...(state.capabilities || [])];
+    const known = new Set(caps.map(cap => cap.code));
+    for (const code of selected) {
+      if (code.startsWith("agent_connection:") && !known.has(code)) caps.push({
+        code, category: "agent_connection", label: code, description: "该远程 Agent 当前不可用，可关闭开关解除关联。",
+      });
+    }
     const selectedSet = buildCapabilitySelectionSet(selected);
     const { byGroup } = groupCapabilities(caps);
 
@@ -502,12 +527,9 @@ const agentsAdmin = {
 
     document.querySelectorAll("[data-kind-badge]").forEach((badge) => {
       const group = badge.dataset.kindBadge;
-      const groupCapabilities = (state.capabilities || []).filter(
-        (capability) => capabilityGroup(capability) === group,
-      );
-      const groupSelected = groupCapabilities.filter((capability) =>
-        selectedSet.has(capability.code),
-      ).length;
+      const groupSelected = group === "agent_connection"
+        ? [...selectedSet].filter(code => code.startsWith("agent_connection:")).length
+        : (state.capabilities || []).filter(capability => capabilityGroup(capability) === group && selectedSet.has(capability.code)).length;
       badge.textContent = String(groupSelected);
     });
   },
@@ -616,6 +638,33 @@ const agentsAdmin = {
     }
   },
 
+  setupReasoningPicker(select, effort) {
+    this.reasoningDraft = effort;
+    this.reasoningDirty = false;
+    const ui = window.DeepAgentReasoning;
+    const selectedModel = () => state.llmModels.find(model => model.id === select.value);
+    const effective = () => selectedModel()?.reasoning_efforts?.includes(this.reasoningDraft) ? this.reasoningDraft : "default";
+    select.consoleSelectedEffort = option => option.value ? ui.effortLabel(effective()) : "";
+    select.consoleMenuFooter = (menu, close) => {
+      if (!select.value) return;
+      ui.appendThinkingMenu(menu, selectedModel()?.reasoning_efforts, effective(), value => {
+        this.reasoningDraft = value === "default" ? null : value;
+        this.reasoningDirty = true;
+        select.title = "";
+        close();
+        select.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    };
+    select.onchange = () => {
+      this.reasoningDraft = null;
+      this.reasoningDirty = true;
+      select.title = "";
+      select.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    select.title = effort && effective() === "default" ? "原思考档位已不可用，请重新选择" : "";
+    select.dispatchEvent(new Event("input"));
+  },
+
   async openEdit(agentId) {
     const requestId = ++agentEditorRequestId;
     try {
@@ -632,7 +681,8 @@ const agentsAdmin = {
       document.getElementById("agentName").disabled = false;
       document.getElementById("agentName").value = agent.name;
       this.syncEditorTitle();
-      populateAgentModelSelect(agent.model_id);
+      populateAgentModelSelect(agent.model_id, agent.reasoning_effort_bound === false ? null : agent.reasoning_effort);
+      if (agent.reasoning_effort_bound === false) document.getElementById('agentModelId').title = '原思考档位已不可用，请重新选择';
       document.getElementById("agentPrompt").value = agent.prompt;
       this.renderCapabilityCheckboxes(agent.capabilities);
       this.renderSkillChoices(agent.skills || []);
@@ -652,6 +702,8 @@ const agentsAdmin = {
         apiFetch("/api/v1/agents"),
         apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}/output-config`),
       ]);
+      const model = agent.reasoning_effort && agent.reasoning_effort_bound !== false && agent.model_id
+        ? await apiFetch(`/api/v1/llm-models/${encodeURIComponent(agent.model_id)}`) : null;
       const existingNames = new Set((agents || []).map((item) => item.name));
       const values = await requestActionFields({
         title: "复制 Agent",
@@ -673,6 +725,7 @@ const agentsAdmin = {
         body: JSON.stringify({
           name,
           model_id: agent.model_id,
+          reasoning_effort: model?.reasoning_efforts?.includes(agent.reasoning_effort) ? agent.reasoning_effort : null,
           prompt: agent.prompt,
           capabilities: [...(agent.capabilities || [])],
           skills: [...(agent.skills || [])],
@@ -713,6 +766,7 @@ const agentsAdmin = {
     const capabilities = this.getSelectedCapabilities();
     const payload = {
       model_id: modelId || null,
+      ...(this.reasoningDirty ? { reasoning_effort: this.reasoningDraft } : {}),
       prompt,
       capabilities,
       skills: this.getSelectedSkills(),
@@ -761,6 +815,7 @@ const agentsAdmin = {
       }))) return;
       if (!(await deleteWithImpactConfirmation(`/api/v1/agents/${encodeURIComponent(agentId)}`, {
         title: "删除 Agent 及全部历史会话？",
+        progressLabel: "正在处理删除请求，请稍候…",
         describeImpact: (impact) => [
           `Agent“${name}”共有 `, { text: `${impact.session_count} 个历史会话` },
           "。\n其中：你本人的 ", { text: `${impact.own_session_count} 个` },

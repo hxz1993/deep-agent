@@ -30,47 +30,47 @@ class WebSearchSettingsTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(value=value):
                 config = await self._load(value)
                 self.assertIsNotNone(config.configuration_error)
-        config = await self._load({"mode": "provider", "provider": "kimi"})
-        self.assertEqual(config.provider, "kimi")
+        config = await self._load({"mode": "provider", "provider": "deepseek"})
+        self.assertEqual(config.provider, "deepseek")
         self.assertIn("API key", config.configuration_error)
         config = await self._load({}, version=2)
         self.assertIn("version", config.configuration_error)
 
     async def test_broken_references_remain_editable_and_safe(self):
-        value = {"mode": "provider", "provider": "kimi", "credential_source": "llm_provider",
+        value = {"mode": "provider", "provider": "deepseek", "credential_source": "llm_provider",
                  "llm_provider_id": "provider-1"}
         cases = (
             None,
-            SimpleNamespace(name="Wrong", provider_type="deepseek", api_key="secret"),
-            SimpleNamespace(name="Kimi", provider_type="moonshotai", api_key=None),
-            SimpleNamespace(name="Kimi", provider_type="moonshotai", api_key="secret",
+            SimpleNamespace(name="Wrong", provider_type="moonshotai", api_key="secret"),
+            SimpleNamespace(name="DeepSeek", provider_type="deepseek", api_key=None),
+            SimpleNamespace(name="DeepSeek", provider_type="deepseek", api_key="secret",
                             use_default_base_url=False, base_url="https://user:secret@example.com"),
-            SimpleNamespace(name="Kimi", provider_type="moonshotai", api_key="secret",
+            SimpleNamespace(name="DeepSeek", provider_type="deepseek", api_key="secret",
                             use_default_base_url=False, base_url="https://["),
         )
         for provider in cases:
             with self.subTest(provider=provider):
                 config = await self._load(value, provider=provider)
                 self.assertEqual(config.llm_provider_id, "provider-1")
-                self.assertEqual(config.provider, "kimi")
+                self.assertEqual(config.provider, "deepseek")
                 self.assertTrue(config.configuration_error)
                 self.assertNotIn("secret", config.configuration_error)
                 self.assertNotIn("configuration_error", config.to_stored_value())
 
     async def test_reference_resolves_latest_key_and_preserves_base(self):
-        value = {"mode": "provider", "provider": "kimi", "credential_source": "llm_provider",
-                 "llm_provider_id": "provider-1", "model": "kimi-k3"}
-        provider = SimpleNamespace(id="provider-1", name="Kimi", provider_type="moonshotai",
+        value = {"mode": "provider", "provider": "deepseek", "credential_source": "llm_provider",
+                 "llm_provider_id": "provider-1", "model": "legacy-model"}
+        provider = SimpleNamespace(id="provider-1", name="DeepSeek", provider_type="deepseek",
                                    api_key="latest-secret", use_default_base_url=False,
-                                   base_url="https://api.moonshot.cn/v1")
+                                   base_url="https://example.com/gateway/v1")
         config = await self._load(value, provider=provider)
         self.assertEqual(config.api_key, "latest-secret")
-        self.assertEqual(config.base_url, "https://api.moonshot.cn/v1")
+        self.assertEqual(config.base_url, "https://example.com/gateway/v1")
         self.assertIsNone(config.model)
         self.assertIsNone(config.configuration_error)
         self.assertNotIn("model", config.to_stored_value())
         self.assertNotIn("api_key", config.to_stored_value())
-        self.assertEqual(value["model"], "kimi-k3")
+        self.assertEqual(value["model"], "legacy-model")
 
     def test_deepseek_legacy_models_ignored_and_removed_on_save(self):
         value = {"mode": "provider", "provider": "deepseek", "api_key": "key"}

@@ -11,6 +11,7 @@ import re
 from typing import Any, Literal
 
 from deep_agent.db.models import LlmModel, LlmProvider, ModelCatalog
+from deep_agent.models.reasoning import catalog_row_options
 
 CatalogView = Literal["model", "provider"]
 
@@ -20,7 +21,6 @@ PROVIDER_ALLOWLIST = frozenset(
         "anthropic",
         "deepseek",
         "google",
-        "minimax",
         "minimax-cn",
         "moonshotai",
         "openai",
@@ -38,10 +38,9 @@ PROVIDER_ADAPTERS: dict[str, str] = {
     "alibaba": "openai_compatible",
     "moonshotai": "openai_compatible",
     "zhipuai": "openai_compatible",
-    "minimax": "anthropic_compatible",
     "minimax-cn": "anthropic_compatible",
     "stepfun": "openai_compatible",
-    "xai": "openai_compatible",
+    "xai": "xai",
 }
 
 PROVIDER_API_DEFAULTS = {
@@ -317,7 +316,7 @@ def provider_runtime_fields(
     adapter = PROVIDER_ADAPTERS.get(provider_id)
     if adapter is None:
         raise CatalogValidationError(f"Provider 尚无运行适配：{provider_id}")
-    if adapter in {"openai", "openai_compatible"}:
+    if adapter in {"openai", "openai_compatible", "xai"}:
         runtime_prefix = "openai"
     elif adapter in {"anthropic", "anthropic_compatible"}:
         runtime_prefix = "anthropic"
@@ -678,6 +677,7 @@ def _provider_option(
             None,
         ),
         "metadata": row.provider_metadata or {},
+        "reasoning_options": catalog_row_options(row),
     }
 
 
@@ -789,6 +789,7 @@ def build_catalog_page(
                     "max_output_tokens": row.max_output_tokens,
                     "input_modalities": _row_modalities(row.input_modalities),
                     "tags": _row_tags(row),
+                    "reasoning_options": catalog_row_options(row),
                 }
                 for row in sorted(
                     provider_rows,

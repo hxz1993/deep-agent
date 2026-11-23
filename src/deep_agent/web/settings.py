@@ -9,7 +9,6 @@ WEB_SEARCH_SCHEMA_VERSION = 1
 WEB_PACKAGE_CODE = "builtin:web"
 WebSearchProvider = Literal[
     "deepseek",
-    "kimi",
     "tavily",
     "exa",
     "you",
@@ -18,12 +17,11 @@ WebSearchProvider = Literal[
 WebSearchCredentialSource = Literal["api_key", "llm_provider"]
 WebFetchMode = Literal["system", "follow_search"]
 
-_PROVIDERS = frozenset({"deepseek", "kimi", "tavily", "exa", "you", "duckduckgo"})
-FETCH_PROVIDERS = frozenset({"deepseek", "kimi"})
+_PROVIDERS = frozenset({"deepseek", "tavily", "exa", "you", "duckduckgo"})
+FETCH_PROVIDERS = frozenset({"deepseek"})
 _KEYLESS_PROVIDERS = frozenset({"duckduckgo"})
 _REUSABLE_LLM_PROVIDER_TYPES = {
     "deepseek": "deepseek",
-    "kimi": "moonshotai",
 }
 
 

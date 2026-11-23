@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_ai.messages import ModelMessage
 from sse_starlette.sse import EventSourceResponse
@@ -26,13 +27,35 @@ from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.context.manual import manual_compaction_availability
 from deep_agent.conversation.models import ConversationHistoryResponse
 from deep_agent.conversation.display_names import decorate_history_display_names
+from deep_agent.conversation.file_links import ReplyFiles
 from deep_agent.conversation.projector import ConversationProjectionError, project_session_events
 from deep_agent.capabilities.display_names import resolve_tool_display_name_map
-from deep_agent.schemas.chat import ChannelSessionOrigin, SessionInfo, SessionListResponse
+from deep_agent.schemas.chat import (
+    ChannelSessionOrigin, SessionInfo, SessionListItem, SessionListResponse, SessionFilterOptionsResponse,
+    SessionAgentFilterOption, SessionAppFilterOption,
+)
 from deep_agent.time import UtcDatetime
 from deep_agent.services.channel_profiles import ChannelProfileService
+from deep_agent.agent.request_context import ResolvedRequestContext, resolve_request_context_overrides
+from deep_agent.services.scope_names import resolve_scope_directory
+from deep_agent.services.trajectory_export import EXPORT_OPENAPI
 
 router = APIRouter()
+
+
+@router.get("/sessions/{session_id}/trajectory-export/preview")
+async def preview_trajectory_export(request: Request, ctx: AppContextDep, user_id: RequestUserDep,
+                                    session_id: str, agent_id: str | None = None):
+    from deep_agent.services.trajectory_export import preview
+    return await preview(ctx, request, session_id, user_id, agent_id=agent_id)
+
+
+@router.post("/sessions/{session_id}/trajectory-export", openapi_extra=EXPORT_OPENAPI)
+async def export_session_trajectory(request: Request, ctx: AppContextDep, user_id: RequestUserDep,
+                                    session_id: str, agent_id: str | None = None,
+                                    include_files: bool = Query(default=False)):
+    from deep_agent.services.trajectory_export import export_response
+    return await export_response(ctx, request, session_id, user_id, agent_id=agent_id, include_files=include_files)
 
 
 class SessionCancelResponse(BaseModel):
@@ -67,8 +90,8 @@ async def _resolve_agent_name(ctx: AppContextDep, agent_id: str | None) -> str |
     return row.name if row else None
 
 
-def _summary_to_session_info(row: SessionSummaryRow) -> SessionInfo:
-    return SessionInfo(
+def _summary_to_session_info(row: SessionSummaryRow) -> SessionListItem:
+    return SessionListItem(
         session_id=row.session_id,
         source_type=row.source_type, source_id=row.source_id,
         app_id=row.app_id, space_id=row.space_id,
@@ -138,11 +161,16 @@ async def _build_session_info(
 
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_sessions(
+    request: Request,
     ctx: AppContextDep,
     user_id: RequestUserDep,
     agent_id: str | None = Query(default=None, description="Filter by agent id."),
     source_type: SessionSourceType | None = Query(default=None),
     source_id: str | None = Query(default=None, min_length=1, max_length=255),
+    app_scope: Literal["auto", "all", "unassigned"] = Query(
+        default="auto", description="auto follows the effective App header; all queries across Apps; unassigned has no App.",
+    ),
+    app_id: str | None = Query(default=None, min_length=1, max_length=255),
     limit: int = Query(default=50, ge=1, le=MAX_LIST_LIMIT, description="Page size."),
     offset: int = Query(default=0, ge=0, description="Page offset."),
     query: str | None = Query(
@@ -159,7 +187,13 @@ async def list_sessions(
         default="updated_at",
         description="Sort field; results are always descending.",
     ),
+    include_active_runs: bool = Query(
+        default=False, description="Include same-instance active run IDs in the session list.",
+    ),
 ) -> SessionListResponse:
+    if app_id is not None and app_scope != "all":
+        raise HTTPException(status_code=422, detail="app_id is only supported with app_scope=all")
+    context = _session_list_context(request)
     filters = SessionListFilters(
         agent_id=agent_id,
         user_id=user_id,
@@ -171,14 +205,26 @@ async def list_sessions(
         updated_before=updated_before,
         has_messages=has_messages,
         sort=sort,
+        app_id=context.app if app_scope == "auto" else app_id,
+        unassigned_app=app_scope == "unassigned",
     )
     rows, total = await ctx.store.list_session_summaries(filters)
     origins = await ctx.stores.channel.get_session_origins([row.session_id for row in rows]) if ctx.stores.channel else {}
     origins = await ChannelProfileService(ctx).enrich_origins(origins)
     items = [_summary_to_session_info(row) for row in rows]
+    names = await resolve_scope_directory(request, user_id)
+    active_runs = {}
+    if include_active_runs:
+        active_runs = {
+            (run.agent_id, run.session_id): run.run_id
+            for run in ctx.active_runs.snapshot() if run.user_id == user_id
+        }
     for item in items:
         origin = origins.get(item.session_id)
         item.channel = ChannelSessionOrigin.model_validate(origin) if origin else None
+        item.app_name = names.apps.get(item.app_id) if item.app_id else None
+        item.space_name = names.spaces.get(item.space_id) if item.space_id else None
+        item.active_run_id = active_runs.get((item.agent_id, item.session_id))
     return SessionListResponse(
         items=items,
         total=total,
@@ -187,8 +233,44 @@ async def list_sessions(
     )
 
 
+def _session_list_context(request: Request) -> ResolvedRequestContext:
+    """Use the same effective Header semantics as chat and request-context."""
+    headers = request.headers
+    try:
+        return resolve_request_context_overrides(
+            app=headers.get("app"), space=headers.get("space"), language=headers.get("language"),
+            override_app=headers.get("x-deep-agent-app"),
+            override_space=headers.get("x-deep-agent-space"),
+            override_language=headers.get("x-deep-agent-language"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/sessions/filter-options", response_model=SessionFilterOptionsResponse)
+async def get_session_filter_options(
+    request: Request,
+    ctx: AppContextDep,
+    user_id: RequestUserDep,
+    agent_id: str | None = Query(default=None),
+) -> SessionFilterOptionsResponse:
+    _session_list_context(request)
+    counts = await ctx.store.list_session_filter_options(user_id=user_id, agent_id=agent_id)
+    names = await resolve_scope_directory(request, user_id)
+    return SessionFilterOptionsResponse(
+        agents=[SessionAgentFilterOption(agent_id=row.agent_id, session_count=row.session_count)
+                for row in counts.agents],
+        apps=[SessionAppFilterOption(app_id=row.app_id, app_name=names.apps.get(row.app_id),
+                                    session_count=row.session_count)
+              for row in counts.apps if row.app_id],
+        unassigned_count=sum(row.session_count for row in counts.apps if row.app_id is None),
+        total=sum(row.session_count for row in counts.apps),
+    )
+
+
 @router.get("/sessions/{session_id}", response_model=SessionInfo)
 async def get_session(
+    request: Request,
     ctx: AppContextDep,
     user_id: RequestUserDep,
     session_id: str,
@@ -207,12 +289,16 @@ async def get_session(
 
     api_agent_id = agent_id or agent_scope_to_api(scope)
     history = await ctx.store.get_history(resolved_session_id, agent_id=api_agent_id)
-    return await _build_session_info(
+    info = await _build_session_info(
         ctx,
         resolved_session_id,
         agent_id=api_agent_id,
         history=history,
     )
+    names = await resolve_scope_directory(request, user_id)
+    info.app_name = names.apps.get(info.app_id) if info.app_id else None
+    info.space_name = names.spaces.get(info.space_id) if info.space_id else None
+    return info
 
 
 @router.post("/sessions/{session_id}/cancel", response_model=SessionCancelResponse)
@@ -222,6 +308,7 @@ async def cancel_session_run(
     channel_account: ChannelControlAccountDep,
     session_id: str,
     agent_id: str | None = None,
+    run_id: str | None = Query(default=None, min_length=1, max_length=128),
 ) -> SessionCancelResponse:
     normalized_agent_id = agent_id
     if agent_id is not None:
@@ -239,7 +326,8 @@ async def cancel_session_run(
     cancel_reason = "channel_cancel_api" if channel_account is not None else "cancel_api"
     entry = ctx.active_runs.get(agent_id=normalized_agent_id, session_id=session_id)
     # Do not attribute another user's active Run to an unauthorized request.
-    owned_entry = entry if entry is not None and entry.user_id == user_id else None
+    owned_entry = entry if (entry is not None and entry.user_id == user_id
+                            and (run_id is None or entry.run_id == run_id)) else None
     log_event("agent_cancel_api_received", session_id=session_id,
               agent_id=normalized_agent_id, reason=cancel_reason,
               run_id=owned_entry.run_id if owned_entry else None,
@@ -252,6 +340,7 @@ async def cancel_session_run(
         session_id=session_id,
         user_id=user_id,
         reason=cancel_reason,
+        run_id=run_id,
     ):
         return SessionCancelResponse(
             status="cancel_requested",
@@ -276,6 +365,7 @@ async def cancel_session_run(
         session_id=resolved_session_id,
         user_id=user_id,
         reason=cancel_reason,
+        run_id=run_id,
     )
     return SessionCancelResponse(
         status="cancel_requested" if requested else "not_running",
@@ -312,8 +402,38 @@ async def get_session_run_status(
     return SessionRunStatusResponse(status="idle", session_id=session_id, agent_id=agent_id)
 
 
+@router.get("/sessions/{session_id}/activity")
+async def observe_session_activity(
+    ctx: AppContextDep, user_id: RequestUserDep, session_id: str, agent_id: str | None = None,
+) -> EventSourceResponse:
+    """Notify an open chat when a Run becomes observable or finishes."""
+    from deep_agent.db.session_scope import agent_scope_to_api
+
+    resolved = await resolve_session(ctx.store, session_id, agent_id=agent_id, user_id=user_id)
+    if resolved is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    key = (agent_scope_to_api(resolved[0]), resolved[1], user_id)
+    if not ctx.session_live.has_activity_capacity():
+        raise HTTPException(status_code=503, detail="Session activity capacity unavailable")
+
+    async def stream():
+        try:
+            queue = ctx.session_live.watch_activity(key)
+        except RuntimeError:
+            return
+        try:
+            while (frame := await queue.get()) is not None:
+                yield frame.sse()
+        finally:
+            ctx.session_live.unwatch_activity(key, queue)
+
+    return EventSourceResponse(stream(), ping=15, send_timeout=15,
+                               headers={"Cache-Control": "no-store"})
+
+
 @router.get("/sessions/{session_id}/live")
 async def observe_session_run(
+    request: Request,
     ctx: AppContextDep,
     user_id: RequestUserDep,
     session_id: str,
@@ -326,19 +446,52 @@ async def observe_session_run(
         raise HTTPException(status_code=404, detail="Session not found")
     from deep_agent.db.session_scope import agent_scope_to_api
 
-    key = (agent_scope_to_api(resolved[0]), resolved[1], user_id)
+    return session_run_response(request, ctx, agent_scope_to_api(resolved[0]), resolved[1], user_id, run_id)
+
+
+def session_run_response(request: Request, ctx, agent_id: str | None, session_id: str,
+                         user_id: str | None, run_id: str, *, diagnostic: bool = False) -> EventSourceResponse:
+    """Project the same Run stream for a session already authorized by the caller."""
+    key = (agent_id, session_id, user_id)
 
     # Check before sending headers, then acquire the actual subscription inside
     # the generator so cancellation before its first iteration leaks no queue.
     try:
         probe = ctx.session_live.subscribe(key, run_id)
-    except (LookupError, BufferError) as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LookupError as exc:
+        active = ctx.active_runs.get(agent_id=agent_id, session_id=session_id) if diagnostic else None
+        if active is not None and active.user_id == user_id and active.run_id == run_id:
+            raise HTTPException(503, "Run live stream is not ready") from exc
+        raise HTTPException(409, str(exc)) from exc
+    except BufferError as exc:
+        raise HTTPException(409, str(exc)) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(503, str(exc)) from exc
     ctx.session_live.unsubscribe(probe)
 
     async def stream():
+        files = ReplyFiles(
+            request, ctx.file_store, session_id, {"user": user_id}, diagnostic=diagnostic,
+            load_history=lambda: ctx.store.get_raw_history(session_id, agent_id=agent_id),
+        )
+
+        async def project_frame(frame):
+            if frame.event == "observation":
+                data = json.loads(frame.data)
+                async for event in files.event(data["data"], event_type=data["event"]):
+                    if event is data["data"]:
+                        yield frame.sse()
+                    else:
+                        envelope = {**data, "event": event.get("type", data["event"]), "data": event}
+                        yield {"event": "observation", "data": json.dumps(envelope, ensure_ascii=False)}
+            else:
+                if frame.event in {"observation_end", "observation_reset"}:
+                    async for event in files.event({"type": frame.event}):
+                        if event["type"] == "text":
+                            yield {"event": "observation", "data": json.dumps(
+                                {"run_id": run_id, "event": "text", "data": event}, ensure_ascii=False)}
+                yield frame.sse()
+
         try:
             subscription = ctx.session_live.subscribe(key, run_id)
         except (LookupError, BufferError, RuntimeError):
@@ -349,11 +502,13 @@ async def observe_session_run(
             for frame in subscription.initial:
                 if subscription.closed:
                     break
-                yield frame.sse()
+                async for projected in project_frame(frame):
+                    yield projected
             subscription.initial = ()
             while True:
                 frame = await subscription.get()
-                yield frame.sse()
+                async for projected in project_frame(frame):
+                    yield projected
                 if frame.event in {"observation_end", "observation_reset"}:
                     break
         finally:
@@ -387,6 +542,7 @@ class SessionEventsResponse(BaseModel):
     response_model=ConversationHistoryResponse,
 )
 async def get_session_history(
+    request: Request,
     ctx: AppContextDep,
     user_id: RequestUserDep,
     session_id: str,
@@ -422,7 +578,10 @@ async def get_session_history(
         ctx.stores,
         capabilities=(list(row.capabilities or []) if row is not None else None),
     )
-    return decorate_history_display_names(projected, display_names)
+    files = ReplyFiles(
+        request, ctx.file_store, resolved_session_id, {"user": user_id},
+    )
+    return await files.history(decorate_history_display_names(projected, display_names))
 
 
 @router.get("/sessions/{session_id}/events", response_model=SessionEventsResponse)

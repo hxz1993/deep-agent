@@ -1,7 +1,9 @@
 /* A single input for suggested values, arbitrary codes and clearing to an empty value. */
 (function () {
   let nextId = 0;
-  window.createEditableSelect = function createEditableSelect(input, { options = [] } = {}) {
+  window.createEditableSelect = function createEditableSelect(input, {
+    options = [], onOpen, onSelectionChange,
+  } = {}) {
     const doc = input.ownerDocument;
     const root = doc.createElement("div");
     root.className = "da-editable-select";
@@ -36,6 +38,9 @@
     let committing = false;
     let entries = [];
     let active = -1;
+    let selected = null;
+    let filterText = "";
+    let emptyText = "";
     const listeners = [];
     function on(target, type, handler, capture = false) {
       target.addEventListener(type, handler, capture);
@@ -78,65 +83,103 @@
         row.scrollIntoView({ block: "nearest" });
       } else input.removeAttribute("aria-activedescendant");
     }
-    function choose(value) {
+    function choose(option) {
       if (locked()) return;
-      input.value = value;
+      selected = option;
+      input.value = option?.displayValue ?? option?.value ?? "";
       close();
       refresh();
       committing = true;
       input.dispatchEvent(new Event("input", { bubbles: true }));
       input.dispatchEvent(new Event("change", { bubbles: true }));
       committing = false;
+      onSelectionChange?.(option);
       input.focus();
       close();
     }
+    function optionColumn(label, code) {
+      const column = doc.createElement("span");
+      const name = doc.createElement("span");
+      name.textContent = label;
+      column.append(name);
+      if (code && code !== label) {
+        const id = doc.createElement("code");
+        id.textContent = code;
+        column.append(id);
+      }
+      return column;
+    }
     function render(filter = "") {
+      filterText = filter;
       const query = filter.toLocaleLowerCase().trim();
       entries = options.filter((item) =>
-        !query || `${item.label} ${item.value}`.toLocaleLowerCase().includes(query));
+        !query || [item.label, item.value, item.detail, item.detailCode].join(" ").toLocaleLowerCase().includes(query));
       menu.replaceChildren();
       entries.forEach((item, index) => {
         const row = doc.createElement("div");
         row.id = `${menu.id}-${index}`;
         row.className = "da-select-option";
         row.setAttribute("role", "option");
-        row.setAttribute("aria-selected", String(input.value === item.value));
+        row.setAttribute("aria-selected", String(onSelectionChange ? selected === item : input.value === item.value));
         row.dataset.index = String(index);
-        const label = doc.createElement("span");
-        label.textContent = item.label;
-        row.append(label);
-        if (item.value) {
-          const code = doc.createElement("code");
-          code.textContent = item.value;
-          row.append(code);
+        if (item.detail) {
+          row.classList.add("da-select-option-with-detail");
+          row.append(optionColumn(item.label, item.value), optionColumn(item.detail, item.detailCode));
+        } else {
+          const label = doc.createElement("span");
+          label.textContent = item.label;
+          row.append(label);
+          if (item.value) {
+            const code = doc.createElement("code");
+            code.textContent = item.value;
+            row.append(code);
+          }
         }
         menu.append(row);
       });
+      if (!entries.length && emptyText) {
+        const empty = doc.createElement("div");
+        empty.className = "da-select-empty";
+        empty.setAttribute("role", "status");
+        empty.textContent = emptyText;
+        menu.append(empty);
+      }
       active = -1;
       input.removeAttribute("aria-activedescendant");
     }
     function open(filter = "") {
       if (disposed || locked()) return;
+      const justOpened = !opened;
       render(filter);
       menu.hidden = false;
-      if (!opened) {
+      if (justOpened) {
         opened = true;
         menu.showPopover();
       }
       input.setAttribute("aria-expanded", "true");
       toggle.setAttribute("aria-expanded", "true");
       place();
+      if (justOpened) onOpen?.();
     }
-    on(input, "click", () => { if (!opened) open(); });
-    on(input, "input", () => { refresh(); if (!committing) open(input.value); });
-    on(toggle, "click", () => { if (opened) close(); else open(); input.focus(); });
-    on(clear, "click", () => choose(""));
+    function openCurrent() {
+      open(onSelectionChange && !selected ? input.value : "");
+    }
+    on(input, "click", () => { if (!opened) openCurrent(); });
+    on(input, "input", () => {
+      refresh();
+      if (committing) return;
+      selected = null;
+      onSelectionChange?.(null);
+      open(input.value);
+    });
+    on(toggle, "click", () => { if (opened) close(); else openCurrent(); input.focus(); });
+    on(clear, "click", () => choose(null));
     on(menu, "pointerdown", (event) => event.preventDefault());
     on(menu, "click", (event) => {
       // Prevent an enclosing label from forwarding another click to the input.
       event.preventDefault();
       const row = event.target.closest("[data-index]");
-      if (row) choose(entries[Number(row.dataset.index)].value);
+      if (row) choose(entries[Number(row.dataset.index)]);
     });
     on(root, "keydown", (event) => {
       if (locked() || event.isComposing) return;
@@ -144,14 +187,15 @@
         event.preventDefault(); event.stopPropagation(); close();
       } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
-        if (!opened) open();
+        if (!opened) openCurrent();
         if (!entries.length) return;
         highlight(active < 0
           ? (event.key === "ArrowUp" ? entries.length - 1 : 0)
           : (active + (event.key === "ArrowDown" ? 1 : -1) + entries.length) % entries.length);
       } else if (event.key === "Enter" && opened) {
         event.preventDefault();
-        if (active >= 0) choose(entries[active].value);
+        if (active >= 0) choose(entries[active]);
+        else if (onSelectionChange && entries.length === 1) choose(entries[0]);
         else close();
       } else if (event.key === "Tab") close();
     });
@@ -177,6 +221,16 @@
     }
     window.lucide?.createIcons({ root });
     refresh();
-    return { refresh, close, destroy };
+    return {
+      refresh, close, destroy,
+      setOptions(nextOptions, message = "") {
+        options = nextOptions;
+        emptyText = message;
+        if (opened) {
+          render(filterText);
+          place();
+        }
+      },
+    };
   };
 })();

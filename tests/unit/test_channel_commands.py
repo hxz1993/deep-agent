@@ -6,15 +6,15 @@ from dataclasses import replace
 from uuid import uuid4
 from unittest.mock import AsyncMock, patch
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from deep_agent.channels.gateway.deepagent_client import StreamEvent
 from deep_agent.channels.commands import parse_command, command_catalog, help_text
 from deep_agent.channels.contracts import InboundMessage, InboundMedia
 from deep_agent.channels.service import ChannelService, MessageJob
 from deep_agent.channels.adapters.wecom.messages import parse_message
-from deep_agent.db.models import ChatSession
-from tests.unit.test_channel_gateway import ChannelGatewayTests
+from deep_agent.db.models import ChannelAccount, ChatSession
+from tests.helpers.channel_gateway import ChannelGatewayFixture
 from tests.unit.test_wecom_adapter import frame
 
 
@@ -72,8 +72,8 @@ class FakeAgent:
 
 
 class ChannelCommandTests(unittest.IsolatedAsyncioTestCase):
-    asyncSetUp = ChannelGatewayTests.asyncSetUp
-    asyncTearDown = ChannelGatewayTests.asyncTearDown
+    asyncSetUp = ChannelGatewayFixture.asyncSetUp
+    asyncTearDown = ChannelGatewayFixture.asyncTearDown
 
     def message(self, text, *, identifier=None, peer="u", peer_type="single", sender="sender"):
         metadata = {"chat_id": peer} if peer_type == "group" else {"user_id": sender}
@@ -113,6 +113,20 @@ class ChannelCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.count_sessions(), 0)
         self.assertEqual(agent.calls, [])
         self.assertEqual(len(adapter.replies), 5)
+
+    async def test_wecom_app_help_only_describes_private_chat(self):
+        service, adapter, agent = self.service()
+        async with self.factory.begin() as db:
+            await db.execute(update(ChannelAccount).where(ChannelAccount.id == self.account.id)
+                             .values(channel_type="wecom_app", transport="webhook"))
+        account = await self.store.get_account(self.account.id)
+        await service.receive(account, adapter, self.message("/help"))
+        await service.receive(account, adapter, self.message("/reset"))
+        private_help = help_text(channel_type="wecom_app")
+        self.assertEqual(adapter.replies[0][1], private_help)
+        self.assertTrue(adapter.replies[1][1].endswith(private_help))
+        self.assertNotIn("群内成员执行", private_help)
+        self.assertEqual(agent.calls, [])
 
     async def test_plain_group_commands_are_intercepted_before_agent_and_deduplicated(self):
         service, adapter, agent = self.service()

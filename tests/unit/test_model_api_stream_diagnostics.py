@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 import httpx2
+from openai import APIConnectionError
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -182,10 +183,10 @@ class ModelApiStreamDiagnosticsTests(unittest.IsolatedAsyncioTestCase):
                         try:
                             await task
                             self.fail("expected unchanged SDK failure")
-                        except (asyncio.CancelledError, json.JSONDecodeError, httpx2.ReadError) as exc:
+                        except (asyncio.CancelledError, json.JSONDecodeError, APIConnectionError) as exc:
                             outcomes.append(type(exc))
                             if scenario == "read":
-                                self.assertIs(exc, error)
+                                self.assertIs(exc.__cause__, error)
                         await result.close()
                     self.assertEqual(stream.closes, 1)
                     if enabled:

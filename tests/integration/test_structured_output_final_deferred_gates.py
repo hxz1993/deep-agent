@@ -40,7 +40,7 @@ class StructuredOutputValidationCancellationTests(unittest.IsolatedAsyncioTestCa
                     def respond(messages, info):
                         requests.append(True)
                         value = {} if len(requests) == 1 else {"text": "a" * 40 + "!" if phase == "worker" else "valid"}
-                        return ModelResponse(parts=[ToolCallPart("lease_result", value, f"cancel-{len(requests)}")])
+                        return ModelResponse(parts=[ToolCallPart("output__lease_result", value, f"cancel-{len(requests)}")])
                     runner = self.runner(respond, loader=AsyncMock(return_value=config))
                     sid = uuid4().hex
                     spawn = asyncio.create_subprocess_exec
@@ -114,7 +114,7 @@ class StructuredOutputPendingConfigurationDeletionTests(unittest.IsolatedAsyncio
                 def respond(messages, info):
                     calls.append(info)
                     if len(calls) == 1:
-                        return ModelResponse(parts=[ToolCallPart("public_result", {}, "invalid-first")])
+                        return ModelResponse(parts=[ToolCallPart("output__public_result", {}, "invalid-first")])
                     if len(calls) == 2:
                         return ModelResponse(parts=[ToolCallPart("builtin__confirm", {"message": "confirm fixture"}, "pending")])
                     self.assertFalse(info.output_tools)

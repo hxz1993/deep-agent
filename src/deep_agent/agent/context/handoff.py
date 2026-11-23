@@ -17,6 +17,7 @@ from deep_agent.agent.context_references import (
     context_reference_from_dict,
     format_context_reference_prompt,
 )
+from deep_agent.agent.tool_names import is_present_tool
 
 SUMMARY_PREFIX = "Summary of previous conversation:\n\n"
 EVIDENCE_MARKER = "\n\n[DeepAgent deterministic evidence]\n"
@@ -59,6 +60,8 @@ def project_tool_evidence(entry: dict[str, Any]) -> dict[str, Any] | None:
     messages still enter the summary and remain available in the Event store.
     """
     outcome = entry.get("outcome") or "unknown"
+    if is_present_tool(entry.get("tool_name"), entry.get("wire_name")):
+        return None
     if entry.get("tool_name") in _HISTORY_RETRIEVAL_TOOLS and outcome in {"success", "completed"}:
         return None
     keys = ("_sequence", "_priority", "call_id", "tool_name", "call_event_id", "call_part_offset",

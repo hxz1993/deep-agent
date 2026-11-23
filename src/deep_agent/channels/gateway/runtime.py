@@ -112,7 +112,7 @@ class ChannelRuntime:
                     await adapter.start(on_message)
                     log_event("channel_adapter_started", account_id=row.id)
                 except Exception as exc:
-                    log_event("channel_adapter_start_failed", account_id=row.id, error_type=type(exc).__name__)
+                    log_event("channel_adapter_start_failed", account_id=row.id, exception=exc)
                     await self._stop_account(row.id)
                     self._failed[row.id] = {"account_id": row.id, "state": "failed", "message": "渠道适配器启动失败，请检查部署配置", "authenticated": False}
 

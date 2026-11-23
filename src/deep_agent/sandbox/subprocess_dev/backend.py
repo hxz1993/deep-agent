@@ -32,13 +32,17 @@ from deep_agent.sandbox.types import (
     ExecuteRequest,
     ExecuteResult,
     MAX_RESULT_BYTES,
-    MAX_SCRIPT_RESOURCE_BYTES,
+    MAX_SANDBOX_FILE_BATCH_BYTES,
     MAX_SCRIPT_RESOURCE_FILES,
     MAX_STDERR_BYTES,
     MAX_STDOUT_BYTES,
     ResourceLimitsSummary,
     SandboxPublishedFile,
 )
+
+
+class _PublishedFileLimitExceeded(ValueError):
+    pass
 
 
 class SubprocessBackend:
@@ -169,7 +173,7 @@ class SubprocessBackend:
             cpu_seconds=self._cpu_limit_seconds,
             max_pids=self._max_pids if self._max_pids else None,
         )
-        worker_env = build_worker_env()
+        worker_env = build_worker_env(request.context_env)
         worker_env.update(
             {
                 "HOME": work_dir,
@@ -335,7 +339,18 @@ class SubprocessBackend:
         if result.status != "ok":
             return result
         try:
-            published = self._collect_published_files(work_dir, response_frame)
+            published = self._collect_published_files(
+                work_dir, response_frame, output_file_max_bytes=request.output_file_max_bytes,
+            )
+        except _PublishedFileLimitExceeded as exc:
+            return error_result(
+                request.request_id,
+                code="OUTPUT_LIMIT",
+                message=str(exc),
+                duration_ms=duration_ms,
+                environment=self._environment,
+                exit_code=exit_code,
+            )
         except Exception as exc:
             return error_result(
                 request.request_id,
@@ -351,6 +366,8 @@ class SubprocessBackend:
     def _collect_published_files(
         work_dir: Path,
         frame: dict[str, Any],
+        *,
+        output_file_max_bytes: int,
     ) -> tuple[SandboxPublishedFile, ...]:
         payload = frame.get("published_files", [])
         if not isinstance(payload, list) or len(payload) > MAX_SCRIPT_RESOURCE_FILES:
@@ -359,6 +376,7 @@ class SubprocessBackend:
         output_root = (root / "outputs").resolve()
         out: list[SandboxPublishedFile] = []
         names: set[str] = set()
+        remaining_bytes = MAX_SANDBOX_FILE_BATCH_BYTES
         for item in payload:
             if not isinstance(item, dict):
                 raise ValueError("published file entry is invalid")
@@ -374,9 +392,20 @@ class SubprocessBackend:
             target = (root / relative).resolve()
             if output_root not in target.parents or not target.is_file():
                 raise ValueError("published file is missing")
-            data = target.read_bytes()
-            if len(data) > MAX_SCRIPT_RESOURCE_BYTES:
-                raise ValueError("published file exceeds backend safety limit")
+            with target.open("rb") as stream:
+                size = os.fstat(stream.fileno()).st_size
+                if size > output_file_max_bytes:
+                    raise _PublishedFileLimitExceeded(
+                        f"沙箱输出文件超过当前 {output_file_max_bytes} 字节附件上限"
+                    )
+                if size > remaining_bytes:
+                    raise _PublishedFileLimitExceeded(
+                        f"沙箱输出文件合计超过 {MAX_SANDBOX_FILE_BATCH_BYTES} 字节上限"
+                    )
+                data = stream.read(size + 1)
+            if len(data) != size:
+                raise ValueError("published file size changed during collection")
+            remaining_bytes -= size
             names.add(file_name)
             out.append(
                 SandboxPublishedFile(

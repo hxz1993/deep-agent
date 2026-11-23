@@ -18,5 +18,6 @@ def decorate_history_display_names(
         if not isinstance(item, (ToolConversationItem, PlanConversationItem)):
             continue
         tool_name = item.tool_name or "tool"
-        item.display_name = mapping.get(tool_name) or tool_name
+        wire = item._wire_name if isinstance(item, ToolConversationItem) else None
+        item.display_name = mapping.get(wire or tool_name) or tool_name
     return decorated

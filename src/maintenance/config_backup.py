@@ -569,8 +569,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     structure_only = ", ".join(table for table in STRUCTURE_ONLY_TABLES if table in result.row_counts)
     print(f"Structure only (no data copied): {structure_only}")
     print(
-        "External Skill ZIP files are not embedded; use Console Skill > "
-        "Export all for a portable companion package."
+        "External Skill ZIP files are not embedded; download the companion package via "
+        "GET /api/v1/configuration/skills/export."
     )
 
 

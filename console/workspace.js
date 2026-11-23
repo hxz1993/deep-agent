@@ -1,11 +1,12 @@
 import { sessionLoadingHtml, setSessionLoading } from "./session-loading.js?v=20260918-release01012";
-import { renderContextReferenceContent, sessionStatusLabels, savedRunPresentation } from "./session-presentation.js?v=20261103-trajectory-files";
-import { renderSessionInspector } from "./session-inspector.js?v=20261013-providers";
-import { channelOriginPresentation } from "./session-display.js?v=20260929-release0124";
+import { renderContextReferenceContent, sessionStatusLabels, savedRunPresentation } from "./session-presentation.js?v=20261106-ptc-source";
+import { renderSessionInspector } from "./session-inspector.js?v=session-source-rows";
+import { channelOriginPresentation } from "./session-display.js?v=session-source-rows";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { registerSessionViewTemplate, loadSessionViewTemplate } from "./session-view-shell.js?v=20261025-readonly-load2";
+import { sessionAppOptions } from "./session-app-filter.js?v=20261104-app-search";
 
-const WORKSPACE_ASSET_VERSION = "20261103-trajectory-files";
+const WORKSPACE_ASSET_VERSION = "20261118-a2a-test-merge";
 
 const WORKSPACE_PANE_LIMITS = {
   session: { min: 220, max: 420, initial: 300, variable: "--console-session-width" },
@@ -99,6 +100,12 @@ function installLegacyDom(source) {
   const sessionSection = sidebar.querySelector(".sidebar-section:not(.grow)");
   if (sessionSection) {
     sessionSection.querySelector(".section-title")?.remove();
+    const appFilter = document.createElement("div");
+    appFilter.className = "session-app-filter";
+    appFilter.innerHTML = `<select id="sessionAppFilter" aria-label="筛选应用" data-badge-align="end" data-searchable="true" data-search-placeholder="搜索应用名称或编码" data-search-empty="未找到匹配应用"><option value="all" data-icon="layers" data-search-fixed="true">全部应用</option><option value="unassigned" data-icon="unlink" data-search-fixed="true">未关联应用</option></select>
+      <button type="button" class="icon-action hidden" id="retrySessionFilterOptions" title="应用与 Agent 统计加载失败，点击重试" aria-label="统计加载失败，重试"><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
+      <span class="session-filter-status" role="status" id="sessionFilterOptionsStatus"></span>`;
+    sessionSection.insertBefore(appFilter, sessionSection.querySelector("#sessionList"));
     const toolbar = document.createElement("div");
     toolbar.className = "session-toolbar";
     const search = document.createElement("label");
@@ -162,13 +169,30 @@ function renderAgentSwitcher(state = window.DeepAgentConsoleChat?.state) {
   trigger.disabled = !state.agents.length;
   menu.innerHTML = state.agents.map((agent) => {
     const selected = agent.id === state.agentId;
+    const counts = state.sessionFilterOptions;
+    const count = counts?.status === "ready" ? counts.agents.find(item => item.agent_id === agent.id)?.session_count ?? 0 : null;
     return `<button type="button" class="agent-select-option${selected ? " selected" : ""}" role="option" aria-selected="${selected}" data-switch-agent-id="${escapeHtml(agent.id)}">
       <span class="agent-select-option-icon"><i data-lucide="bot" aria-hidden="true"></i></span>
       <span>${escapeHtml(agent.name || agent.id)}${workspaceAgentChannelBadge(agent.id)}</span>
+      ${count === null ? "" : `<span class="agent-session-count" title="本人会话数">${escapeHtml(count)}</span>`}
       ${selected ? '<i class="agent-select-check" data-lucide="check" aria-hidden="true"></i>' : ""}
     </button>`;
   }).join("");
   window.lucide?.createIcons();
+}
+
+function renderSessionFilters() {
+  const state = window.DeepAgentConsoleChat?.state;
+  const select = document.getElementById("sessionAppFilter");
+  if (!state || !select) return;
+  const snapshot = state.sessionFilterOptions;
+  const options = sessionAppOptions(snapshot, state.sessionAppFilter || "all");
+  select.innerHTML = options.map(option => `<option value="${escapeHtml(option.value)}" data-icon="${option.icon}"${option.value === "all" || option.value === "unassigned" ? ' data-search-fixed="true"' : ""}${option.separatorBefore ? ' data-separator-before="true"' : ""}${option.count === null ? "" : ` data-badge="${escapeHtml(option.count)}"`}>${escapeHtml(option.label)}</option>`).join("");
+  select.value = state.sessionAppFilter || "all";
+  document.getElementById("retrySessionFilterOptions")?.classList.toggle("hidden", snapshot?.status !== "error");
+  const status = document.getElementById("sessionFilterOptionsStatus");
+  if (status) status.textContent = snapshot?.status === "error" ? "应用与 Agent 统计加载失败，可重试" : snapshot?.status === "loading" ? "正在加载应用统计" : "";
+  renderAgentSwitcher(state);
 }
 
 async function refreshWorkspaceAgents(button) {
@@ -177,7 +201,10 @@ async function refreshWorkspaceAgents(button) {
     button.classList.add("loading");
   }
   try {
-    await Promise.all([window.DeepAgentConsoleChat?.refreshAgentWorkspace(), refreshChannelAccounts()]);
+    await Promise.all([
+      window.DeepAgentConsoleChat?.refreshAgentWorkspace(), refreshChannelAccounts(),
+      window.DeepAgentConsoleContext?.refreshIdentity?.().catch(error => window.DeepAgentConsole?.toast(error.message, true)),
+    ]);
     lastRenderKey = "";
     renderAgentSwitcher();
     renderInspector();
@@ -514,7 +541,10 @@ function renderInspector() {
   const host = document.getElementById("inspectorContent");
   if (!api || !host || document.querySelector("main.chat")?.classList.contains("trajectory-active")) return;
   const state = api.state;
-  const activeSession = state.sessions.find((session) => session.id === state.sessionId && (session.agentId || "") === (state.agentId || "")) || {};
+  const effectiveContext = window.DeepAgentConsoleContext?.effectiveContext || {};
+  const activeSession = state.sessionId
+    ? state.sessions.find((session) => session.id === state.sessionId && (session.agentId || "") === (state.agentId || "")) || {}
+    : { appId: effectiveContext.app, spaceId: effectiveContext.space, appName: effectiveContext.app_name, spaceName: effectiveContext.space_name };
   const run = state.lastRunMetrics || {};
   const saved = savedRunPresentation({ model_name: run.model_name, run_id: run.run_id, runs: [{ ...run, usage: state.lastRunUsage || run.usage }], latest_status: run.status });
   const historicalModel = saved.runModel || (run.model_id
@@ -568,10 +598,11 @@ function startStateMonitor() {
       sessionCache: api.state.sessionCache,
       runCache: api.state.runCache,
       identity: window.DeepAgentConsoleContext?.identity,
+      effectiveContext: window.DeepAgentConsoleContext?.effectiveContext,
       conversationId: api.state.conversationId,
       sessionMetrics: api.state.sessions
         .filter((session) => session.id === api.state.sessionId && (session.agentId || "") === (api.state.agentId || ""))
-        .map((session) => [session.turnCount, session.messageCount, session.attachmentCount, session.channel, session.source_type, session.source_id, session.modelName, session.appId, session.spaceId]),
+        .map((session) => [session.turnCount, session.messageCount, session.attachmentCount, session.channel, session.source_type, session.source_id, session.modelName, session.appId, session.spaceId, session.appName, session.spaceName]),
     });
     if (key === lastRenderKey) return;
     lastRenderKey = key;
@@ -599,10 +630,17 @@ function bindWorkspaceControls() {
   document.getElementById("refreshWorkspaceAgentsBtn")?.addEventListener("click", (event) => {
     void refreshWorkspaceAgents(event.currentTarget);
   });
+  document.getElementById("sessionAppFilter")?.addEventListener("change", (event) => {
+    void window.DeepAgentConsoleChat?.setSessionAppFilter(event.target.value);
+  });
+  document.getElementById("retrySessionFilterOptions")?.addEventListener("click", () => {
+    void window.DeepAgentConsoleChat?.refreshSessionFilterOptions({ force: true });
+  });
   document.getElementById("toggleInspectorPaneBtn")?.addEventListener("click", toggleInspectorPane);
 }
 
 window.DeepAgentConsoleWorkspace = {
+  renderSessionFilters,
   renderDirectory() {
     lastRenderKey = "";
     renderAgentSwitcher();

@@ -185,6 +185,20 @@ class McpInspectionResult(BaseModel):
 
 class McpRequestContextConfig(BaseModel):
     mode: McpRequestContextMode
+    target_app_id: str | None = Field(default=None, min_length=1, max_length=50)
+    target_space_id: str | None = Field(default=None, min_length=1, max_length=50)
+    target_app_name: str | None = Field(default=None, max_length=255)
+    target_space_name: str | None = Field(default=None, max_length=255)
+
+    @model_validator(mode="after")
+    def validate_target(self) -> McpRequestContextConfig:
+        fields = (self.target_app_id, self.target_space_id, self.target_app_name, self.target_space_name)
+        if self.mode == "bound_app":
+            if not self.target_app_id or not self.target_space_id:
+                raise ValueError("绑定应用需要 App 和 Space")
+        elif any(value is not None for value in fields):
+            raise ValueError("只有绑定应用模式可以配置目标应用")
+        return self
 
 
 class McpUrlConfig(BaseModel):
@@ -202,6 +216,12 @@ class McpUrlConfig(BaseModel):
         description="Optional positive MCP initialization timeout in seconds.",
     )
 
+    @model_validator(mode="after")
+    def validate_bound_headers(self) -> McpUrlConfig:
+        if self.request_context and self.request_context.mode == "bound_app" and self.headers:
+            raise ValueError("绑定应用使用当前用户的登录身份，不能配置固定请求头")
+        return self
+
 
 def normalize_mcp_url_config(config: dict[str, Any]) -> dict[str, Any]:
     return McpUrlConfig.model_validate(config).model_dump(mode="json", exclude_none=True)
@@ -211,6 +231,10 @@ class McpRequestContextInfo(BaseModel):
     mode: McpRequestContextMode
     configurable: bool
     inherited_headers: list[str]
+    target_app_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    target_space_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    target_app_name: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    target_space_name: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class McpBuiltinConfig(BaseModel):
@@ -289,6 +313,7 @@ class McpServerResponse(BaseModel):
     @classmethod
     def from_row(cls, row: McpServer) -> McpServerResponse:
         mode = resolve_mcp_request_context_mode(row.transport, row.config)
+        target = row.config["request_context"] if mode == "bound_app" else {}
         return cls(
             name=row.name,
             transport=row.transport,  # type: ignore[arg-type]
@@ -299,6 +324,10 @@ class McpServerResponse(BaseModel):
             request_context=McpRequestContextInfo(
                 mode=mode,
                 configurable=row.transport == "url",
+                target_app_id=target.get("target_app_id"),
+                target_space_id=target.get("target_space_id"),
+                target_app_name=target.get("target_app_name"),
+                target_space_name=target.get("target_space_name"),
                 inherited_headers=(
                     sorted(OPTION.agent.mcp_forward_request_headers)
                     if mode == "inherit"

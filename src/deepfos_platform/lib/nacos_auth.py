@@ -13,7 +13,7 @@ from typing import Dict, Optional
 from urllib.parse import quote
 
 from aiohttp import ClientTimeout
-from loguru import logger
+from ..log import safe_logger as logger
 
 from .httpcli import AioHttpCli
 
@@ -128,7 +128,7 @@ class PasswordAuthProvider(AuthProvider):
             await asyncio.sleep(delay)
             await self.refresh()
         except Exception:
-            logger.warning('Nacos password token renewal failed.')
+            logger.opt(exception=True).warning('Nacos password token renewal failed.')
 
     async def _cancel_renewal(self):
         task = self._renewal_task

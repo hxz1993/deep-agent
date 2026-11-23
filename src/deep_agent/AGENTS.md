@@ -48,8 +48,8 @@ Agent 开关默认关闭；配置由 `agent_output_configs` 保存，`structured
 取消诊断按 Session/Run 关联停止接口入口、活动执行首次取消来源和发送连接结束记录。
 `http_disconnect` 只在实际收到 ASGI 断连消息时使用，不能由 `CancelledError` 推断；
 后者无明确证据时为 `task_cancelled_unknown`，更外层的服务退出记录可能晚于执行终态。
-`api/v1/stream_diagnostics.py` 仅包装现有 ASGI 收发，不额外读消息、不改取消及心跳策略；
-观察流 `/live` 不接入发送连接的取消观察。回归见 `test_cancel_diagnostics.py` 和 `test_session_live_api.py`。
+`api/v1/stream_diagnostics.py` 包装现有 ASGI 收发，不额外读消息；普通聊天断开的原因仅记到连接日志。
+渠道发送流仍关联执行取消来源。回归见 `test_cancel_diagnostics.py` 和 `test_session_live_api.py`。
 
 OpenAI 兼容协议的 HTTP 日志在 `agent/model_api_diagnostics.py`；只记录安全地址、状态与工具名清单。
 原 HTTP 字节流透明包装额外记录首字节、累计传输量、最近字节年龄与消费状态，响应头后30秒、之后60秒
@@ -81,12 +81,12 @@ Deferred 续跑可能把用户输入单独先入库，再写工具结果；不�
 日志 `history_tool_result_matched/synthesized` 关联当前读取 Run 和历史 Tool Call，正文不入日志。
 回归入口为 `test_history_repair.py`、`test_history_resume_persistence.py`。
 
-### v0.8.5 真实事件及时持久化
+### 会话事件持久化
 
 `agent/message_persistence.py`通过 SDK 公开节点和已接受工具事件插入真实消息内容，
 采用短数据库事务，不能等待整个 Run 的逻辑锁；不新增运行快照、计数回执或正常结束事件。
-完整助手阶段、已接受调用及每个已完成结果及时提交，以来源消息和部分身份去重并归组读取。
-半段流式文本仅保留在当前 SSE；正常取消/异常时尽力保存 SDK 已返回的部分内容，强杀不承诺半段恢复。
+首条输入先提交。符合条件的纯只读工具轮次在内存推进，同时通过 SSE 发布，遇到压缩、可能有副作用的调用、人工交互或收尾时提交检查点。未明确标记为只读的工具沿用调用前提交和逐结果保存。结构化输出继续使用其原生持久化契约。
+以来源消息和部分身份去重并归组读取。正常取消或异常时尽力保存 SDK 已返回的部分和只读结果。进程强杀只保留已经提交的内容。
 异常终止只记一次有原因的 `execution/error`，工具可恢复失败只记录自身结果，主动停止不新增异常。
 流式失败保存的部分助手和终态状态更新必须通过原 `session_event_*` 队列在 `error` 前发布；
 不能只有 Event Store 保存、实时客户端缺帧。取消状态收口同样镜像已有事实；
@@ -270,8 +270,9 @@ ExpectedError 的 HTTP 200 包装状态分开；不从附件格式清单推断�
 PTC 执行错误用官方 `ToolFailedError + ToolReturnPart(outcome=failed)` 保留脱敏嵌套调用审计，
 不转为消耗重试预算的 `ModelRetry`。取消与系统异常仍传播给 Runner 收尾，不能吞掉。
 
-页面关闭或网络断开触发 Token 清理无人消费的 Run，不是正常停止入口。API 与 Runner 必须显式
-关闭内层异步流，SDK 上下文退出前后捕获官方消息，并保存已有部分历史为中断；不拼接假消息。
+普通聊天由进程持有已接收的 Run，发起页关闭或网络断开仅释放发送流。渠道发送流断开仍触发
+Token 清理。API 与 Runner 必须显式关闭内层异步流，SDK 上下文退出前后捕获官方消息，并保存
+已取消 Run 的部分历史为中断；不拼接假消息。
 EventPersister 写入失败需保留有界失败回执，使后续 flush 明确报错。进程强杀或数据库不可写
 不在历史完整性保证范围内。UI Deferred 已经
 Pending 时没有活动 Run，其表单取消仍通过 `DeferredToolResults` 处理。当前注册表只在单进程
@@ -289,17 +290,16 @@ Pending 时没有活动 Run，其表单取消仍通过 `DeferredToolResults` 处
 
 DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包含分类、展示元数据、工具目录和恰好一个 Toolset；Pydantic AI 的 `AbstractCapability` 才是可介入模型请求、消息历史、工具准备和事件生命周期的原生扩展点。当前上下文压缩使用这一层；DeepSeek V4 已交由 Pydantic AI 官方 Provider/Profile，不再注册项目自定义重试能力。
 
-2026-09-19 独立搜索改版本地已实现，尚未发布。Web 统一披露普通 `web_search(query)`，不再向主会话
-注入原生搜索 Capability，不按主会话模型选择搜索实现，也不切换 DeepSeek 主会话协议。
-DeepSeek 搜索在 `web/deepseek.py` 中异步直调 Anthropic Messages，默认 `deepseek-flash`，
-声明 `web_search_20250305`，只解析结构化结果和引用片段，不创建辅助 Agent。
-Kimi 在 `web/kimi.py` 直接调用 `/v1/tools/search`，无 model、无辅助 Chat、Formula 或 Responses 后备。
-DuckDuckGo/Tavily 复用 Common Tools，Exa/You.com 复用 Harness。运行时不限制模型名称，不自动降级或换供应商。
+Web 披露普通函数工具 `web_search`，按全局选中的搜索供应商装配参数，与主会话模型独立。
+DeepSeek 在 `web/deepseek.py` 直接调用 `/v1/tools/search`。模型可选择条数、正文、原始问题和本地化 IP，
+收到供应商 JSON 对象，轨迹和来源授权从工具元数据读取。参数和示例见[网络搜索指南](../../docs/guides/web-tools.md)。
+Tavily、Exa、You.com 直调原生 Search API，DuckDuckGo 使用 DDGS 的 DuckDuckGo 后端。
+各家请求参数与回包独立。运行时不限制模型名称，不自动降级或换供应商。
 
 `web/settings.py` 将空配置、无记录和旧 native 归一为 `unconfigured`，读取不写库；坏引用、缺 Key、
 无效 Provider 地址携带 `configuration_error`。不在装配阶段因这些配置问题拒绝 Run；实际搜索时使用
 `ToolFailed` 生成同 ID 的失败 Tool Result，模型可继续回答，SSE/History/事件协议不变。
-管理保存仅接受 `mode=provider`；三个 Console 入口不增加存储层级。Kimi 旧 model 读取忽略、保存移除；
+管理保存支持当前供应商及清空配置。旧搜索 `model` 读取忽略、保存移除；
 复用 Provider 只存引用不复制 Key。GET 回显 `configuration_error`；旧 `/test-model` 返回410。
 新库最终无默认搜索行：已发布001不改，`initialize_current_defaults()` 仅在空库初始化时清掉native种子；
 历史升级不删除记录，旧备份恢复仍按未配置解释。不得引入新的隐式搜索默认供应商。
@@ -308,7 +308,8 @@ DuckDuckGo/Tavily 复用 Common Tools，Exa/You.com 复用 Harness。运行时�
 该限制针对工具协议，不限制模型型号；旧原生工具消息仍保持历史回读。协议历史探测结论见
 `../../docs/design/21-web-tools/web-tools-research.md`，不能用旧单句探针声称完整主会话原生搜索已接通。
 回归入口包括 `test_web_search_settings.py`、`test_global_settings.py`、`test_web_search_probe.py`、
-`test_kimi_web_search.py`、`test_web_search_failure_events.py`；测试搜索必须验证真实来源，HTTP200或回答文本不算成功。
+`test_deepseek_web_search.py`、`test_web_tools.py`、`test_web_search_failure_events.py`；
+线上搜索验收需验证真实来源、结果字段和内容。
 2026-09-19管理草稿沿用已有Provider Key实测：Kimi 1510 ms、DeepSeek Flash 3894 ms、Pro 15388 ms；
 不保存配置，耗时为单次观测；DuckDuckGo真实草稿测试约11.36秒通过。Tavily/Exa/You.com真实Key联调仍待补。
 
@@ -327,11 +328,27 @@ ToolSearch。v0.14.7实现：已授权且已披露MCP，以及当前已装配的
 `load_file_data`仍为code-only原语；不新增`save_file_data`，不接入`read_file`、`parse_document`、
 `web_image_view`、UI/Deferred、发现、计划、历史或任意Shell。Run Token、Base64和全量内部返回不进入历史审计。
 
-当前通过`ptc/async_runtime.py`使用已安装Monty的官方`AsyncMontySession.feed_run`，
+当前通过`ptc/async_runtime.py`使用已安装Monty的官方`AsyncMontySession.feed_start`与`resume_auto`，
 复用Harness的ToolManager、调用预算、类型签名和返回转换；不实现第二套工具分发。
-`ptc/limits.py`固定256MiB Monty内存、32MiB单个内部返回、120秒同Run Session执行预算、
+逐个暂停点只读取工具调用的`position`，在既有`ptc_diagnostics.steps`中保存可选
+`source_location={call_id,filename,start,end}`，偏移为UTF-8字节、end不包含；call_id指原始
+外层run_code，支持同Run前一段定义函数。仅保存引用，不复制源码、不改变甘特图计时；
+Run/REPL重置清理映射，未知来源不推测，定位采集失败不阻止工具执行。
+Monty已升级1.5.0，Pydantic AI 2.46.0/Harness 0.32.0保持；桥接层将旧max_duration_secs映射到
+新max_feed_duration_secs，执行时间改为每段120秒，不再跨段累计。资源超限销毁不可靠REPL。
+工具说明仅列仍存在的子集限制，不再禁止字符串格式化、JSON default、CSV或Decimal；
+已知解释器错误补具体纠正提示，仍保留失败事实，不自动改写或重放代码。
+`ptc/limits.py`固定256MiB Monty内存、32MiB单个内部返回、每段120秒Monty执行预算、
 每段120秒总截止（含工具等待）、每段100次内部调用。超时/取消清理worker并取消、等待宿主回调，
-正常同Run复用REPL；restart清变量，不回滚已发生副作用。无新增配置、依赖、数据库结构或协议类型。
+正常同Run复用REPL；restart清变量，不回滚已发生副作用。无新增配置、数据库结构或协议类型；
+Monty依赖升级如上，独立Python沙箱依赖不变。
+
+OpenAI／OpenAI Compatible 模型可用显式 `tags: ["openai_responses", ...]` 选择 Responses；
+缺省仍为 Chat Completions，不按名称或 URL 推断，其他 Provider 忽略该标记。
+Responses 中有 `reasoning` 能力标签时请求 `openai_reasoning_summary="auto"`；订阅 GPT 同样请求摘要，
+均不显式设置 effort。摘要取供应商实际返回，不保证每轮有文本。Chat 专用高级兼容标记在
+Responses 中保留但不应用。StepFun 单独开启累计流式用量模式，缺 usage 的片段保留前值，
+重复累计尾包不相加；视频分支沿用同一统计规则。不回写旧会话已记录的错误用量。
 可信Python与下载中心导出成功产物汇总到外层既有`generated_files` metadata，后续失败或取消仍保留；
 仅引用授权成果，不把内部参数/结果复制为完整嵌套消息。详见
 [PTC当前设计](../../docs/design/20-code-mode/ptc-data-transfer-design.md)，完整验收另列报告。
@@ -478,6 +495,11 @@ user/App/Space上下文时，`export_file_to_download_center`始终直接披露�
 | `resource_reader.py` · `tools.py` | Skill管理预览和模型侧资源目录；正文统一转 `read_file` |
 | `script_tool.py` | Agent选择含脚本Skill和Sandbox时，组装已授权Skill脚本执行工具 |
 
+已关联Skill的文本脚本及辅助模块可经`list_skill_resources`发现、`read_file`分页读取；
+旧索引`readable=false`不作为文本读取禁令，不回写、不要求重装。附件、可信产物和Skill文本不按后缀或MIME白名单限制；未知类型尝试文本读取，实际二进制内容明确报错。
+只读源码不依赖Sandbox，不自动执行；编译／二进制脚本不开放为文本，原路径与Hash校验保留。
+Harness仍只延迟加载`SKILL.md`，不自动灌入整包源代码。
+
 ### `api/v1/`
 
 | 文件 | 路由 |
@@ -555,10 +577,11 @@ Plan表、隐藏全局计划、Reminder用户消息或自研任务状态机。
 
 ### 渠道消息系统工具
 
-`channel_message` 归入系统工具目录 `runtime:channel`，不是 Agent 需要勾选的能力或 MCP。
-仅由可信渠道 Run 自动加载，同时支持飞书和企微；来源来自渠道 Run/Binding，不能靠正文或
-context_refs 授权。每次执行重新检查账号、Agent、会话、Run 与文件权限，只发本轮群或私聊。
-普通 Console 和历史浏览不加载；首轮不必有附件，沙箱新生成的授权 file_id 也可发送。
+`channel_message` 和 `channel_doc()` 归入系统工具目录 `runtime:channel`，由可信渠道 Run 自动加载。
+来源来自渠道 Run/Binding，不能靠正文或 context_refs 授权。渠道 Run 屏蔽 Agent 配置及请求指定的 UI 工具，运行时追加原渠道文字澄清指令。用户补充信息走普通新消息。
+`channel_doc()` 以当前渠道返回快捷命令和收发说明，复用网关命令目录和适配器的出站限制。
+`channel_message` 执行时重新检查账号、Agent、会话、Run 与文件权限，只发本轮群或私聊。
+普通 Console 和历史浏览不加载这两个工具。首轮不必有附件，沙箱新生成的授权 file_id 也可发送。
 
 v0.14.8：可信装配位只把准确`channel_message`加入PTC双入口，其他同名来源不扩权。
 媒体来源允许授权`file_id`或公开HTTP(S)`url`二选一；`files/public_download.py`复用原PTC公开读取的
@@ -610,6 +633,8 @@ channel_message_operations 及其中回执，保留已发布迁移；不改变�
 `POST /api/v1/agents` 或 Alembic 种子；流式请求带 `agent_id`（UUID）。
 
 ### UI 工具
+
+模型工具名由 `agent/tool_names.py` 按来源生成。手工 UI、MCP、结构化输出分别使用 `ui__`、`mcp__`、`output__`，内置工具沿用原名。公开事件保留业务名，模型回放只从持久化的部件身份或旧待操作调用 ID 恢复模型名，禁止按当前配置猜测历史输出身份。
 
 代码内置 `builtin__confirm`、`builtin__choice` 同属只读包 `ui:builtin`。手工包保存于
 `ui_tool_packages`，工具通过 `package_code` 归属；Agent 的 `capabilities` 只保存包编码，
@@ -812,9 +837,10 @@ alembic upgrade head
 | GET | `/health`, `/info`, `/docs` | 否 |
 | GET | `/api/v1/admin/access` | 否；当前平台身份，企业管理员返回`allowed=true` |
 | POST | `/api/v1/chat`, `/api/v1/chat/stream` | 否（持久化需 DB） |
+| GET | `/api/v1/agents` | 是；当前登录用户读取摘要，支持 `q` 按名称或 ID 搜索。`include_updater=true` 需要管理员权限 |
 | GET | `/api/v1/agents/{agent_id}` | 是；可信登录用户读取固定Agent，无需管理员 |
 | GET | `/api/v1/llm-models`、`/api/v1/llm-models/{model_id}` | 是；可信登录用户；默认只列可选模型。`selectable_only=false`全量列表仍要求管理员 |
-| CRUD | `/api/v1/agents` | 是；企业管理员，单个GET除外 |
+| POST／PATCH／DELETE | `/api/v1/agents`、`/api/v1/agents/{agent_id}` | 是；企业管理员 |
 | CRUD | `/api/v1/mcp` | 是；企业管理员 |
 | CRUD | `/api/v1/ui-tools` | 是；企业管理员 |
 | GET | `/api/v1/tools` | 企业管理员；无 DB 时跳过动态 UI 工具 |

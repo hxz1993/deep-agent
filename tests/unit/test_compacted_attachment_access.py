@@ -8,6 +8,7 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserProm
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage, UsageLimits
 
+from deep_agent.db.serialization import StoredUserPromptPart
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.files import build_file_toolset
@@ -24,7 +25,7 @@ class CompactedAttachmentAccessTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_original_attachment_remains_readable_after_compaction(self):
         ref = {"kind": "attachment-ref", "id": "local_original", "name": "README.txt", "mime": "text/plain"}
-        raw = [ModelRequest(parts=[UserPromptPart(content=["uploaded", ref])]),
+        raw = [ModelRequest(parts=[StoredUserPromptPart(content=["uploaded", ref])]),
                ModelResponse(parts=[TextPart("received")]),
                ModelRequest(parts=[UserPromptPart(content="latest")]),
                ModelResponse(parts=[TextPart("done")])]

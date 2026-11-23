@@ -3,7 +3,24 @@ from __future__ import annotations
 
 import re
 
-from .schema import MAX_RECORD_BYTES, NUMBER_FIELDS, ADAPTATION_NUMBER_FIELDS, LAYOUT_NUMBER_FIELDS, PERSISTENCE_NUMBER_FIELDS, BOOLEAN_FIELDS, TOOL_LIST_FIELDS, sanitize_record
+from .schema import (
+    ADAPTATION_NUMBER_FIELDS,
+    BOOLEAN_FIELDS,
+    BUNDLE_NUMBER_FIELDS,
+    LAYOUT_NUMBER_FIELDS,
+    MAX_RECORD_BYTES,
+    NUMBER_FIELDS,
+    PERSISTENCE_NUMBER_FIELDS,
+    PERSISTENCE_TIMING_FIELDS,
+    TOOL_LIST_FIELDS,
+    sanitize_record,
+)
+
+
+_NUMERIC_FIELDS = (
+    NUMBER_FIELDS | ADAPTATION_NUMBER_FIELDS | LAYOUT_NUMBER_FIELDS | BUNDLE_NUMBER_FIELDS
+    | PERSISTENCE_NUMBER_FIELDS | PERSISTENCE_TIMING_FIELDS | {"http_status", "tools_omitted", "artifact_count"}
+)
 
 
 def escape(value: str) -> str:
@@ -90,7 +107,7 @@ def parse_record(line: str) -> dict | None:
             key, value = unescape(part).split("=", 1)
             if key in reserved or key in record:
                 return None
-            if key in NUMBER_FIELDS or key in ADAPTATION_NUMBER_FIELDS or key in LAYOUT_NUMBER_FIELDS or key in PERSISTENCE_NUMBER_FIELDS or key in ("http_status", "tools_omitted"):
+            if key in _NUMERIC_FIELDS:
                 value = float(value) if "." in value or "e" in value.lower() else int(value)
             elif key in BOOLEAN_FIELDS:
                 if value not in ("True", "False"):

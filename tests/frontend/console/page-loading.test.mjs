@@ -6,21 +6,24 @@ const main = await readFile(new URL('../../../console/main.js', import.meta.url)
 const loaderSource = await readFile(new URL('../../../console/page-loader.js', import.meta.url), 'utf8');
 const { createPageLoader } = await import(`data:text/javascript;base64,${Buffer.from(loaderSource).toString('base64')}`);
 const deferred = () => { let resolve, reject; const promise = new Promise((a,b) => {resolve=a;reject=b;}); return {promise,resolve,reject}; };
-function harness({allowed=true, authenticated=true, pending={}}={}) {
+function harness({allowed=true, authenticated=true, pending={}, healthStatus=200}={}) {
   const calls=[];
-  const panels=['workspace','configuration','diagnostics'].map(name=>({dataset:{pagePanel:name},active:name==='workspace',classList:{toggle(_name,value){panels.find(p=>p.dataset.pagePanel===name).active=value;}}}));
+  const connection = { textContent: '连接中' };
+  const panels=['workspace','configuration','diagnostics','developer'].map(name=>({dataset:{pagePanel:name},active:name==='workspace',classList:{toggle(_name,value){panels.find(p=>p.dataset.pagePanel===name).active=value;}}}));
   const location={hash:'#/configuration'};
   const window={DeepAgentConsoleAPI:{adminAccess:async()=>{calls.push('access');return {allowed,roles:allowed?['enterprise_admin']:[]};}},lucide:{createIcons(){}},addEventListener(){}};
   const modules={
+    developer:{initDeveloper(){calls.push('init:developer');},openDeveloper(){calls.push("developer:open");},closeDeveloper(){calls.push("developer:close");}},
     configuration:{async initConfiguration(){calls.push('init:configuration');await pending.configuration?.promise;},restoreConfigurationTab(){calls.push('refresh:configuration');},rememberConfigurationTab(){}},
     workspace:{async initWorkspace(){calls.push('init:workspace');await pending.workspace?.promise;}},
     'diagnostics-center':{initDiagnostics(){calls.push('init:diagnostics');},setDiagnosticsActive(active){calls.push(`diagnostics:${active}`);}},
   };
-  const context=vm.createContext({window,location,console,createPageLoader,initUserIdentityControls(){},refreshIdentity:async()=>{calls.push('identity');return authenticated;},document:{body:{dataset:{},classList:{add(){},remove(){}}},getElementById(){return null;},querySelector(selector){return selector==='[data-page-panel].active'?panels.find(p=>p.active):null;},querySelectorAll(selector){return selector==='[data-page-panel]'?panels:[];}},history:{replaceState(_s,_t,hash){location.hash=hash;},pushState(_s,_t,hash){location.hash=hash;}},importPage:async(path)=>{const name=path.match(/\.\/([^/.]+)\.js/)[1];calls.push(`import:${name}`);return modules[name];}});
+  const context=vm.createContext({window,location,console,createPageLoader,initUserIdentityControls(){},refreshIdentity:async()=>{calls.push('identity');return authenticated;},document:{body:{dataset:{},classList:{add(){},remove(){}}},getElementById(id){return id==='connStatus'?{classList:{toggle(){}},querySelector:()=>connection}:null;},querySelector(selector){return selector==='[data-page-panel].active'?panels.find(p=>p.active):null;},querySelectorAll(selector){return selector==='[data-page-panel]'?panels:[];}},history:{replaceState(_s,_t,hash){location.hash=hash;},pushState(_s,_t,hash){location.hash=hash;}},importPage:async(path)=>{const name=path.match(/\.\/([^/.]+)\.js/)[1];calls.push(`import:${name}`);return modules[name];},
+    AbortSignal,serviceUrl:path=>path,async daFetch(path){calls.push(path);await pending.health?.promise;return {ok:healthStatus===200,status:healthStatus};}});
   const script=main.replace(/^import .*;\n/gm,'').replace(/await import\(/g,'await importPage(').split('\ninitConsoleSelects();')[0];
   vm.runInContext(script,context);
   for(const fn of ['bindNavigation','bindThemes','bindContextControls','loadProductVersion'])context[fn]=()=>{};
-  return {context,calls,panels,window,modules};
+  return {context,calls,panels,window,modules,connection};
 }
 test('page loader shares concurrent initialization and retries a failed load',async()=>{
   const gate=deferred();let count=0;const load=createPageLoader({one:()=>{count++;return gate.promise;}});
@@ -28,13 +31,58 @@ test('page loader shares concurrent initialization and retries a failed load',as
   let attempts=0;const retry=createPageLoader({one:()=>{if(++attempts===1)throw Error('unavailable');return 8;}});await assert.rejects(retry('one'));assert.equal(await retry('one'),8);
 });
 test('configuration deep link loads only its own page after identity and admin access',async()=>{
- const h=harness();await h.context.boot();assert.deepEqual(h.calls,['identity','access','import:configuration','init:configuration','refresh:configuration']);assert.equal(h.panels.find(p=>p.active).dataset.pagePanel,'configuration');
+ const h=harness();await h.context.boot();assert.deepEqual(h.calls,['identity','access','health','import:configuration','init:configuration','refresh:configuration']);assert.equal(h.panels.find(p=>p.active).dataset.pagePanel,'configuration');assert.equal(h.connection.textContent,'已连接');
+});
+test('a slow or failed health probe does not block navigation or repeat on page switches', async () => {
+  const gate = deferred();
+  const h = harness({ pending: { health: gate }, healthStatus: 503 });
+  await h.context.boot();
+  assert.equal(h.panels.find(p => p.active).dataset.pagePanel, 'configuration');
+  assert.equal(h.connection.textContent, '连接中');
+  gate.resolve();
+  await h.context.showPage('workspace');
+  assert.equal(h.connection.textContent, 'HTTP 503');
+  assert.equal(h.calls.filter(call => call === 'health').length, 1);
+});
+test('a late startup probe cannot overwrite a newer chat connection status', async () => {
+  const gate = deferred();
+  const h = harness({ pending: { health: gate }, healthStatus: 503 });
+  await h.context.boot();
+  h.window.DeepAgentConsole.setConnectionStatus('ok', '已连接');
+  gate.resolve();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.connection.textContent, '已连接');
 });
 test('unauthenticated or non-admin deep links never initialize any business page',async()=>{
- for(const options of [{authenticated:false},{allowed:false}]){const h=harness(options);await h.context.boot();assert.equal(h.calls.some(x=>x.startsWith('import:')),false);}
+ for(const options of [{authenticated:false},{allowed:false}]){const h=harness(options);await h.context.boot();assert.equal(h.calls.some(x=>x.startsWith('import:')||x==='health'),false);}
 });
 test('late configuration initialization does not restore a tab over a newer route',async()=>{
  const gate=deferred();const h=harness({pending:{configuration:gate}});const first=h.context.boot();while(!h.calls.includes('init:configuration'))await Promise.resolve();await h.context.showPage('diagnostics');gate.resolve();await first;assert.equal(h.panels.find(p=>p.active).dataset.pagePanel,'diagnostics');assert.equal(h.calls.includes('refresh:configuration'),false);assert.ok(h.calls.includes('diagnostics:true'));
+});
+test('a cold diagnostic session link keeps its destination while the module loads', async () => {
+  const gate = deferred();
+  const h = harness();
+  const { document, importPage, location } = h.context;
+  const classes = new Set(['hidden']);
+  const loading = { classList: { add: value => classes.add(value), remove: value => classes.delete(value) } };
+  const getElementById = document.getElementById;
+  document.getElementById = id => id === 'diagnosticsLoading' ? loading : getElementById(id);
+  h.context.importPage = async path => {
+    if (path.startsWith('./diagnostics-center.js')) await gate.promise;
+    return importPage(path);
+  };
+  await h.context.boot();
+  const target = '#/diagnostics/sessions/session-id?view=conversation&event_id=question-event';
+  location.hash = target;
+  const opening = h.context.showPage('diagnostics', { updateHash: false });
+  assert.equal(classes.has('hidden'), false);
+  assert.match(loading.innerHTML, /正在加载诊断中心/);
+  assert.equal(h.calls.includes('diagnostics:true'), false);
+  gate.resolve();
+  assert.equal(await opening, true);
+  assert.equal(location.hash, target);
+  assert.equal(classes.has('hidden'), true);
+  assert.ok(h.calls.includes('diagnostics:true'));
 });
 test('each dirty configuration guard reports rejected navigation to cross-page callers',async()=>{
  for(const [name,guard] of [
@@ -51,4 +99,15 @@ test('each dirty configuration guard reports rejected navigation to cross-page c
 });
 test('repeated workspace navigation initializes once without cancelling existing execution',async()=>{
  const h=harness();await h.context.boot();let refreshes=0;h.window.DeepAgentConsoleChat={refreshConfiguration(){refreshes++;},abort(){throw Error('must not abort');}};await h.context.showPage('workspace');await h.context.showPage('configuration');await h.context.showPage('workspace');assert.equal(h.calls.filter(x=>x==='init:workspace').length,1);assert.equal(refreshes,1);
+});
+
+test('developer dialog lazy loads without replacing the current page or cancelling chat', async()=>{
+ const h=harness(); await h.context.boot(); await h.context.showPage('workspace');
+ h.window.DeepAgentConsoleChat={abort(){throw Error('must not abort chat');}};
+ await h.context.showPage('developer'); assert.equal(h.panels.find(p=>p.active).dataset.pagePanel,'workspace');
+ assert.ok(h.calls.includes('developer:open'));
+ await h.context.showPage('configuration'); assert.ok(h.calls.includes('developer:close'));
+ h.context.location.hash='#/developer'; await h.context.showPage(h.context.pageFromLocation(),{updateHash:false});
+ assert.equal(h.calls.filter(x=>x==='init:developer').length,1);
+ assert.equal(h.panels.find(p=>p.active).dataset.pagePanel,'configuration');
 });

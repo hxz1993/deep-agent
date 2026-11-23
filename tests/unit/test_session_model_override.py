@@ -135,8 +135,8 @@ class BuildRunnerForAgentTests(unittest.IsolatedAsyncioTestCase):
         default = _llm("00000000-0000-4000-8000-000000000010", "gpt-a")
         override = _llm("00000000-0000-4000-8000-000000000011", "gpt-b")
         agent = _agent(model_id=default.id)
-        agent.capabilities = ["builtin:general"]
-        agent.skills = ["deepagent-diagnostics"]
+        agent.capabilities = ["builtin:general", "builtin:sandbox"]
+        agent.skills = ["deepfos-readonly-analysis"]
         ctx = _ctx()
         ctx.stores.agent.get_by_id = AsyncMock(return_value=agent)
         ctx.stores.llm_model.get_by_id = AsyncMock(return_value=override)
@@ -147,8 +147,8 @@ class BuildRunnerForAgentTests(unittest.IsolatedAsyncioTestCase):
             spec = build.call_args.args[0]
             self.assertEqual(spec.model, "openai:gpt-b")
             self.assertEqual(spec.instructions, "You are helpful.")
-            self.assertEqual(spec.capabilities, ["builtin:general"])
-            self.assertEqual(spec.skills, ["deepagent-diagnostics"])
+            self.assertEqual(spec.capabilities, ["builtin:sandbox"])
+            self.assertEqual(spec.skills, ["deepfos-readonly-analysis"])
 
 
 class ChatSessionModelColumnTests(unittest.TestCase):

@@ -5,6 +5,7 @@ from deep_agent.capabilities.codes import canonical_tool_package_codes
 from deep_agent.capabilities.registry import ToolPackageRegistry
 from deep_agent.capabilities.ui.registry import runnable_ui_tool_package_codes
 from deep_agent.db.stores.bundle import DataStores
+from deep_agent.remote_agents.contracts import CONNECTION_PREFIX
 
 
 async def selectable_tool_package_codes(
@@ -16,6 +17,8 @@ async def selectable_tool_package_codes(
         package.code for package in await load_mcp_tool_packages(stores)
     )
     codes.update(await runnable_ui_tool_package_codes(stores))
+    if stores.remote_agent is not None:
+        codes.update(CONNECTION_PREFIX + row.id for row in await stores.remote_agent.list())
     return codes
 
 

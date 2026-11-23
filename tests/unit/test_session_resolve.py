@@ -49,10 +49,6 @@ class SessionResolveTests(unittest.IsolatedAsyncioTestCase):
         resolved = await resolve_session(self.store, "sess-1", agent_id=self.agent_a)
         self.assertEqual(resolved, (self.agent_a, "sess-1"))
 
-    async def test_resolve_display_id_with_agent_id(self) -> None:
-        await self._seed("sess-1")
-        resolved = await resolve_session(self.store, "sess-1", agent_id=self.agent_a)
-        self.assertEqual(resolved, (self.agent_a, "sess-1"))
 
     async def test_resolve_bare_session_without_agent(self) -> None:
         await self._seed("sess-bare")

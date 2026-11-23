@@ -18,6 +18,7 @@ class SkillResource(BaseModel):
 
 class SkillPackageRecord(BaseModel):
     code: str
+    scope_ref: str | None = "general"
     label: str
     description: str
     version: str | None = None

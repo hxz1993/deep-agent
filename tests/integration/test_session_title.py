@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from pydantic_ai.messages import ModelResponse, TextPart
+from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.models.wrapper import WrapperModel
 
@@ -44,7 +47,9 @@ class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 title_mock = AsyncMock()
                 body = {"agent_id": self._agent_id, "message": "解析附件", "session_title": "  客户合同填报  ", "capabilities": []}
                 with patch("deep_agent.agent.factory._resolve_model", return_value=text_only_model("已收到")), \
-                     patch("deep_agent.agent.title_generator.generate_title", title_mock), mock_request_disconnect():
+                     patch("deep_agent.agent.title_generator.generate_title", title_mock), \
+                     patch.object(self._stores.coordinator, "ensure_title_fallback", wraps=self._stores.coordinator.ensure_title_fallback) as fallback, \
+                     mock_request_disconnect():
                     async with AsyncClient(transport=self._transport, base_url="http://test") as client:
                         response = await client.post("/api/v1/chat/stream" if streaming else "/api/v1/chat", json=body)
                 self.assertEqual(response.status_code, 200, response.text)
@@ -52,6 +57,7 @@ class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 session_id = next(e["session_id"] for e in events if e["type"] == "session") if streaming else response.json()["session_id"]
                 self.assertEqual(await self._stores.coordinator.get_session_title(session_id, agent_id=self._agent_id), "客户合同填报")
                 title_mock.assert_not_awaited()
+                fallback.assert_not_awaited()
                 rows = await self._stores.coordinator.list_events(session_id, limit=500)
                 titles = [row for row in rows if row.event_type == "session/title"]
                 self.assertEqual([row.payload["source"] for row in titles], ["user"])
@@ -270,6 +276,56 @@ class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail, "分析预算差异")
         stored = await self._stores.coordinator.list_events(session_id, event_type="session/title")
         self.assertEqual([row.payload["source"] for row in stored], ["fallback", "model"])
+        self.assertEqual(stored[0].sequence, 2)
+
+    async def test_automatic_title_does_not_block_main_model_but_precedes_completion(self) -> None:
+        for streaming in (False, True):
+            with self.subTest(streaming=streaming):
+                title_entered = asyncio.Event()
+                release_title = asyncio.Event()
+                main_model_started = asyncio.Event()
+                coordinator = self._stores.coordinator
+
+                async def slow_title(**kwargs):
+                    title_entered.set()
+                    await release_title.wait()
+                    return TitleGenerationResult("自动标题", False)
+
+                async def run_model(messages, info):
+                    main_model_started.set()
+                    return ModelResponse(parts=[TextPart("正文已生成")])
+
+                async def stream_model(messages, info):
+                    main_model_started.set()
+                    yield "正文已生成"
+
+                model = FunctionModel(run_model, stream_function=stream_model)
+                title = AsyncMock(side_effect=slow_title)
+                with patch("deep_agent.agent.factory._resolve_model", return_value=model), \
+                     patch("deep_agent.agent.title_generator.generate_title", title), \
+                     mock_request_disconnect():
+                    async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+                        path = "/api/v1/chat/stream" if streaming else "/api/v1/chat"
+                        request = asyncio.create_task(client.post(
+                            path, json={"agent_id": self._agent_id, "message": "处理报告", "capabilities": []},
+                        ))
+                        try:
+                            await asyncio.wait_for(title_entered.wait(), timeout=5)
+                            await asyncio.wait_for(main_model_started.wait(), timeout=5)
+                            self.assertFalse(request.done())
+                        finally:
+                            release_title.set()
+                            response = await request
+                self.assertEqual(response.status_code, 200, response.text)
+                if streaming:
+                    events = parse_sse_events(response.text)
+                    session_id = next(e["session_id"] for e in events if e["type"] == "session")
+                    self.assertEqual([e["source"] for e in events if e["type"] == "session_title"], ["fallback", "model"])
+                    self.assertEqual(events[-1]["type"], "final")
+                else:
+                    session_id = response.json()["session_id"]
+                title.assert_awaited_once()
+                self.assertEqual(await coordinator.get_session_title(session_id, agent_id=self._agent_id), "自动标题")
 
     async def test_non_stream_response_waits_for_bounded_title_task(self) -> None:
         body, title_mock = await self._chat(

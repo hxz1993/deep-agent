@@ -47,7 +47,7 @@ def _source_pages(data: bytes, mime: str) -> int | None:
     if mime != "application/pdf":
         return None
     try:
-        with PdfReader(io.BytesIO(data), strict=True) as reader:
+        with PdfReader(io.BytesIO(data), strict=False) as reader:
             if reader.is_encrypted:
                 raise ModelRetry("加密 PDF 不受支持；请先提供已解密的原件")
             count = len(reader.pages)

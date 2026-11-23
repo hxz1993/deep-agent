@@ -6,7 +6,7 @@ from typing import Dict, Type
 from functools import partial
 from urllib.parse import urlparse
 
-from loguru import logger
+from ..log import safe_logger as logger
 from starlette.datastructures import Address
 
 from ..errors.classes import ServerNotFound, ServerInstanceNotFound

@@ -109,7 +109,7 @@ def pdf_document(data: bytes) -> tuple[tuple[str, ...], dict[str, Any]]:
     empty_pages: list[int] = []
     total_chars = 0
     try:
-        with PdfReader(io.BytesIO(data), strict=True) as reader:
+        with PdfReader(io.BytesIO(data), strict=False) as reader:
             if reader.is_encrypted:
                 raise AttachmentParseError("加密 PDF 不受支持；请提供已解密的原件")
             if not len(reader.pages):

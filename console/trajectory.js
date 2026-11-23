@@ -1,4 +1,5 @@
-import { mountStructuredOutput } from "./structured-output.js?v=20261022-output-inspector3";
+import { renderIconsWithin } from "./render-scheduler.js?v=20261105-v01510";
+import { mountStructuredOutput } from "./structured-output.js?v=20261121-publication";
 import { cacheMessageSummary } from "./cache-usage.js?v=20260923-usage-tab-2";
 import { tokenValue } from "./context-budget-presentation.js?v=20260923-c02";
 import { renderPlanSnapshot } from "./plan-view.js?v=20261103-view-image1";
@@ -8,8 +9,10 @@ import { parseServerTimestamp } from "./time.js?v=20260912-21";
 import { renderWebImagePreview } from "./web-image.js?v=20260912-21";
 import { findViewImageResult, renderViewImageResult } from "./view-image.js?v=20261103-view-image3";
 import { attachmentPreviewAttributes, attachmentDownloadUrl } from "./attachment-preview.js?v=20261103-view-image1";
-import { toolResultPresentation } from "./assistant-presentation.js?v=20261103-view-image1";
+import { renderReplyFileCards } from "./reply-files.js";
+import { isRemoteAgentToolEvent, toolResultPresentation } from "./assistant-presentation.js?v=remote-agents-1";
 import { renderPtcExecution } from "./ptc-execution.js?v=20260924-5";
+import { mountTrajectoryExport } from "./trajectory-export.js?v=20261106-trajectory-export";
 
 const TOOL_KINDS = new Set(["tool", "planning", "deferred"]);
 const PRESENTATION_ONLY_SSE_TYPES = new Set(["session_title"]);
@@ -58,28 +61,34 @@ function eventLabel(kind, part = {}) {
   if (kind === "thinking") return "Thinking";
   if (kind === "assistant") return "Assistant message";
   if (kind === "title") return "Session title";
-  if (kind === "error") return "异常";
-  if (kind === "output") return part.name || "输出";
+  if (kind === "error") return "Error";
+  if (kind === "output") return part.publication_protocol ? "Publication Output" : part.name || "Output";
   if (kind === "compaction") return "Compaction";
-  if (kind === "planning") return part.tool || "任务计划";
-  if (kind === "deferred") return part.tool || "等待用户操作";
-  if (kind === "tool") return part.tool || "工具调用";
-  return part.event_type || "会话事件";
+  if (kind === "planning") return part.tool || "Plan";
+  if (kind === "deferred") return part.tool || "Interaction";
+  if (kind === "tool") return part.tool || "Tool Call";
+  return part.event_type || "Session Event";
 }
 
 function eventSummary(kind, source = {}) {
-  if (kind === "input") return valuePreview(source.content) || "仅包含附件或上下文引用";
+  if (kind === "input") return valuePreview(source.content) || "Attachments or context references only";
   if (["thinking", "assistant"].includes(kind)) return valuePreview(source.content);
   if (kind === "title") return valuePreview(source.title) || "Session title";
-  if (kind === "output") return source.accepted ? "已接受结构化输出" : valuePreview(source.errors) || "输出未被接受";
-  if (kind === "error") return valuePreview(source.message) || "执行异常";
+  if (kind === "output") {
+    if (!source.accepted) return valuePreview(source.errors) || "Output not accepted";
+    if (source.publication_protocol) {
+      return valuePreview(source.output?.message ?? source.output?.reply?.text);
+    }
+    return "Structured output accepted";
+  }
+  if (kind === "error") return valuePreview(source.message) || "Execution failed";
   if (kind === "compaction") {
     const before = source.budget?.estimated_tokens_before ?? source.budget?.estimated_before;
     const after = source.budget?.estimated_tokens_after ?? source.budget?.estimated_after;
-    return before != null && after != null ? `${before} → ${after} Token` : "上下文压缩事件";
+    return before != null && after != null ? `${before} → ${after} Token` : "Context compaction";
   }
-  if (source.type === "tool_result") return valuePreview(source.result ?? source.content) || "工具已返回";
-  return valuePreview(source.args) || "等待参数或结果";
+  if (source.type === "tool_result") return valuePreview(redactTrajectoryValue(source.result ?? source.content)) || "Tool returned";
+  return valuePreview(redactTrajectoryValue(source.args)) || "Waiting for arguments or result";
 }
 
 function newEvent({
@@ -117,7 +126,7 @@ function newEvent({
 }
 
 function partKind(part, toolName) {
-  if (toolName === "write_plan") return "planning";
+  if (toolName === "write_plan" && !["ui", "mcp"].includes(part?.source)) return "planning";
   if (part?.type === "tool_call" && (part?.widget || part?.metadata?.widget)) return "deferred";
   return "tool";
 }
@@ -146,12 +155,31 @@ function assistantLoopPayload(parts = []) {
 
 function assistantLoopSummary(payload = {}, status = "running") {
   if (payload.content) return valuePreview(payload.content);
-  if (payload.tool_calls?.length) return `调用 ${payload.tool_calls.length} 个工具`;
-  if (!payload.thinking) return "模型响应";
-  if (status === "failed") return "模型响应失败";
-  if (status === "interrupted") return "已停止";
-  if (status === "completed") return "模型思考";
-  return "模型处理中";
+  if (payload.tool_calls?.length) {
+    const count = payload.tool_calls.length;
+    return `${count} tool call${count === 1 ? "" : "s"}`;
+  }
+  if (!payload.thinking) return "Model response";
+  if (status === "failed") return "Model response failed";
+  if (status === "interrupted") return "Interrupted";
+  if (status === "completed") return "Model reasoning";
+  return "Model processing";
+}
+
+function appendTextPreview(preview, delta, limit = 180) {
+  // Match valuePreview's whitespace/trim/slice behavior without re-reading an
+  // append-only answer. Once its normalized prefix overflows it cannot shrink.
+  if (!preview.overflow) for (let index = 0; index < delta.length; index += 1) {
+    const character = delta[index];
+    if (/\s/.test(character)) {
+      if (preview.text.length) preview.space = true;
+      continue;
+    }
+    if (preview.space) { preview.text += " "; preview.space = false; }
+    preview.text += character;
+    if (preview.text.length > limit) { preview.overflow = true; break; }
+  }
+  return preview.overflow ? `${preview.text.slice(0, limit)}…` : preview.text;
 }
 
 function assistantMessageKey(event) {
@@ -230,8 +258,8 @@ function applyExecutionTiming(row, timing, kind) {
   row.duration_ms = timing.duration_ms;
   row.duration_source = "execution";
   row.duration_description = kind === "model_request"
-    ? "模型请求耗时：包含等待响应和完整流式生成，不含工具执行；采用服务端单调时钟。"
-    : "工具执行耗时：服务端实际执行区间，不含模型生成参数、人工等待及事件入库。并行工具耗时不能直接相加。";
+    ? "Server-measured model request time, including response wait and streaming."
+    : "Server-measured tool execution time. Parallel calls can overlap.";
   return true;
 }
 
@@ -411,11 +439,20 @@ export function buildTrajectory(history = {}) {
   let inputSequence = 0;
   const projected = [];
   const tools = new Map();
+  const remoteCompletions = new Map();
   const outputCallsByRun = new Map();
   const assistantMessages = new Map();
   const automaticTitles = new Map();
   const outputFacts = items.filter(event => event.event_type === "output/attempt");
+  let latestUser = null;
   for (const event of items) {
+    if (event.event_type === "remote_agent/invocation") {
+      const { tool_call_id, run_id } = event.payload || {};
+      if (event.status === "completed" && tool_call_id && run_id) {
+        remoteCompletions.set(JSON.stringify([run_id, tool_call_id]), event);
+      }
+      continue;
+    }
     if (event.event_type === "output/attempt") {
       projected.push(projectOutputAttempt(event, inputSequence, items));
       continue;
@@ -471,6 +508,7 @@ export function buildTrajectory(history = {}) {
       input.event_type = event.event_type;
       input.timestamp_end = event.updated_at || input.timestamp;
       projected.push(input);
+      if (prompt) latestUser = input;
     }
 
     if (event.event_type === "assistant/message") {
@@ -485,7 +523,11 @@ export function buildTrajectory(history = {}) {
       parts.forEach((part, offset) => {
         group.parts.set(Number.isInteger(source?.part_index) ? source.part_index + offset : offset, part);
       });
-      const assistantParts = [...group.parts.entries()].sort(([left], [right]) => left - right).map(([, part]) => {
+      const output = message.metadata?.deepagent_output;
+      const publication = output?.publication_protocol;
+      const assistantParts = [...group.parts.entries()].sort(([left], [right]) => left - right).map(([index, part]) => {
+        if (publication && output.part_indices?.includes(index)) return null;
+        if (publication && message.metadata.deepagent_dispatch?.rejected && part?.part_kind === "text") return null;
         if (part?.part_kind === "thinking") return { type: "thinking", content: part.content || "" };
         if (part?.part_kind === "text") return { type: "text", content: part.content || "" };
         if (toolRole(part) === "call") return {
@@ -499,35 +541,38 @@ export function buildTrajectory(history = {}) {
         };
         return null;
       }).filter(Boolean);
-      const assistantPayload = assistantLoopPayload(assistantParts);
-      // A tool-only response is still a persisted assistant decision. Keep one
-      // row per SDK message, including empty thinking, rather than hiding facts.
-      const assistant = newEvent({
-        id: group.event.event_id,
-        kind: "assistant",
-        inputSequence: Math.max(inputSequence, 1),
-        runId: event.run_id || message.run_id || null,
-        timestamp: group.event.created_at || message.timestamp || null,
-        status: event.status || message.state || "completed",
-        part: { content: assistantPayload.content },
-        payload: assistantPayload,
-        native: { ...messageMeta(message), event_ids: [...group.eventIds] },
-      });
-      assistant.summary = assistantLoopSummary(assistantPayload, assistant.status);
-      assistant.sequence = Number(group.event.sequence || 0);
-      assistant.turn_id = event.turn_id || null;
-      assistant.event_type = event.event_type;
-      // Writes happen after generation; updated_at can change again at Run
-      // finalization. Neither timestamp measures a model request.
-      assistant.timestamp_end = null;
-      if (!applyExecutionTiming(assistant, message.metadata?.deepagent_timing, "model_request")) {
-        applyLegacyInterval(assistant, message.timestamp, group.event.created_at,
-          "旧记录估算：供应商响应时间戳至首次入库，可能缺少首字节前等待并包含入库等待，不是精确模型请求耗时。未使用更新时间。");
-      }
-      if (group.row) Object.assign(group.row, assistant);
-      else {
-        group.row = assistant;
-        projected.push(assistant);
+      // The accepted publication result already has its own Output row.
+      if (assistantParts.length || !publication) {
+        const assistantPayload = assistantLoopPayload(assistantParts);
+        // A tool-only response is still a persisted assistant decision. Keep one
+        // row per SDK message, including empty thinking, rather than hiding facts.
+        const assistant = newEvent({
+          id: group.event.event_id,
+          kind: "assistant",
+          inputSequence: Math.max(inputSequence, 1),
+          runId: event.run_id || message.run_id || null,
+          timestamp: group.event.created_at || message.timestamp || null,
+          status: event.status || message.state || "completed",
+          part: { content: assistantPayload.content },
+          payload: assistantPayload,
+          native: { ...messageMeta(message), event_ids: [...group.eventIds] },
+        });
+        assistant.summary = assistantLoopSummary(assistantPayload, assistant.status);
+        assistant.sequence = Number(group.event.sequence || 0);
+        assistant.turn_id = event.turn_id || null;
+        assistant.event_type = event.event_type;
+        // Writes happen after generation; updated_at can change again at Run
+        // finalization. Neither timestamp measures a model request.
+        assistant.timestamp_end = null;
+        if (!applyExecutionTiming(assistant, message.metadata?.deepagent_timing, "model_request")) {
+          applyLegacyInterval(assistant, message.timestamp, group.event.created_at,
+            "Estimate from the provider response timestamp to the first saved event.");
+        }
+        if (group.row) Object.assign(group.row, assistant);
+        else {
+          group.row = assistant;
+          projected.push(assistant);
+        }
       }
     }
 
@@ -537,6 +582,7 @@ export function buildTrajectory(history = {}) {
       if (!role || !callId) return;
       if (part.part_kind === "retry-prompt" && !part.tool_name && message.metadata?.deepagent_output_budget) return;
       const outputMetadata = message.metadata?.deepagent_output;
+      const wire = message.metadata?.deepagent_wire_names?.[String(offset)];
       const absolutePartIndex = Number(event.payload?.source?.part_index || 0) + offset;
       const outputCallKey = `${event.run_id || ""}:${callId}`;
       if (role === "call") outputCallsByRun.set(outputCallKey,
@@ -544,7 +590,7 @@ export function buildTrajectory(history = {}) {
         || outputFacts.some(fact => outputSourceMatches(fact, event, part, offset)));
       // SDK RetryPrompt may omit tool_name. Pair it with the nearest actual call
       // in this Run, rather than creating a normal tool or guessing by its name.
-      if (outputCallsByRun.get(outputCallKey)) return;
+      if (typeof wire === "string" ? wire.startsWith("output__") : outputCallsByRun.get(outputCallKey)) return;
       const toolName = part.tool_name || null;
       const sameId = tools.get(callId) || [];
       const matching = sameId.filter(row => sameTool(row, callId, toolName));
@@ -559,7 +605,7 @@ export function buildTrajectory(history = {}) {
           tool_call_id: callId,
           args: part.args ?? null,
           result: part.content ?? null,
-          source: toolSource(toolName),
+          source: typeof wire === "string" ? wire.split("__", 1)[0] : toolSource(toolName),
           widget: part.metadata?.widget || null,
           metadata: part.metadata || null,
         };
@@ -581,7 +627,7 @@ export function buildTrajectory(history = {}) {
         const dispatch = message.metadata?.deepagent_dispatch;
         const partIndex = Number(event.payload?.source?.part_index || 0) + offset;
         tool.dispatched = !(dispatch?.rejected === true && (dispatch.not_dispatched_part_indices || []).includes(partIndex));
-        if (!tool.dispatched) { tool.status = "failed"; tool.summary = "未分发：模型响应被拒绝"; }
+        if (!tool.dispatched) { tool.status = "failed"; tool.summary = "Not dispatched because the model response was rejected"; }
         tool.timestamp_end = event.updated_at || tool.timestamp;
         sameId.push(tool);
         tools.set(callId, sameId);
@@ -598,9 +644,9 @@ export function buildTrajectory(history = {}) {
         tool.result = redactTrajectoryValue(jsonClone({
           result: part.content ?? null,
           outcome: part.outcome || null,
-          plan: toolName === "write_plan" ? metadata.deepagent_plan || null : null,
+          plan: tool.kind === "planning" ? metadata.deepagent_plan || null : null,
           artifacts: toolResultArtifacts(metadata),
-          metadata: { code_mode: metadata.code_mode, nested_calls: metadata.nested_calls, ptc_diagnostics: metadata.ptc_diagnostics, ...(toolName === "view_image" ? { view_image: metadata.view_image } : {}) },
+          metadata: { code_mode: metadata.code_mode, nested_calls: metadata.nested_calls, ptc_diagnostics: metadata.ptc_diagnostics, remote_agent: metadata.remote_agent, ...(toolName === "view_image" ? { view_image: metadata.view_image } : {}) },
         }));
         tool.native = { ...(tool.native || {}), result_event_id: event.event_id, result_part_offset: offset };
         tool.timestamp_end = null;
@@ -608,11 +654,35 @@ export function buildTrajectory(history = {}) {
         if (!applyExecutionTiming(tool, metadata.deepagent_timing, "tool_execution")
           && tool.kind !== "deferred" && !isDeferredResume) {
           applyLegacyInterval(tool, tool.timestamp, part.timestamp,
-            "旧记录估算：工具调用入库至结果产生，包含调度等待，不是精确执行耗时。未使用更新时间。");
+            "Estimate from the saved tool call to its result, including scheduling time.");
         }
-        tool.summary = tool.dispatched === false ? "未分发：模型响应被拒绝" : eventSummary(tool.kind, { type: "tool_result", result: part.content });
+        tool.summary = tool.dispatched === false
+          ? "Not dispatched because the model response was rejected"
+          : eventSummary(tool.kind, { type: "tool_result", result: part.content });
       }
     });
+  }
+  for (const event of remoteCompletions.values()) {
+    const invocation = event.payload;
+    const tool = (tools.get(invocation.tool_call_id) || []).find(row =>
+      row.run_id === invocation.run_id && ["delegate_task", "answer_task"].includes(row.label)
+      && row.dispatched !== false && row.native?.call_event_id);
+    if (!tool) continue;
+    const files = Object.entries(invocation.files || {})
+      .filter(([key]) => !invocation.file_message_ids || invocation.file_message_ids[key] === (invocation.message_id || ""))
+      .map(([, file]) => file);
+    const result = {
+      task_id: invocation.id, status: "completed", result: invocation.text, files, warnings: invocation.warnings || [],
+    };
+    tool.status = "completed";
+    tool.summary = eventSummary(tool.kind, { type: "tool_result", result });
+    tool.result = redactTrajectoryValue(jsonClone({
+      ...tool.result, result, outcome: "success", artifacts: toolResultArtifacts({ generated_files: files }),
+      metadata: { ...tool.result?.metadata, remote_agent: {
+        id: invocation.id, name: invocation.name, protocol: invocation.protocol, status: "completed",
+      } },
+    }));
+    tool.native = { ...tool.native, result_event_id: event.event_id };
   }
   // Pending records describe the pause at persistence time. Resolve only calls
   // belonging to this response, not an unrelated later run with the same ID.
@@ -620,6 +690,12 @@ export function buildTrajectory(history = {}) {
   for (const tool of projected.filter((row) => TOOL_KINDS.has(row.kind))) {
     const id = tool.native?.call_event_id;
     if (!id) continue;
+    if (tool.status === "pending" && !tool.native.result_event_id && deferredSources.has(id)
+      && latestUser && latestUser.sequence > tool.sequence) {
+      tool.status = "interrupted";
+      tool.outcome = "skipped";
+      tool.timestamp_end = null;
+    }
     const group = toolsByCallEvent.get(id) || [];
     group.push(tool);
     toolsByCallEvent.set(id, group);
@@ -627,8 +703,15 @@ export function buildTrajectory(history = {}) {
   for (const row of projected) {
     if (row.kind !== "assistant" || row.status !== "pending" || !row.payload?.tool_calls?.length) continue;
     const matching = (row.native?.event_ids || [row.id]).flatMap((id) => toolsByCallEvent.get(id) || []);
-    if (row.payload.tool_calls.every((call) => matching.some((tool) => tool.tool_call_id === call.tool_call_id && tool.native?.result_event_id))) {
-      row.status = "completed";
+    if (row.payload.tool_calls.every((call) => matching.some((tool) =>
+      tool.tool_call_id === call.tool_call_id && (tool.native?.result_event_id || tool.outcome === "skipped")
+    ))) {
+      if (matching.some((tool) => tool.outcome === "skipped")) {
+        row.status = "interrupted";
+        row.outcome = "skipped";
+      } else {
+        row.status = "completed";
+      }
     }
   }
   return projected.sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0));
@@ -685,9 +768,9 @@ function liveLabel(type, data) {
 
 function liveSummary(type, data) {
   if (["thinking", "text"].includes(type)) return valuePreview(data?.delta);
-  if (type === "tool_result") return valuePreview(data?.result) || "工具已返回";
-  if (type === "tool_call_removed") return data?.reason || "调用已撤回";
-  return valuePreview(data?.message || data?.args) || type;
+  if (type === "tool_result") return valuePreview(redactTrajectoryValue(data?.result)) || "Tool returned";
+  if (type === "tool_call_removed") return data?.reason || "Tool call withdrawn";
+  return valuePreview(redactTrajectoryValue(data?.message || data?.args)) || type;
 }
 
 function formatJson(value) {
@@ -745,10 +828,12 @@ function isPythonCodeEvent(event) {
 }
 
 function eventKindClass(event) {
+  if (event?.kind === "tool" && isRemoteAgentToolEvent({ tool: event.label, metadata: event.result?.metadata, source: event.source })) return "remote-agent";
   return isRunCodeEvent(event) ? "code" : event?.kind;
 }
 
 function eventKindBadge(event) {
+  if (eventKindClass(event) === "remote-agent") return "远程";
   return isRunCodeEvent(event) ? "PTC" : kindBadge(event?.kind);
 }
 
@@ -764,6 +849,15 @@ function statusLabel(status) {
     interrupted: "Interrupted",
     failed: "Failed",
   }[status] || status;
+}
+
+function renderEventStatus(event) {
+  if (event.outcome === "skipped") return '<em class="interrupted">Skipped</em>';
+  if (event.kind === "output" && event.payload?.publication_protocol && event.payload.accepted) {
+    if (event.payload.output?.status === "input_required") return '<em class="pending">Input Required</em>';
+  }
+  const label = event.kind === "output" && event.status === "failed" ? "Error" : statusLabel(event.status);
+  return `<em class="${escapeHtml(event.status)}">${escapeHtml(label)}</em>`;
 }
 
 function renderFact(label, value, { mono = false } = {}) {
@@ -796,11 +890,11 @@ function durationLabel(value) {
 function renderRowTime(event, clockMode) {
   if (clockMode !== "duration") return `<time>${escapeHtml(formatTime(event.timestamp))}</time>`;
   const duration = eventDuration(event);
-  if (duration == null) return '<span class="trajectory-duration unknown" title="没有可确认的执行耗时；瞬时事件和人工等待不计为0秒">—</span>';
+  if (duration == null) return '<span class="trajectory-duration unknown" title="Execution duration unavailable">—</span>';
   const band = duration <= 5000 ? "fast" : duration <= 10000 ? "steady" : duration <= 20000 ? "elevated" : "slow";
-  const range = {fast:"≤5秒",steady:"5–10秒",elevated:"10–20秒",slow:">20秒"}[band];
+  const range = {fast:"≤5 s",steady:"5–10 s",elevated:"10–20 s",slow:">20 s"}[band];
   const label = durationLabel(duration);
-  return `<span class="trajectory-duration ${band}" title="${escapeHtml(`${range}；${event.duration_description || "服务端记录的耗时"}`)}"><i aria-hidden="true"></i>${escapeHtml(label)}</span>`;
+  return `<span class="trajectory-duration ${band}" title="${escapeHtml(`${range} · ${event.duration_description || "Server-measured duration"}`)}"><i aria-hidden="true"></i>${escapeHtml(label)}</span>`;
 }
 
 function renderMarkdown(content, emptyMessage = "No content in this event.") {
@@ -866,19 +960,7 @@ function renderJumpLink({ eventId, iconName, text, detail = "" }) {
   return `<button type="button" class="trajectory-summary-link"${attributes}>${icon(iconName)}<span><strong>${escapeHtml(text)}</strong>${detail ? `<small>${escapeHtml(detail)}</small>` : ""}</span>${eventId ? icon("arrow-up-right") : ""}</button>`;
 }
 
-function renderInputSummary(event, _events, attachmentUrl = attachmentDownloadUrl) {
-  const contextRefs = Array.isArray(event.payload?.context_refs) ? event.payload.context_refs : [];
-  const attachments = Array.isArray(event.payload?.attachments) ? event.payload.attachments : [];
-  const contextLinks = contextRefs.map((reference, index) => {
-    const safe = redactTrajectoryValue(reference);
-    const label = safe?.label || safe?.key || safe?.type || "Unnamed context";
-    const identity = `${index}:${safe?.key || ""}`;
-    const type = [safe?.type, safe?.schema_version ? `v${safe.schema_version}` : null].filter(Boolean).join(" · ");
-    return `<details class="trajectory-context-reference" data-trajectory-context="${escapeHtml(identity)}">
-      <summary class="trajectory-context-heading">${icon("braces")}<span class="trajectory-context-copy"><strong><span class="trajectory-context-index">${index + 1}.</span> ${escapeHtml(label)}</strong><small>${escapeHtml(type)}</small>${safe?.key ? `<code>${escapeHtml(safe.key)}</code>` : ""}</span>${icon("chevron-right")}</summary>
-      <div class="trajectory-context-content">${renderJsonBlock(safe, { expanded: true })}</div>
-    </details>`;
-  }).join("");
+function renderAttachmentRows(attachments, attachmentUrl) {
   const attachmentLinks = attachments.map((attachment) => {
     const href = attachmentUrl(attachment);
     const name = attachment.name || attachment.id || "Unnamed attachment";
@@ -892,11 +974,27 @@ function renderInputSummary(event, _events, attachmentUrl = attachmentDownloadUr
       : renderJumpLink({ eventId: null, iconName: "paperclip", text: name, detail });
     return `<div class="trajectory-attachment-row">${main}${download}</div>`;
   }).join("");
+  return attachmentLinks ? `<div class="trajectory-summary-links">${attachmentLinks}</div>` : "";
+}
+
+function renderInputSummary(event, _events, attachmentUrl = attachmentDownloadUrl) {
+  const contextRefs = Array.isArray(event.payload?.context_refs) ? event.payload.context_refs : [];
+  const attachments = Array.isArray(event.payload?.attachments) ? event.payload.attachments : [];
+  const contextLinks = contextRefs.map((reference, index) => {
+    const safe = redactTrajectoryValue(reference);
+    const label = safe?.label || safe?.key || safe?.type || "Unnamed context";
+    const identity = `${index}:${safe?.key || ""}`;
+    const type = [safe?.type, safe?.schema_version ? `v${safe.schema_version}` : null].filter(Boolean).join(" · ");
+    return `<details class="trajectory-context-reference" data-trajectory-context="${escapeHtml(identity)}">
+      <summary class="trajectory-context-heading">${icon("braces")}<span class="trajectory-context-copy"><strong><span class="trajectory-context-index">${index + 1}.</span> ${escapeHtml(label)}</strong><small>${escapeHtml(type)}</small>${safe?.key ? `<code>${escapeHtml(safe.key)}</code>` : ""}</span>${icon("chevron-right")}</summary>
+      <div class="trajectory-context-content">${renderJsonBlock(safe, { expanded: true })}</div>
+    </details>`;
+  }).join("");
   return `${renderSummarySection(
     "Preview",
     renderMarkdown(event.payload?.content, "This message only contains attachments or context references."),
     { targetTab: "preview", className: "trajectory-summary-preview is-scroll" },
-  )}${attachmentLinks ? renderSummarySection("Attachments", `<div class="trajectory-summary-links">${attachmentLinks}</div>`) : ""}
+  )}${renderSummarySection("Attachments", renderAttachmentRows(attachments, attachmentUrl))}
     ${contextLinks ? renderSummarySection("Context references", `<div class="trajectory-summary-links">${contextLinks}</div>`) : ""}`;
 }
 
@@ -928,9 +1026,9 @@ function renderAssistantTools(event, events) {
   }).join("")}</div>`;
 }
 
-function renderAssistantSummary(event, events) {
+function renderAssistantSummary(event, events, _attachmentUrl, previewText) {
   const preview = `${renderThinking(event.payload?.thinking)}${renderMarkdown(
-    event.payload?.content,
+    previewText ?? event.payload?.content,
     event.payload?.thinking ? "No text output yet." : "No text in this model response.",
   )}`;
   return `${renderSummarySection(
@@ -969,15 +1067,13 @@ function localFileDownload(value) {
 
 function renderLocalFileDownload(value, artifacts = [], imageOptions = {}) {
   if (findViewImageResult(value, imageOptions)) return "";
+  if (imageOptions.toolName === "remote_task_result" && imageOptions.metadata?.remote_agent) return "";
   if (artifacts.some((item) => item?.kind === "sandbox_output")) return "";
   const file = localFileDownload(value);
   if (!file || artifacts.some((item) => (item?.file_id || item?.artifact_id) === file.fileId)) return "";
   const path = `api/v1/local-files/${encodeURIComponent(file.fileId)}/download`;
   const href = imageOptions.attachmentUrl?.({ id: file.fileId, name: file.fileName }) || globalThis.serviceUrl?.(path) || `/${path}`;
-  return renderSummarySection(
-    "Files",
-    `<a class="trajectory-summary-link local-file-download" href="${escapeHtml(href)}" download>${icon("download")}<span><strong>${escapeHtml(file.fileName)}</strong></span></a>`,
-  );
+  return `<a class="trajectory-summary-link local-file-download" href="${escapeHtml(href)}" download>${icon("download")}<span><strong>${escapeHtml(file.fileName)}</strong></span></a>`;
 }
 
 function formatFileBytes(value) {
@@ -1011,27 +1107,62 @@ function renderGeneratedFiles(artifacts, attachmentUrl) {
       : "";
     return `<div class="generated-file-item"><span class="generated-file-icon">${icon("file-output")}</span><span class="generated-file-copy">${label}<code title="${escapeHtml(fileId)}">${escapeHtml(fileId)}</code></span><span class="generated-file-actions">${download}<button type="button" data-copy-file-id="${escapeHtml(fileId)}" title="复制 File ID">${icon("copy")}</button></span></div>`;
   }).join("");
-  return rows ? renderSummarySection("工具产物", `<div class="generated-file-list">${rows}</div>`) : "";
+  return rows ? `<div class="generated-file-list">${rows}</div>` : "";
+}
+
+function toolInputAttachments(event, events) {
+  if (eventKindClass(event) !== "remote-agent" || !["delegate_task", "answer_task"].includes(event.label)) return [];
+  let args = event.payload?.args;
+  if (typeof args === "string") {
+    try { args = JSON.parse(args); } catch { return []; }
+  }
+  if (!Array.isArray(args?.attachments)) return [];
+  const selected = new Map(args.attachments.filter(ref => typeof ref?.id === "string" && ref.id).map(ref => [ref.id, null]));
+  if (!selected.size) return [];
+  for (const row of events) {
+    if (row.id === event.id) break;
+    if (row.kind === "input") {
+      for (const attachment of row.payload?.attachments || []) {
+        if (selected.has(attachment.id)) selected.set(attachment.id, attachment);
+      }
+    }
+    for (const file of row.result?.artifacts || []) {
+      if (selected.get(file.file_id) === null && ["sandbox_output", "document_evidence"].includes(file.kind)) {
+        selected.set(file.file_id, { id: file.file_id, name: file.file_name, mime: file.mime });
+      }
+    }
+  }
+  return [...selected.values()].filter(Boolean);
+}
+
+function renderSummaryCode(value, limit) {
+  return hasMeaningfulValue(value) ? `<p class="trajectory-summary-code">${escapeHtml(valuePreview(value, limit))}</p>` : "";
 }
 
 function renderPayloadResultSections({ payload, result }) {
-  const payloadText = hasMeaningfulValue(payload) ? valuePreview(payload, 280) : null;
-  const resultText = hasMeaningfulValue(result) ? valuePreview(result, 360) : null;
-  return `${payloadText ? renderSummarySection("Input", `<p class="trajectory-summary-code">${escapeHtml(payloadText)}</p>`, { targetTab: "input" }) : ""}
-    ${resultText ? renderSummarySection("Result", `<p class="trajectory-summary-code">${escapeHtml(resultText)}</p>`, { targetTab: "result" }) : ""}`;
+  return renderSummarySection("Input", renderSummaryCode(payload, 280), { targetTab: "input" })
+    + renderSummarySection("Result", renderSummaryCode(result, 360), { targetTab: "result" });
 }
 
-function renderToolSummary(event, _events, attachmentUrl = attachmentDownloadUrl) {
+function renderToolResultFiles(event, attachmentUrl) {
   const result = toolResultValue(event);
   const artifacts = Array.isArray(event.result?.artifacts) ? event.result.artifacts : [];
+  return renderGeneratedFiles(artifacts, attachmentUrl)
+    + renderLocalFileDownload(result, artifacts, { toolName: event.label, metadata: event.result?.metadata, attachmentUrl });
+}
+
+function renderToolSummary(event, events, attachmentUrl = attachmentDownloadUrl) {
+  const result = toolResultValue(event);
   // Tool event labels are projected from the actual tool name, never its result.
   const imageOptions = { toolName: event.label, metadata: event.result?.metadata, attachmentUrl };
   const imageResults = renderViewImageResult(result, imageOptions);
   const imagePreview = imageResults ? "" : renderWebImagePreview(result, { className: "trajectory-web-image-preview" });
-  return `${imageResults ? renderSummarySection("查看图片", imageResults) : ""}${imagePreview ? renderSummarySection("Web image", imagePreview) : ""}${renderGeneratedFiles(artifacts, attachmentUrl)}${renderPayloadResultSections({
-    payload: event.payload?.args ?? event.payload,
-    result,
-  })}${renderLocalFileDownload(result, artifacts, imageOptions)}`;
+  const input = renderSummaryCode(event.payload?.args ?? event.payload, 280)
+    + renderAttachmentRows(toolInputAttachments(event, events), attachmentUrl);
+  const output = renderSummaryCode(result, 360) + renderToolResultFiles(event, attachmentUrl);
+  return (imageResults ? renderSummarySection("Images", imageResults) : renderSummarySection("Web image", imagePreview))
+    + renderSummarySection("Input", input, { targetTab: "input", className: "trajectory-tool-section" })
+    + renderSummarySection("Result", output, { targetTab: "result", className: "trajectory-tool-section" });
 }
 
 function planSnapshot(event) {
@@ -1113,10 +1244,10 @@ function renderOutputSummary(event) {
     + (event.payload?.errors?.length ? renderSummarySection("Validation", renderJsonBlock(event.payload.errors)) : "");
 }
 
-function renderSummary(event, events, attachmentUrl) {
+function renderSummary(event, events, attachmentUrl, previewText) {
   const renderer = SUMMARY_RENDERERS[event.kind];
   const primary = renderer
-    ? renderer(event, events, attachmentUrl)
+    ? renderer(event, events, attachmentUrl, previewText)
     : renderSummarySection("Event", `<p class="trajectory-summary-lead">${escapeHtml(event.summary || event.label)}</p>`);
   return `<section class="trajectory-summary">${renderMeta(event)}<div class="trajectory-summary-primary">${primary}</div></section>`;
 }
@@ -1156,7 +1287,7 @@ function highlightPython(code) {
   return escapeHtml(code);
 }
 
-function renderRunCode(event, line = null, callName = null, compact = false) {
+function renderRunCode(event, line = null, callName = null, compact = false, range = null) {
   const code = runCodeSource(event);
   if (!code) return `<p class="trajectory-summary-empty">No source code in this call.</p>`;
   const lines = code.split("\n");
@@ -1165,13 +1296,52 @@ function renderRunCode(event, line = null, callName = null, compact = false) {
   const callPattern = escapedName ? new RegExp(`(?:^|[^\\w])${escapedName}\\s*\\(`) : null;
   const matchingLines = callPattern && !exactLine
     ? lines.map((text, index) => callPattern.test(text) ? index + 1 : null).filter(Boolean) : [];
-  const displayed = exactLine || callName
+  let offset = 0;
+  const displayed = range ? lines.map((text) => {
+    const start = Math.max(0, range.start - offset);
+    const end = Math.min(text.length, range.end - offset);
+    offset += text.length + 1;
+    const selected = end > start;
+    const content = selected
+      ? `${highlightPython(text.slice(0, start))}<mark class="trajectory-code-call">${highlightPython(text.slice(start, end))}</mark>${highlightPython(text.slice(end))}`
+      : highlightPython(text);
+    return `<span class="trajectory-code-line${selected ? " is-call-match" : ""}">${content || " "}</span>`;
+  }).join("\n") : exactLine || callName
     ? lines.map((text, index) => `<span class="trajectory-code-line${index + 1 === exactLine ? " is-error" : matchingLines.includes(index + 1) ? " is-call-match" : ""}">${highlightPython(text) || " "}</span>`).join("\n")
     : highlightPython(code);
   return `<section class="trajectory-code-view">
     ${compact ? "" : `<header><span>Python</span><button type="button" data-copy-run-code>${icon("copy")}Copy</button></header>`}
     <pre><code class="hljs language-python">${displayed}</code></pre>
   </section>`;
+}
+
+export function renderPtcSource(event, step, events = []) {
+  const location = step?.source_location;
+  if (!location) return renderRunCode(event, step?.source_line, step?.tool_name, true);
+  // A function may have been defined by an earlier feed in the same Run.
+  // Resolve its existing outer call rather than copying source into metadata.
+  const sourceEvent = location.call_id === event.tool_call_id ? event : events.find(item =>
+    isRunCodeEvent(item) && item.tool_call_id === location.call_id && item.run_id === event.run_id);
+  if (!sourceEvent) return '<p class="trajectory-summary-empty">源码所在的先前 PTC 调用尚未加载，无法精确定位。</p>';
+  const code = runCodeSource(sourceEvent);
+  const bytes = new TextEncoder().encode(code);
+  if (!Number.isSafeInteger(location.start) || !Number.isSafeInteger(location.end)
+      || location.start < 0 || location.end <= location.start || location.end > bytes.length) {
+    return '<p class="trajectory-summary-empty">源码定位信息不可用。</p>';
+  }
+  try {
+    // Monty uses UTF-8 byte offsets; JS string offsets use UTF-16 code units.
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    const before = decoder.decode(bytes.subarray(0, location.start));
+    const selected = decoder.decode(bytes.subarray(location.start, location.end));
+    const line = before.split("\n").length;
+    const endLine = line + selected.split("\n").length - 1;
+    const label = line === endLine ? `第 ${line} 行` : `第 ${line}–${endLine} 行`;
+    return `<p class="trajectory-ptc-note">源码：${label}${sourceEvent !== event ? "（先前 PTC 调用）" : ""}</p>`
+      + renderRunCode(sourceEvent, null, null, true, { start: before.length, end: before.length + selected.length });
+  } catch {
+    return '<p class="trajectory-summary-empty">源码定位信息不可用。</p>';
+  }
 }
 
 // Tabs describe semantic projections, not HTTP bodies or database columns.
@@ -1210,20 +1380,21 @@ function renderRaw(event) {
   return `<pre class="trajectory-raw">${escapeHtml(content || "None")}</pre>`;
 }
 
-function renderPreview(event) {
+function renderPreview(event, previewText) {
   if (event.kind === "assistant") {
-    return `<section class="trajectory-preview">${renderThinking(event.payload?.thinking)}${renderMarkdown(event.payload?.content, "No text in this model response.")}</section>`;
+    return `<section class="trajectory-preview">${renderThinking(event.payload?.thinking)}${renderMarkdown(previewText ?? event.payload?.content, "No text in this model response.")}</section>`;
   }
   return `<section class="trajectory-preview">${renderMarkdown(event.payload?.content, "No text in this user message.")}</section>`;
 }
 
-function renderDetail(event, activeTab = "summary", events = [], attachmentUrl, ptcState = {}) {
+function renderDetail(event, activeTab = "summary", events = [], attachmentUrl = attachmentDownloadUrl, ptcState = {}, previewText, files) {
   if (!event) return `<div class="trajectory-detail-empty">${icon("scan-search")}<p>Select an event to inspect</p></div>`;
   const tabs = detailTabs(event);
   const allowedTabs = new Set(tabs.map(([id]) => id));
   if (!allowedTabs.has(activeTab)) activeTab = "summary";
-  let content = renderSummary(event, events, attachmentUrl);
+  let content = activeTab === "summary" ? renderSummary(event, events, attachmentUrl, previewText) : "";
   if (["input", "message", "event"].includes(activeTab)) content = renderJsonBlock(event.payload);
+  if (activeTab === "input" && event.kind === "tool") content += renderAttachmentRows(toolInputAttachments(event, events), attachmentUrl);
   if (activeTab === "event" && event.kind === "title" && event.native?.event_ids?.length > 1) {
     // These are title lifecycle records, never an HTTP request/response pair.
     content = renderJsonBlock({
@@ -1231,14 +1402,23 @@ function renderDetail(event, activeTab = "summary", events = [], attachmentUrl, 
       latest: { event_id: event.native.event_ids.at(-1), payload: event.native.title_result || event.payload },
     });
   }
-  if (activeTab === "result") content = renderJsonBlock(event.result);
-  if (activeTab === "output" && event.kind === "output") content = event.candidate_found
-    ? '<div data-structured-output-detail></div>' : '<p class="trajectory-summary-empty">Original candidate unavailable.</p>';
-  if (activeTab === "preview") content = renderPreview(event);
+  if (activeTab === "result") {
+    content = renderJsonBlock(event.result);
+    if (event.kind === "tool") content += renderToolResultFiles(event, attachmentUrl);
+  }
+  if (activeTab === "output" && event.kind === "output") {
+    content = event.candidate_found
+      ? '<div data-structured-output-detail></div>' : '<p class="trajectory-summary-empty">Original candidate unavailable.</p>';
+    content += renderReplyFileCards(files, { attachmentUrl });
+  }
+  if (activeTab === "preview") content = renderPreview(event, previewText);
+  if (event.kind === "assistant" && ["summary", "preview"].includes(activeTab)) {
+    content += renderReplyFileCards(files, { attachmentUrl });
+  }
   if (activeTab === "raw") content = renderRaw(event);
   if (activeTab === "usage") content = renderTrajectoryUsage(event);
   if (activeTab === "code") content = renderRunCode(event);
-  if (activeTab === "execution") content = renderPtcExecution(event, { ...ptcState, codeView: (step) => renderRunCode(event, step.source_line, step.tool_name, true) });
+  if (activeTab === "execution") content = renderPtcExecution(event, { ...ptcState, codeView: (step) => renderPtcSource(event, step, events) });
   const headerLabel = TOOL_KINDS.has(event.kind) || ["compaction", "title", "output"].includes(event.kind)
     ? event.label
     : event.run_id ? `Run ${String(event.run_id).slice(0, 8)}` : "";
@@ -1247,7 +1427,7 @@ function renderDetail(event, activeTab = "summary", events = [], attachmentUrl, 
     : activeTab === "execution" ? "trajectory-detail-body is-ptc" : "trajectory-detail-body";
   return `
     <header class="trajectory-detail-head">
-      <div><span class="trajectory-kind ${escapeHtml(eventKindClass(event))}">${escapeHtml(eventKindBadge(event))}</span>${headerLabel ? `<strong>${escapeHtml(headerLabel)}</strong>` : ""}<em class="${escapeHtml(event.status)}">${escapeHtml(event.kind === "output" && event.status === "failed" ? "Error" : statusLabel(event.status))}</em></div>
+      <div><span class="trajectory-kind ${escapeHtml(eventKindClass(event))}">${escapeHtml(eventKindBadge(event))}</span>${headerLabel ? `<strong>${escapeHtml(headerLabel)}</strong>` : ""}${renderEventStatus(event)}</div>
     </header>
     <nav class="trajectory-detail-tabs" role="tablist">${tabs.map(([id, label]) => `<button type="button" class="${activeTab === id ? "active" : ""}" data-trajectory-detail-tab="${id}">${label}</button>`).join("")}</nav>
     <div class="${detailBodyClass}">${content}</div>`;
@@ -1271,6 +1451,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   const search = byId("trajectorySearch");
   const exportButton = byId("exportTrajectoryBtn");
   const clockToggle = byId("trajectoryClockToggle");
+  let exportUI = null;
   let exportReady = !readOnly;
   function setExportReady(ready) {
     exportReady = Boolean(ready);
@@ -1278,6 +1459,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       exportButton.disabled = !exportReady;
       exportButton.title = exportReady ? "导出轨迹" : "轨迹完整读取后可导出";
     }
+    exportUI?.sync();
   }
   setExportReady(exportReady);
   if (!root || !list || !detail || !conversationTab || !trajectoryTab) return null;
@@ -1285,10 +1467,16 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   let history = { items: [] };
   let historyEvents = [];
   let liveEvents = [];
+  let replyTextByEvent = new Map();
+  const liveRepliesByRun = new Map();
+  const liveFilesByRun = new Map();
+  let savedFilesByRun = new Map();
   let currentRunId = null;
   const runTurns = new Map();
   let pendingResults = [];
   let liveCalls = new WeakMap();
+  let liveTextPreviews = new WeakMap();
+  let inputCount = null;
   let activeAssistantLoop = null;
   let assistantLoopSequence = 0;
   let selectedId = null;
@@ -1301,6 +1489,13 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   let clockMode = "time";
   let renderQueued = false;
   let renderedSelectedId = null, renderedDetailTab = null;
+  let renderedPtcSourceKey = "";
+  let renderedDetail = null;
+  let renderedClockMode = null;
+  let eventRevision = 0;
+  const eventVersions = new WeakMap();
+  const rowElements = new Map();
+  const touchEvent = (event) => { if (event) eventVersions.set(event, ++eventRevision); };
 
   const allEvents = () => [...historyEvents, ...liveEvents].sort((left, right) => {
     const leftSequence = Number.isFinite(Number(left.sequence)) ? Number(left.sequence) : Number.MAX_SAFE_INTEGER;
@@ -1308,8 +1503,27 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     return leftSequence - rightSequence;
   });
 
+  function currentInputCount() {
+    if (inputCount === null) {
+      const sequences = new Set();
+      for (const events of [historyEvents, liveEvents]) for (const event of events) {
+        const sequence = event.input_sequence;
+        if (sequence) sequences.add(sequence);
+      }
+      inputCount = sequences.size;
+    }
+    return inputCount;
+  }
+
+  function liveAssistantSummary(assistant) {
+    const preview = liveTextPreviews.get(assistant);
+    if (assistant.payload.content && preview) return appendTextPreview(preview, "");
+    return assistantLoopSummary(assistant.payload, assistant.status);
+  }
+
   function selectView(view, { notify = true } = {}) {
     if (disposed) return;
+    if (view !== "trajectory") exportUI?.close();
     const changed = activeView !== view;
     activeView = view === "trajectory" ? "trajectory" : "conversation";
     const trajectoryActive = view === "trajectory";
@@ -1327,6 +1541,8 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       else if (!host) window.DeepAgentConsoleWorkspace?.openInspectorPane?.();
       scheduleRender();
     } else {
+      // The shared inspector may replace its contents in conversation mode.
+      renderedDetail = null;
       if (onInspector) onInspector();
       else if (!host) window.DeepAgentConsoleWorkspace?.renderInspector?.();
     }
@@ -1334,7 +1550,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   }
 
   function scheduleRender() {
-    if (disposed || renderQueued) return;
+    if (disposed || activeView !== "trajectory" || renderQueued) return;
     renderQueued = true;
     animationFrame = window.requestAnimationFrame(() => {
       animationFrame = null;
@@ -1344,23 +1560,77 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   }
 
   function renderRows(events) {
+    const remaining = new Set(events.map((event) => event.id));
+    for (const [id, entry] of rowElements) {
+      if (!remaining.has(id)) { entry.node.remove(); rowElements.delete(id); }
+    }
     if (!events.length) {
-      list.innerHTML = `<div class="trajectory-empty">${icon("route")}<p>当前筛选下没有轨迹。</p></div>`;
+      if (!list.querySelector?.(".trajectory-empty")) {
+        list.innerHTML = `<div class="trajectory-empty">${icon("route")}<p>当前筛选下没有轨迹。</p></div>`;
+        renderIconsWithin(list, window.lucide);
+      }
       return;
     }
-    const html = [];
-    events.forEach((event) => {
+    list.querySelector?.(".trajectory-empty")?.remove();
+    for (const [index, event] of events.entries()) {
       const showToolName = TOOL_KINDS.has(event.kind) || event.kind === "output";
-      const summary = event.summary || "No content";
-      html.push(`<button type="button" class="trajectory-row ${escapeHtml(event.kind)} ${selectedId === event.id ? "active" : ""}" data-trajectory-id="${escapeHtml(event.id)}">
-        <span class="trajectory-row-copy"><span class="trajectory-kind ${escapeHtml(eventKindClass(event))}">${escapeHtml(eventKindBadge(event))}</span>${showToolName ? `<strong>${escapeHtml(event.label)}</strong>` : ""}<span class="trajectory-row-summary">${escapeHtml(summary)}</span></span>
-        <span class="trajectory-row-meta">${renderRowTime(event, clockMode)}<em class="${escapeHtml(event.status)}">${escapeHtml(event.kind === "output" && event.status === "failed" ? "Error" : statusLabel(event.status))}</em></span>
-      </button>`);
-    });
-    list.innerHTML = html.join("");
+      const summary = event.summary || (event.payload?.publication_protocol ? "" : "No content");
+      const html = `<span class="trajectory-row-copy"><span class="trajectory-kind ${escapeHtml(eventKindClass(event))}">${escapeHtml(eventKindBadge(event))}</span>${showToolName ? `<strong>${escapeHtml(event.label)}</strong>` : ""}<span class="trajectory-row-summary">${escapeHtml(summary)}</span></span>
+        <span class="trajectory-row-meta">${renderRowTime(event, clockMode)}${renderEventStatus(event)}</span>`;
+      let entry = rowElements.get(event.id);
+      if (!entry) {
+        const node = document.createElement("button");
+        node.type = "button";
+        node.dataset.trajectoryId = event.id;
+        entry = { node, html: null };
+        rowElements.set(event.id, entry);
+      }
+      const { node } = entry;
+      const className = `trajectory-row ${event.kind}${selectedId === event.id ? " active" : ""}`;
+      if (node.className !== className) node.className = className;
+      if (entry.html !== html) {
+        node.innerHTML = html;
+        entry.html = html;
+        renderIconsWithin(node, window.lucide);
+      }
+      if (list.children[index] !== node) list.insertBefore(node, list.children[index] || null);
+    }
+  }
+
+  function detailContext(event, events) {
+    if (event?.kind !== "assistant" || !event.payload?.tool_calls?.length) return "";
+    // Assistant tool jump links depend on matching tool facts, not unrelated deltas.
+    return event.payload.tool_calls.map((call) => [...events].reverse().find((item) =>
+      (TOOL_KINDS.has(item.kind) || item.kind === "output") && item.tool_call_id === call?.tool_call_id
+      && (event.source === "sse" ? item.run_id === event.run_id
+        : item.kind === "output"
+          ? (item.native?.source_event_ids || []).some(id => (event.native?.event_ids || [event.id]).includes(id))
+          : (event.native?.event_ids || [event.id]).includes(item.native?.call_event_id)))?.id || "").join("\n");
+  }
+
+  function assistantPreviewText(event, events) {
+    if (event?.kind !== "assistant" || !event.payload?.content?.includes("attachment://")) return undefined;
+    const saved = replyTextByEvent.get(event.id);
+    if (saved !== undefined) return saved;
+    const live = liveRepliesByRun.get(event.run_id);
+    if (live === undefined) return undefined;
+    const lastReply = events.findLast(row => row.kind === "assistant" && row.run_id === event.run_id && row.payload?.content);
+    return lastReply === event ? live : undefined;
+  }
+
+  function replyOutputFiles(event, events) {
+    if (!event?.run_id) return undefined;
+    const files = savedFilesByRun.get(event.run_id) || liveFilesByRun.get(event.run_id);
+    if (!files) return undefined;
+    const publication = events.findLast(row => row.kind === "output" && row.run_id === event.run_id
+      && row.payload?.accepted && row.payload?.publication_protocol);
+    if (publication) return event === publication ? files : undefined;
+    return event.kind === "assistant" && events.findLast(row => row.kind === "assistant" && row.run_id === event.run_id) === event
+      ? files : undefined;
   }
 
   function render() {
+    if (disposed || activeView !== "trajectory") return;
     const listScrollTop = list.scrollTop;
     const detailScrollTop = detail.scrollTop;
     const ptcChartScrollTop = detail.querySelector?.(".trajectory-ptc-chart")?.scrollTop || 0;
@@ -1368,26 +1638,38 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     const events = allEvents();
     const stats = trajectoryStats(events);
     const visible = filterTrajectory(events, { mode, query: search?.value });
-    if (clockToggle) {
+    if (clockToggle && renderedClockMode !== clockMode) {
+      renderedClockMode = clockMode;
       clockToggle.innerHTML = `${icon(clockMode === "duration" ? "timer" : "clock-3")}<span>${clockMode === "duration" ? "耗时" : "时间"}</span>`;
       clockToggle.setAttribute("aria-pressed", String(clockMode === "duration"));
       clockToggle.setAttribute("aria-label", clockMode === "duration" ? "切换为时间显示" : "切换为耗时显示");
       clockToggle.title = clockMode === "duration" ? "切换为时间；耗时分档：≤5秒、5–10秒、10–20秒、>20秒；橙色表示较慢，非错误" : "切换为耗时：≤5秒、5–10秒、10–20秒、>20秒";
+      renderIconsWithin(clockToggle, window.lucide);
     }
-    if (byId("trajectoryCallCount")) byId("trajectoryCallCount").textContent = String(stats.calls);
+    const callCount = byId("trajectoryCallCount");
+    if (callCount && callCount.textContent !== String(stats.calls)) callCount.textContent = String(stats.calls);
     const selected = events.find((event) => event.id === selectedId) || visible[0] || null;
     selectedId = selected?.id || null;
     renderRows(visible);
-    if (query("main.chat")?.classList.contains("trajectory-active")) {
+    const previewText = ["summary", "preview"].includes(detailTab) ? assistantPreviewText(selected, events) : undefined;
+    const files = ["summary", "preview", "output"].includes(detailTab) ? replyOutputFiles(selected, events) : undefined;
+    const detailState = [selected, selected ? eventVersions.get(selected) : 0, detailTab, ptcVisible, ptcExpanded, ptcDetailTab, detailContext(selected, events), previewText, files];
+    if (!renderedDetail || detailState.some((value, index) => value !== renderedDetail[index])) {
+      renderedDetail = detailState;
       const codeState = selectedId === renderedSelectedId && detailTab === renderedDetailTab ? globalThis.DeepAgentMarkdown?.captureCodeState?.(detail) : [];
       const openContexts = selectedId === renderedSelectedId && detailTab === renderedDetailTab
         ? new Set(Array.from(detail.querySelectorAll?.("details[data-trajectory-context]") || []).filter(item => item.open).map(item => item.dataset.trajectoryContext)) : new Set();
-      detail.innerHTML = renderDetail(selected, detailTab, events, attachmentUrl, { visible: ptcVisible, expanded: ptcExpanded, detailTab: ptcDetailTab });
+      detail.innerHTML = renderDetail(selected, detailTab, events, attachmentUrl,
+        { visible: ptcVisible, expanded: ptcExpanded, detailTab: ptcDetailTab }, previewText, files);
       for (const item of detail.querySelectorAll?.("details[data-trajectory-context]") || []) item.open = openContexts.has(item.dataset.trajectoryContext);
       const outputHost = detail.querySelector?.("[data-structured-output-detail]");
-      if (outputHost && selected?.candidate_found) mountStructuredOutput(outputHost, { id: selected.id, name: selected.payload.name, output: selected.candidate, failed: !selected.payload.accepted });
+      if (outputHost && selected?.candidate_found) mountStructuredOutput(outputHost, {
+        id: selected.id, name: selected.payload.name, output: selected.candidate, failed: !selected.payload.accepted,
+        publicationProtocol: selected.payload.publication_protocol,
+      });
       globalThis.DeepAgentMarkdown?.restoreCodeState?.(detail, codeState);
       globalThis.DeepAgentMarkdown?.renderDiagrams?.(detail);
+      renderIconsWithin(detail, window.lucide);
       if (selectedId === renderedSelectedId) {
         detail.scrollTop = detailScrollTop;
         const chart = detail.querySelector?.(".trajectory-ptc-chart");
@@ -1395,25 +1677,66 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
         if (chart) chart.scrollTop = ptcChartScrollTop;
         if (jsonPanel) jsonPanel.scrollTop = ptcJsonScrollTop;
       }
+      const sourceKey = detailTab === "execution" && ptcDetailTab === "code" ? `${selectedId}:${ptcExpanded}` : "";
+      if (sourceKey && sourceKey !== renderedPtcSourceKey) {
+        const panel = detail.querySelector?.(".trajectory-ptc-json-panel");
+        const target = panel?.querySelector?.(".trajectory-code-call");
+        if (panel && target) panel.scrollTop += target.getBoundingClientRect().top - panel.getBoundingClientRect().top - 24;
+      }
+      renderedPtcSourceKey = sourceKey;
     }
     list.scrollTop = listScrollTop;
     if (selectedId !== renderedSelectedId) onSelectEvent?.(selected);
     renderedSelectedId = selectedId; renderedDetailTab = detailTab;
-    window.lucide?.createIcons();
   }
 
-  function setHistory(nextHistory, { preserveView = false } = {}) {
+  function clearRenderedTrajectory() {
+    if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
+    animationFrame = null;
+    renderQueued = false;
+    rowElements.clear();
+    list.innerHTML = "";
+    list.scrollTop = 0;
+    // The inspector is shared with conversation metadata. Remove only content
+    // still owned by this controller, never an already-rendered overview.
+    if (activeView === "trajectory" || detail.querySelector?.(".trajectory-detail-head, .trajectory-detail-empty")) {
+      detail.innerHTML = "";
+      detail.scrollTop = 0;
+    }
+    renderedDetail = null;
+    renderedSelectedId = null;
+    renderedDetailTab = null;
+    renderedPtcSourceKey = "";
+  }
+
+  function setHistory(nextHistory, { preserveView = false, preserveLive = false } = {}) {
     const sessionChanged = nextHistory?.session_id && history.session_id
       && nextHistory.session_id !== history.session_id;
-    history = nextHistory || { items: [] };
+    if (sessionChanged) {
+      exportUI?.close();
+      replyTextByEvent.clear();
+      liveRepliesByRun.clear();
+      liveFilesByRun.clear();
+      savedFilesByRun.clear();
+      clearRenderedTrajectory();
+    }
+    if (preserveLive && !sessionChanged) {
+      const merged = new Map((nextHistory.items || []).map(event => [event.event_id, event]));
+      for (const event of history.items || []) merged.set(event.event_id, event);
+      history = { ...nextHistory, items: [...merged.values()].sort((a, b) => a.sequence - b.sequence) };
+    } else {
+      history = nextHistory || { items: [] };
+      liveEvents = [];
+      pendingResults = [];
+      liveCalls = new WeakMap();
+      liveTextPreviews = new WeakMap();
+      runTurns.clear();
+      currentRunId = null;
+      activeAssistantLoop = null;
+    }
     historyEvents = buildTrajectory(history);
-    liveEvents = [];
-    pendingResults = [];
-    liveCalls = new WeakMap();
-    runTurns.clear();
+    inputCount = null;
     for (const event of history.items || []) if (event.run_id && event.turn_id) runTurns.set(event.run_id, event.turn_id);
-    currentRunId = null;
-    activeAssistantLoop = null;
     if (!preserveView || sessionChanged || !historyEvents.some((event) => event.id === selectedId)) {
       selectedId = historyEvents.at(-1)?.id || null;
       selectionPinned = false;
@@ -1423,13 +1746,37 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     scheduleRender();
   }
 
+  function setConversationHistory(items) {
+    const segments = new Map();
+    savedFilesByRun = new Map();
+    for (const item of items) {
+      if (item.run_id && item.status === "completed" && item.output_files?.length) {
+        savedFilesByRun.set(item.run_id, item.output_files);
+      }
+      const sourceId = item.source_event_ids?.[0];
+      if (item.kind !== "assistant_message" || !sourceId || typeof item.text !== "string") continue;
+      const texts = segments.get(sourceId) || [];
+      texts.push(item.text);
+      segments.set(sourceId, texts);
+    }
+    replyTextByEvent = new Map([...segments].map(([sourceId, texts]) => [sourceId, texts.join("\n")]));
+    scheduleRender();
+  }
+
   function reset() {
+    exportUI?.close();
+    replyTextByEvent.clear();
+    liveRepliesByRun.clear();
+    liveFilesByRun.clear();
+    savedFilesByRun.clear();
     setHistory({ items: [] });
     selectView("conversation");
+    clearRenderedTrajectory();
   }
 
   function addUser({ content, attachments = [], context_refs = [], branch_point = null }) {
-    const inputSequence = trajectoryStats(allEvents()).inputs + 1;
+    exportUI?.close();
+    const inputSequence = currentInputCount() + 1;
     const inputEvent = newEvent({
       id: `live-user-${Date.now()}`,
       kind: "input",
@@ -1440,6 +1787,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       payload: { content: content || null, attachments, context_refs, branch_point },
     });
     liveEvents.push(inputEvent);
+    inputCount = null;
     scheduleRender();
   }
 
@@ -1459,6 +1807,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       source: "sse",
     });
     liveEvents.push(activeAssistantLoop);
+    inputCount = null;
     return activeAssistantLoop;
   }
 
@@ -1467,7 +1816,14 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     if (type === "thinking") {
       assistant.payload.thinking = `${assistant.payload.thinking || ""}${payload.delta || ""}` || null;
     } else if (type === "text") {
-      assistant.payload.content = `${assistant.payload.content || ""}${payload.delta || ""}` || null;
+      const delta = `${payload.delta || ""}`;
+      assistant.payload.content = `${assistant.payload.content || ""}${delta}` || null;
+      let preview = liveTextPreviews.get(assistant);
+      if (!preview) {
+        preview = { text: "", space: false, overflow: false };
+        liveTextPreviews.set(assistant, preview);
+      }
+      appendTextPreview(preview, delta);
     } else if (type === "tool_call") {
       const calls = assistant.payload.tool_calls;
       const existing = calls.find((item) => item.tool_call_id === payload.tool_call_id);
@@ -1482,8 +1838,9 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       if (existing) Object.assign(existing, next);
       else calls.push(next);
     }
-    assistant.summary = assistantLoopSummary(assistant.payload, assistant.status);
+    assistant.summary = liveAssistantSummary(assistant);
     assistant.timestamp_end = timestamp;
+    touchEvent(assistant);
     return assistant;
   }
 
@@ -1515,11 +1872,12 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       const payload = frame.payload;
       row.result = redactTrajectoryValue(jsonClone({ result: payload.result, outcome: payload.outcome || null,
         artifacts: payload.artifacts || null, plan: payload.plan || null,
-        metadata: { code_mode: payload.metadata?.code_mode, nested_calls: payload.metadata?.nested_calls, ptc_diagnostics: payload.metadata?.ptc_diagnostics, ...(row.label === "view_image" ? { view_image: payload.metadata?.view_image } : {}) } }));
+        metadata: { code_mode: payload.metadata?.code_mode, nested_calls: payload.metadata?.nested_calls, ptc_diagnostics: payload.metadata?.ptc_diagnostics, remote_agent: payload.metadata?.remote_agent, ...(row.label === "view_image" ? { view_image: payload.metadata?.view_image } : {}) } }));
       row.summary = liveSummary("tool_result", payload);
       row.status = toolResultPresentation(payload).status;
       if (row.duration_source !== "execution") row.timestamp_end = frame.timestamp;
       applyExecutionTiming(row, payload.timing, "tool_execution");
+      touchEvent(row);
       return true;
     });
   }
@@ -1545,12 +1903,14 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   }
 
   function ingest({ event, data }) {
+    if (event === "session") exportUI?.close();
     const type = event || data?.type;
     const payload = data || {};
     if (!type || !shouldIngestTrajectoryEvent(type)) return;
     if (["session_event_appended", "session_event_updated"].includes(type)) {
       const stored = payload.event || payload;
       if (!stored?.event_id || !stored?.event_type) return;
+      inputCount = null;
       const liveInput = stored.event_type === "user/message"
         ? [...liveEvents].reverse().find((item) => item.kind === "input")
         : null;
@@ -1598,8 +1958,9 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     if (type === "output") {
       if (!payload.output_id || historyEvents.some(item => item.id === payload.output_id)) return;
       const existing = liveEvents.find(item => item.id === payload.output_id);
-      const projected = projectOutputAttempt({ event_id: payload.output_id, sequence: payload.sequence, turn_id: payload.turn_id, run_id: payload.run_id, event_type: "output/attempt", created_at: new Date().toISOString(), payload }, Math.max(trajectoryStats(allEvents()).inputs, 1), history.items || []);
-      if (existing) Object.assign(existing, projected); else liveEvents.push(projected);
+      const projected = projectOutputAttempt({ event_id: payload.output_id, sequence: payload.sequence, turn_id: payload.turn_id, run_id: payload.run_id, event_type: "output/attempt", created_at: new Date().toISOString(), payload }, Math.max(currentInputCount(), 1), history.items || []);
+      if (existing) { Object.assign(existing, projected); touchEvent(existing); } else liveEvents.push(projected);
+      inputCount = null;
       scheduleRender();
       return;
     }
@@ -1610,21 +1971,22 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
         id: `live-compaction-${id}`,
         compaction_event_id: id,
         kind: "compaction",
-        input_sequence: Math.max(trajectoryStats(allEvents()).inputs, 1),
+        input_sequence: Math.max(currentInputCount(), 1),
         run_id: payload.run_id || currentRunId,
         timestamp: existing?.timestamp || new Date().toISOString(),
         timestamp_end: new Date().toISOString(),
         status: "running",
         label: "Compaction",
-        summary: payload.phase || "正在处理上下文",
+        summary: payload.phase || "Compacting context",
         tool_call_id: null,
         source: "sse",
         payload: redactTrajectoryValue(jsonClone(payload)),
         result: null,
         native: null,
       };
-      if (existing) Object.assign(existing, next);
+      if (existing) { Object.assign(existing, next); touchEvent(existing); }
       else liveEvents.push(next);
+      inputCount = null;
       scheduleRender();
       return;
     }
@@ -1632,11 +1994,11 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       currentRunId = payload.run_id || currentRunId;
       if (currentRunId && payload.turn_id) runTurns.set(currentRunId, payload.turn_id);
       const currentUser = [...liveEvents].reverse().find((item) => item.kind === "input" && !item.run_id);
-      if (currentUser && currentRunId) currentUser.run_id = currentRunId;
+      if (currentUser && currentRunId) { currentUser.run_id = currentRunId; touchEvent(currentUser); }
       scheduleRender();
       return;
     }
-    const inputSequence = Math.max(trajectoryStats(allEvents()).inputs, 1);
+    const inputSequence = Math.max(currentInputCount(), 1);
     const timestamp = new Date().toISOString();
 
     if (["thinking", "text"].includes(type)) {
@@ -1661,7 +2023,8 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       reconcileResults();
       if (activeAssistantLoop?.run_id === currentRunId) {
         activeAssistantLoop.status = "completed";
-        activeAssistantLoop.summary = assistantLoopSummary(activeAssistantLoop.payload, activeAssistantLoop.status);
+        activeAssistantLoop.summary = liveAssistantSummary(activeAssistantLoop);
+        touchEvent(activeAssistantLoop);
         activeAssistantLoop = null;
       }
       scheduleRender();
@@ -1674,9 +2037,11 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
         call.status = "interrupted";
         call.summary = liveSummary(type, payload);
         call.timestamp_end = timestamp;
+        touchEvent(call);
         if (activeAssistantLoop?.run_id === currentRunId) {
           activeAssistantLoop.status = "interrupted";
-          activeAssistantLoop.summary = assistantLoopSummary(activeAssistantLoop.payload, activeAssistantLoop.status);
+          activeAssistantLoop.summary = liveAssistantSummary(activeAssistantLoop);
+          touchEvent(activeAssistantLoop);
           activeAssistantLoop = null;
         }
         scheduleRender();
@@ -1684,10 +2049,18 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       }
     }
         if (type === "final") {
+          const runId = payload.run_id || currentRunId;
+          if (runId && !payload.output_info && typeof payload.output === "string") {
+            liveRepliesByRun.set(runId, payload.output);
+          }
+          if (runId && payload.status === "completed" && payload.output_files?.length) {
+            liveFilesByRun.set(runId, payload.output_files);
+          }
           liveEvents.filter((item) => item.run_id === currentRunId && item.status === "running")
             .forEach((item) => {
               item.status = "completed"; item.timestamp_end = timestamp;
-              if (item.kind === "assistant") item.summary = assistantLoopSummary(item.payload, item.status);
+              if (item.kind === "assistant") item.summary = liveAssistantSummary(item);
+              touchEvent(item);
             });
           activeAssistantLoop = null;
           scheduleRender();
@@ -1697,7 +2070,8 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       liveEvents.filter((item) => item.run_id === currentRunId && ["running", "pending"].includes(item.status))
         .forEach((item) => {
           item.status = type === "error" ? "failed" : "interrupted"; item.timestamp_end = timestamp;
-          if (item.kind === "assistant") item.summary = assistantLoopSummary(item.payload, item.status);
+          if (item.kind === "assistant") item.summary = liveAssistantSummary(item);
+          touchEvent(item);
         });
       activeAssistantLoop = null;
       // Transport termination closes live content; only a persisted execution
@@ -1726,6 +2100,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       native: null,
     };
     liveEvents.push(live);
+    inputCount = null;
     if (type === "tool_call") {
       liveCalls.set(live, { args: jsonClone(payload.args),
         baseline: (history.items || []).reduce((max, item) => Math.max(max, Number(item.sequence) || 0), 0) });
@@ -1734,12 +2109,11 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     scheduleRender();
   }
 
-  function exportTrace() {
-    if (!exportReady || disposed) return;
-    const payload = {
+  function exportPayload(persistedHistory = null) {
+    return {
       format: "deepagent-session-trajectory",
       version: 1,
-      source: readOnly ? "history" : "history+sse",
+      source: readOnly || persistedHistory ? "history" : "history+sse",
       generated_at: new Date().toISOString(),
       session_id: state.sessionId || history.session_id || null,
       conversation_id: state.conversationId || history.conversation_id || null,
@@ -1748,8 +2122,13 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
         "历史轨迹没有持久化逐Part精确耗时",
         "同一模型响应的 Part 合并展示；native.event_ids 保留对应数据库事件 ID",
       ],
-      events: redactTrajectoryValue(allEvents()),
+      events: redactTrajectoryValue(persistedHistory ? buildTrajectory(persistedHistory) : allEvents()),
     };
+  }
+
+  function exportTrace() {
+    if (!exportReady || disposed) return;
+    const payload = exportPayload();
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -1776,7 +2155,13 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     clockMode = clockMode === "time" ? "duration" : "time";
     scheduleRender();
   });
-  listen(exportButton, "click", exportTrace);
+  exportUI = mountTrajectoryExport({ button: exportButton, getTrajectory: exportPayload, exportJson: exportTrace,
+    getScope: () => ({ sessionId: state.sessionId || history.session_id || null, agentId: state.agentId || "", readOnly,
+      ready: exportReady && !state.historyLoading && state.historyReady !== false && !state.refreshHistoryAfterStream && !state.historyObservationPending,
+      running: Boolean(state.streaming || state.observingRun || state.exportRunStatus === "running" || state.exportRunStatus === "cancel_requested"),
+    }),
+  });
+  if (!exportUI) listen(exportButton, "click", exportTrace);
   listen(list, "click", (event) => {
         const row = event.target.closest("[data-trajectory-id]");
     if (!row) return;
@@ -1873,13 +2258,14 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     ptcDetailTab = ["input", "result", "error", "code"].includes(value.ptcDetailTab) ? value.ptcDetailTab : "result";
     if (search) search.value = value.query || "";
     queryAll("[data-trajectory-mode]").forEach((button) => button.classList.toggle("active", button.dataset.trajectoryMode === mode));
-    selectView(value.view, { notify: false }); render();
+    selectView(value.view ?? activeView, { notify: false }); render();
     list.scrollTop = Number(value.listScrollTop) || 0; detail.scrollTop = Number(value.detailScrollTop) || 0;
   }
   function destroy() {
+    exportUI?.destroy();
     disposed = true; if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
     bindings.splice(0).forEach((remove) => remove()); historyEvents = []; liveEvents = []; history = {};
-    pendingResults = []; runTurns.clear(); liveCalls = new WeakMap();
+    pendingResults = []; runTurns.clear(); liveCalls = new WeakMap(); liveTextPreviews = new WeakMap(); inputCount = null; rowElements.clear(); renderedDetail = null;
   }
-  return { setHistory, setExportReady, reset, addUser, ingest, selectView, focus, snapshot, restore, destroy, events: allEvents };
+  return { setHistory, setConversationHistory, setExportReady, reset, addUser, ingest, selectView, focus, snapshot, restore, destroy, events: allEvents };
 }

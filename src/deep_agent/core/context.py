@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from deep_agent.agent.event_persister import EventPersister
 from deep_agent.agent.active_runs import ActiveRunRegistry
+from deep_agent.agent_service.security import AgentServiceAddress
 from deep_agent.core.session_live import SessionLiveHub
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
@@ -75,6 +76,9 @@ class AppContext:
     sandbox_backend: PythonExecutionBackend | None = None
     sandbox_profile: ResolvedSandboxProfile | None = None
     session_live: SessionLiveHub = field(default_factory=SessionLiveHub)
+    agent_tasks: object | None = None
+    agent_service_address: AgentServiceAddress = field(default_factory=AgentServiceAddress)
+    remote_agents: object | None = None
     wecom_profiles: object | None = None
     wecom_import_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -84,6 +88,13 @@ class AppContext:
             from deep_agent.services.wecom_profiles import WecomProfileService
             self.wecom_profiles = WecomProfileService(self.stores.wecom, self.stores.channel)
         return self.wecom_profiles
+
+    def get_remote_agents(self):
+        if self.remote_agents is None:
+            from deep_agent.remote_agents.cli_workspace import DEFAULT_CLI_WORKSPACE_ROOT
+            from deep_agent.remote_agents.runtime import RemoteAgentRuntime
+            self.remote_agents = RemoteAgentRuntime(self, workspace_root=Path(DEFAULT_CLI_WORKSPACE_ROOT))
+        return self.remote_agents
 
     @property
     def store(self) -> SessionStore:
@@ -99,6 +110,13 @@ class AppContext:
         except Exception:
             logger.exception("Startup aborted: database migration failed")
             raise
+
+        if bundle.stores.integration_app is not None:
+            try:
+                await bundle.stores.integration_app.require_app_skill_conversion()
+            except Exception:
+                await close_db(bundle.engine)
+                raise
 
         logger.info(
             "{} started (database={})",
@@ -249,10 +267,15 @@ class AppContext:
         )
 
     async def aclose(self) -> None:
+        if self.remote_agents is not None:
+            await self.remote_agents.close()
+        if self.agent_tasks is not None:
+            await self.agent_tasks.close()
         if self.wecom_profiles is not None:
             await self.wecom_profiles.close()
         self.session_live.close()
         self.active_runs.cancel_all()
+        await self.active_runs.drain_background()
         await self.mcp_lease_manager.close_all()
         if self.sandbox_backend is not None:
             await self.sandbox_backend.aclose()

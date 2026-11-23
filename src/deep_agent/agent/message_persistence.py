@@ -2,44 +2,60 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterable
 from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import replace
+from hashlib import sha256
 from typing import Any
 
-from pydantic_ai import AgentStreamEvent, ModelRequestNode, RunContext, ToolDenied
+from pydantic_ai import AgentStreamEvent, ModelRequestNode, RunContext, ToolDefinition, ToolDenied
 from pydantic_ai.capabilities import AbstractCapability, CapabilityOrdering, ToolSearch
 from pydantic_ai.exceptions import ToolFailedError
 from pydantic_ai.messages import (
     FunctionToolCallEvent, FunctionToolResultEvent, ModelMessage, ModelRequest,
-    ModelResponse, ToolCallPart, ToolReturn, ToolReturnPart, RetryPromptPart,
+    ModelResponse, ToolCallPart, ToolReturn, ToolReturnPart,
 )
+from pydantic_core import to_json
 
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.agent.history import is_user_only_request, same_tool_return
+from deep_agent.agent.history import is_retry_feedback, is_user_only_request, same_tool_return
+from deep_agent.agent.tool_names import READ_ONLY_TOOL, public_tool_messages
 from deep_agent.agent.observability import log_event
 from deep_agent.agent.planning import (
     attach_plan_snapshot, current_plan_snapshot, is_planning_tool, plan_snapshot_from_part,
 )
+from deep_agent.db.conversation import MessagePartWriteState, SqlConversationCoordinator
 from deep_agent.db.run_ownership import live_run
 from deep_agent.db.execution_error import safe_execution_error
+from deep_agent.db.serialization import serialize_message
 from deep_agent.diagnostics.persistence import persistence_failure_fields
+from deep_agent.usage import response_call
 
 
 class MessagePersistenceError(RuntimeError):
     """Further tools must not execute after a completed-message write failure."""
 
 
+def _is_read_only_tool(tool_def: ToolDefinition | None) -> bool:
+    return tool_def is not None and tool_def.kind == "function" and (
+        tool_def.tool_kind in {"tool-search", "capability-load"}
+        or (tool_def.metadata or {}).get(READ_ONLY_TOOL) is True
+    )
+
+
 class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
     """Per-run instance, including provider retries; never share across Runs."""
 
     capture_execute_results = True
+    _duplicate_flush_hooks: frozenset[str] = frozenset()
 
     def __init__(self, store: Any, *, history_length: int,
                  skip_user_prompt: bool, model_name: str | None = None,
                  provider_id: str | None = None,
-                 event_queue: asyncio.Queue | None = None) -> None:
+                 event_queue: asyncio.Queue | None = None,
+                 defer_read_only: bool = False) -> None:
         self.store = store
         self.event_queue = event_queue
         # Keep the original input length for callers; ledger ordering survives compaction.
@@ -54,6 +70,14 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
         self._accepted: set[tuple[int, str]] = set()
         self._results: dict[str, Any] = {}
         self._write_lock = asyncio.Lock()
+        self._buffer_read_only = defer_read_only and skip_user_prompt
+        self._defer_writes = self._buffer_read_only
+        self._write_options = {}
+        if isinstance(store, SqlConversationCoordinator):
+            self._write_options["write_state"] = MessagePartWriteState()
+        self._committed_scope: tuple | None = None
+        self._committed_public_messages: list[ModelMessage] = []
+        self._committed_projection: bytes | None = None
         self._message_identity_merges = 0
         self._response_id_mismatches = 0
         self._executing_parent: ContextVar[tuple[int, str] | None] = ContextVar(
@@ -61,9 +85,8 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
         )
 
     def get_ordering(self) -> CapabilityOrdering:
-        # The public SDK orders after_* hooks in reverse. Outermost means our
-        # after_tool_execute observes the existing limits/redaction's final
-        # result, never the raw oversized result before those policies run.
+        # Capture after the entire tool lifecycle, including other wrap hooks
+        # that add timing or transform the finished result.
         # ToolSearch is itself outermost and adds feedback to its tool return.
         # Resolve the tie explicitly so its final result is saved once, in both
         # ordinary and streaming runs, before immutable event comparison.
@@ -169,7 +192,9 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                 response_index = match
         return self._with_ordinals(merged)
 
-    def _accept(self, ctx: RunContext[AgentDeps], call: ToolCallPart, *, allow_nested: bool = False) -> bool:
+    def _accept(
+        self, ctx: RunContext[AgentDeps], call: ToolCallPart, *, allow_nested: bool = False,
+    ) -> tuple[int, str] | None:
         # Providers can reuse IDs in later loops: acceptance is response-scoped.
         for message in reversed(ctx.messages):
             if isinstance(message, ModelResponse) and any(
@@ -177,8 +202,9 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                 and part.tool_name == call.tool_name for part in message.parts
             ):
                 self._record(message)
-                self._accepted.add((id(message), call.tool_call_id))
-                return True
+                key = (id(message), call.tool_call_id)
+                self._accepted.add(key)
+                return key
         # PTC dispatch uses normal SDK tool hooks for its authorized inner calls,
         # but those calls are not new model messages. Their durable outer tool is
         # already recorded; nested audit remains on its existing result metadata.
@@ -186,8 +212,19 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
         # parent from provider-controlled tool_call_id strings.
         parent = self._executing_parent.get()
         if allow_nested and parent is not None and parent in self._accepted:
-            return False
+            return None
         raise MessagePersistenceError("Accepted tool call has no official model response")
+
+    def _copy_for_event_store(self, message: ModelMessage) -> ModelMessage:
+        copy = deepcopy(message)
+        if (
+            self._buffer_read_only and isinstance(copy, ModelRequest) and copy.parts
+            and all(isinstance(part, ToolReturnPart) for part in copy.parts)
+        ):
+            # A buffered result uses the same envelope as an immediately saved
+            # result. The live SDK request retains its instructions and identity.
+            return replace(copy, timestamp=None, instructions=None, run_id=None, conversation_id=None)
+        return copy
 
     def _with_ordinals(self, messages: list[ModelMessage]) -> list[ModelMessage]:
         result = []
@@ -195,21 +232,22 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
         for message in messages:
             if self.skip_user_prompt and is_user_only_request(message):
                 continue
-            copy = deepcopy(message)
+            copy = self._copy_for_event_store(message)
             copy.metadata = {**(copy.metadata or {}), "deepagent_message_ordinal": ordinal,
                              "deepagent_part_indices": list(range(len(copy.parts)))}
             ordinal += 1
             result.append(copy)
         return result
 
-    def _completed_messages(self) -> list[ModelMessage]:
+    def completed_messages(self) -> list[ModelMessage]:
+        """Return accepted facts available at a checkpoint, even before they are committed."""
         messages = []
         ordinal = 1 if self.skip_user_prompt else 0
         accepted_in_round: set[str] = set()
         for message in self._ledger:
             if self.skip_user_prompt and is_user_only_request(message):
                 continue
-            copy = deepcopy(message)
+            copy = self._copy_for_event_store(message)
             indices = list(range(len(copy.parts)))
             if isinstance(message, ModelResponse):
                 output_fact = bool((message.metadata or {}).get("deepagent_output"))
@@ -224,11 +262,11 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                 # Validation corrections were never accepted tool executions.
                 # Do not persist their raw validators' arguments or exceptions.
                 indices = [i for i, part in enumerate(copy.parts)
-                           if (copy.metadata or {}).get("deepagent_output_budget") or not isinstance(part, RetryPromptPart)
-                           or part.tool_call_id in accepted_in_round]
+                           if (copy.metadata or {}).get("deepagent_output_budget") or not is_retry_feedback(part)
+                           or getattr(part, "tool_call_id", None) in accepted_in_round]
                 copy.parts = [copy.parts[i] for i in indices]
                 for part in copy.parts:
-                    if isinstance(part, RetryPromptPart) and not (copy.metadata or {}).get("deepagent_output_budget"):
+                    if is_retry_feedback(part) and not (copy.metadata or {}).get("deepagent_output_budget"):
                         part.content = safe_execution_error({"message": part.content})["message"]
             copy.metadata = {**(copy.metadata or {}),
                              "deepagent_message_ordinal": ordinal,
@@ -242,10 +280,10 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
             # Supplemental media has no call ID; save it in the official SDK
             # request once ordering is fixed, not in a parallel-result draft.
             parts = deepcopy([part for part in self._results.values()
-                              if not isinstance(part, RetryPromptPart)
-                              or part.tool_call_id in accepted_in_round])
+                              if not is_retry_feedback(part)
+                              or getattr(part, "tool_call_id", None) in accepted_in_round])
             for part in parts:
-                if isinstance(part, RetryPromptPart):
+                if is_retry_feedback(part):
                     part.content = safe_execution_error({"message": part.content})["message"]
             request = ModelRequest(parts=parts,
                                    metadata={"deepagent_message_ordinal": ordinal})
@@ -253,27 +291,80 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                 messages.append(request)
         return messages
 
-    async def _flush(self, ctx: RunContext[AgentDeps], *, hook: str = "unknown") -> None:
+    def _projection(self, messages: list[ModelMessage]) -> bytes | None:
+        digest = sha256()
+        try:
+            for message in messages:
+                # The event codec uses this serializer, including part positions
+                # and message ordinals. Usage tracks whether zero was reported.
+                usage = (
+                    response_call(message, request_id="", model_id=self.model_name,
+                                  provider_id=self.provider_id, purpose="chat")
+                    if isinstance(message, ModelResponse) else None
+                )
+                digest.update(to_json((serialize_message(message), usage)))
+        except (TypeError, ValueError):
+            return None
+        return digest.digest()
+
+    async def _flush(
+        self, ctx: RunContext[AgentDeps], *, hook: str = "unknown",
+        tool_call_id: str | None = None, phase: str | None = None,
+    ) -> None:
+        started_at = time.perf_counter()
         async with self._write_lock:
             if self.persistence_error is not None:
                 raise self.persistence_error
             deps = ctx.deps
+            locked_at = time.perf_counter()
+            assembled_at = None
+            transaction_ended_at = None
+            committed_at = None
+            outcome = "interrupted"
             messages = []
             write_stage = "assemble"
             try:
-                messages = self._completed_messages()
+                messages = self.completed_messages()
+                if hook == "_prepare_model_node" and self.skip_user_prompt and not messages:
+                    # The runner already committed the user input before entering the SDK.
+                    outcome = "skipped"
+                    return
+                scope = (deps.session_id, deps.agent_id, deps.user, deps.app_id,
+                         deps.space_id, deps.turn_id, deps.run_id)
+                messages_to_write = public_tool_messages(messages, deps.tool_names)
+                projection = None
+                if (
+                    hook in self._duplicate_flush_hooks
+                    and scope == self._committed_scope
+                    and len(messages_to_write) == len(self._committed_public_messages)
+                ):
+                    projection = self._projection(messages_to_write)
+                    if self._committed_projection is None:
+                        self._committed_projection = self._projection(self._committed_public_messages)
+                    if projection is not None and projection == self._committed_projection:
+                        outcome = "skipped"
+                        return
                 write_stage = "append"
-                async with asyncio.timeout(10):
-                    rows = await self.store.append_message_parts(
-                        deps.session_id, agent_id=deps.agent_id, user_id=deps.user,
-                        app_id=deps.app_id, space_id=deps.space_id,
-                        turn_id=deps.turn_id, run_id=deps.run_id,
-                        messages=messages,
-                        first_message_ordinal=1 if self.skip_user_prompt else 0,
-                        usage_model_id=self.model_name,
-                        usage_provider_id=self.provider_id,
-                    )
+                try:
+                    async with asyncio.timeout(10):
+                        assembled_at = time.perf_counter()
+                        rows = await self.store.append_message_parts(
+                            deps.session_id, agent_id=deps.agent_id, user_id=deps.user,
+                            app_id=deps.app_id, space_id=deps.space_id,
+                            turn_id=deps.turn_id, run_id=deps.run_id,
+                            messages=messages_to_write,
+                            first_message_ordinal=1 if self.skip_user_prompt else 0,
+                            usage_model_id=self.model_name,
+                            usage_provider_id=self.provider_id,
+                            **self._write_options,
+                        )
+                finally:
+                    transaction_ended_at = time.perf_counter()
+                committed_at = transaction_ended_at
                 self.messages = messages
+                self._committed_scope = scope
+                self._committed_public_messages = messages_to_write
+                self._committed_projection = projection
                 write_stage = "publish"
                 if self.event_queue is not None:
                     for row in rows or []:
@@ -281,7 +372,9 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                             "type": "session_event_appended", "persisted": True,
                             "event": row.public_dict(),
                         })
+                outcome = "completed"
             except Exception as exc:
+                outcome = "failed"
                 log_event("message_persistence_failed", session_id=deps.session_id,
                           run_id=deps.run_id, agent_id=deps.agent_id,
                           phase="incremental", error_type=type(exc).__name__,
@@ -291,9 +384,34 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                           **persistence_failure_fields(exc, store=self.store, messages=messages, hook=hook))
                 self.persistence_error = MessagePersistenceError("Unable to persist completed message")
                 raise self.persistence_error from exc
+            finally:
+                ended_at = time.perf_counter()
+                log_event(
+                    "message_persistence_timing", session_id=deps.session_id, run_id=deps.run_id,
+                    agent_id=deps.agent_id, agent_name=getattr(deps, "agent_name", None),
+                    request_index=getattr(ctx, "run_step", None), write_hook=hook, status=outcome,
+                    tool_call_id=tool_call_id, phase=phase,
+                    duration_ms=round((ended_at - started_at) * 1000),
+                    lock_wait_ms=round((locked_at - started_at) * 1000),
+                    assemble_ms=round(((assembled_at or ended_at) - locked_at) * 1000),
+                    transaction_ms=(round((transaction_ended_at - assembled_at) * 1000)
+                                    if transaction_ended_at is not None and assembled_at is not None else None),
+                    publish_ms=round((ended_at - committed_at) * 1000) if committed_at is not None else None,
+                )
 
-    async def _save(self, ctx: RunContext[AgentDeps], *, hook: str = "unknown") -> None:
-        await self._flush(ctx, hook=hook)
+    async def _save(
+        self, ctx: RunContext[AgentDeps], *, hook: str = "unknown",
+        tool_call_id: str | None = None, phase: str | None = None,
+    ) -> None:
+        if self.persistence_error is not None:
+            raise self.persistence_error
+        if not self._defer_writes:
+            await self._flush(ctx, hook=hook, tool_call_id=tool_call_id, phase=phase)
+
+    async def checkpoint_history(self, ctx: RunContext[AgentDeps]) -> None:
+        """Make the source prefix visible to compaction's existing SQL validation."""
+        if self._defer_writes:
+            await self._flush(ctx, hook="context_compaction")
 
     async def wrap_node_run(self, ctx, *, node, handler):
         await self._prepare_model_node(ctx, node)
@@ -320,11 +438,20 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
             self._next_request = None
             await self._save(ctx, hook="_prepare_model_node")
 
-    async def after_model_request(self, ctx, *, request_context, response):
+    async def wrap_model_request(self, ctx, *, request_context, handler):
+        response = await handler(request_context)
+        if response.run_id is None:
+            response.run_id = ctx.deps.run_id
         if ctx.deps.output_state is not None:
             await ctx.deps.output_state.check_response(ctx, response, progress=self)
+        if self._defer_writes:
+            definitions = {tool.name: tool for tool in request_context.model_request_parameters.function_tools}
+            if any(isinstance(part, ToolCallPart) and not _is_read_only_tool(definitions.get(part.tool_name))
+                   for part in response.parts):
+                # Keep the original timing of call facts for a batch that may write.
+                self._defer_writes = False
         self._record(response)
-        await self._save(ctx, hook="after_model_request")
+        await self._save(ctx, hook="wrap_model_request")
         return response
 
     async def after_node_run(self, ctx, *, node, result):
@@ -342,23 +469,25 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
         return result
 
     async def before_tool_execute(self, ctx, *, call, tool_def, args):
-        if self._accept(ctx, call, allow_nested=True):
-            await self._save(ctx, hook="before_tool_execute")
-        else:
-            # Propagate an earlier persistence failure even if a nested tool caught it.
-            await self._flush(ctx, hook="before_tool_execute")
+        self._accept(ctx, call, allow_nested=True)
+        if not _is_read_only_tool(tool_def):
+            # Unknown or side-effecting calls require the existing durable
+            # dispatch guard and immediate capture of their settled outcomes.
+            self._defer_writes = False
+        await self._save(ctx, hook="before_tool_execute")
         return args
 
     async def wrap_tool_execute(self, ctx, *, call, tool_def, args, handler):
-        parent = previous_parent = self._executing_parent.get()
-        for message in reversed(self._ledger):
-            key = (id(message), call.tool_call_id)
-            if key in self._accepted:
-                parent = key
-                break
+        previous_parent = self._executing_parent.get()
+        # The latest SDK enters wrap before before_tool_execute. Establish
+        # ancestry here so inner calls remain tied to the durable outer call.
+        parent = previous_parent or self._accept(ctx, call, allow_nested=True)
         token = self._executing_parent.set(parent)
         try:
-            return await handler(args)
+            result = await handler(args)
+            if self.capture_execute_results and previous_parent is None:
+                result = await self._capture_tool_result(ctx, call, tool_def, result)
+            return result
         except ToolFailedError as exc:
             if self.capture_execute_results and previous_parent is None:
                 self._results[call.tool_call_id] = deepcopy(exc.tool_failed)
@@ -380,9 +509,7 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
             ctx.deps.plan_snapshots[part.tool_call_id] = snapshot
         return True
 
-    async def after_tool_execute(self, ctx, *, call, tool_def, args, result):
-        if not self.capture_execute_results or self._executing_parent.get() is not None:
-            return result
+    async def _capture_tool_result(self, ctx, call, tool_def, result):
         # Normal run() has no consumer-facing tool-result events. Preserve the
         # settled result here while sibling tools may still be running. This is
         # a completed tool fact, deduplicated against its later official request;
@@ -401,13 +528,18 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                 wrapped.metadata = deepcopy(part.metadata)
                 result = wrapped
         self._results[call.tool_call_id] = part
-        await self._save(ctx, hook="after_tool_execute")
+        await self._save(ctx, hook="wrap_tool_execute")
         return result
 
 
 class StreamMessagePersistenceCapability(MessagePersistenceCapability):
     # Stream events already carry the fully normalized official result parts.
     capture_execute_results = False
+    # The pre-tool hook keeps its authoritative scope check before dispatch.
+    _duplicate_flush_hooks = frozenset({
+        "_prepare_model_node", "wrap_model_request", "after_node_run",
+        "wrap_run_event_stream", "stream_end",
+    })
 
     async def wrap_run_event_stream(
         self, ctx: RunContext[AgentDeps], *, stream: AsyncIterable[AgentStreamEvent],
@@ -416,13 +548,17 @@ class StreamMessagePersistenceCapability(MessagePersistenceCapability):
             async for event in stream:
                 if isinstance(event, FunctionToolCallEvent) and event.args_valid:
                     self._accept(ctx, event.part)
-                    await self._save(ctx, hook="wrap_run_event_stream")
+                    await self._save(
+                        ctx, hook="wrap_run_event_stream", phase="tool_call", tool_call_id=event.part.tool_call_id,
+                    )
                 elif isinstance(event, FunctionToolResultEvent):
                     await self._capture_plan_result(ctx, event.part)
                     self._results[event.part.tool_call_id] = deepcopy(event.part)
-                    await self._save(ctx, hook="wrap_run_event_stream")
+                    await self._save(
+                        ctx, hook="wrap_run_event_stream", phase="tool_result", tool_call_id=event.part.tool_call_id,
+                    )
                 yield event
-            await self._flush(ctx, hook="wrap_run_event_stream")
+            await self._save(ctx, hook="stream_end")
         finally:
             close = getattr(stream, "aclose", None)
             if callable(close):

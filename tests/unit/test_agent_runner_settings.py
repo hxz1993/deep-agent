@@ -39,7 +39,7 @@ class _NoopStore:
         return []
 
     async def append(self, session_id: str, messages, **_kwargs):
-        return None
+        return []
 
 
 if __name__ == "__main__":

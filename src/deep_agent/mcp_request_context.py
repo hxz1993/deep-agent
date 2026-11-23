@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Literal
 
-McpRequestContextMode = Literal["inherit", "isolated"]
+McpRequestContextMode = Literal["inherit", "isolated", "bound_app"]
 DEFAULT_MCP_REQUEST_CONTEXT_MODE: McpRequestContextMode = "inherit"
 NEW_URL_MCP_REQUEST_CONTEXT_MODE: McpRequestContextMode = "isolated"
 
@@ -18,8 +18,11 @@ def resolve_mcp_request_context_mode(
     if transport == "builtin":
         return "inherit"
     raw = (config or {}).get("request_context")
-    if isinstance(raw, Mapping) and raw.get("mode") == "isolated":
-        return "isolated"
+    if isinstance(raw, Mapping):
+        if raw.get("mode") == "isolated":
+            return "isolated"
+        if raw.get("mode") == "bound_app":
+            return "bound_app"
     return DEFAULT_MCP_REQUEST_CONTEXT_MODE
 
 
@@ -30,7 +33,10 @@ def resolve_mcp_headers(
 ) -> dict[str, str] | None:
     """Apply the configured policy to static and request-scoped headers."""
     static_headers = dict((config or {}).get("headers") or {})
-    if resolve_mcp_request_context_mode(transport, config) == "isolated":
+    mode = resolve_mcp_request_context_mode(transport, config)
+    if mode == "bound_app":
+        raise ValueError("Bound MCP requires a verified target and login")
+    if mode == "isolated":
         return static_headers or None
     merged = {**static_headers, **dict(request_headers or {})}
     # Runtime identity is still used internally for file/session ownership.

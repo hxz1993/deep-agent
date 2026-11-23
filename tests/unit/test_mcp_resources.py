@@ -575,6 +575,7 @@ class _FakeMcpStore:
         data: McpServerUpdate,
         *,
         inspection: dict | None = None,
+        expected: McpServer | None = None,
     ) -> McpServer | None:
         assert self.row is not None
         for field, value in data.model_dump(exclude_unset=True).items():
@@ -587,6 +588,8 @@ class _FakeMcpStore:
         self,
         _name: str,
         inspection: dict,
+        *,
+        expected: McpServer | None = None,
     ) -> McpServer | None:
         assert self.row is not None
         self.saved_inspection = inspection
@@ -779,7 +782,6 @@ class McpResourceToolsetTests(unittest.IsolatedAsyncioTestCase):
             set(toolset.tools),
             {
                 "list_mcp_resources",
-                "list_mcp_resource_templates",
                 "read_mcp_resource",
             },
         )
@@ -800,15 +802,8 @@ class McpResourceToolsetTests(unittest.IsolatedAsyncioTestCase):
             mimeType="text/markdown",
             size=12,
         )
-        template = ResourceTemplate(
-            name="cube",
-            uriTemplate="deepfos://cube/{name}",
-            description="Cube guide",
-            mimeType="application/json",
-        )
         client = _FakeInspectionClient(
             resources=[resource],
-            templates=[template],
             content="hello",
         )
         toolset = build_mcp_resource_toolset(_spec("mcp:docs"), [_row("docs")])
@@ -820,10 +815,6 @@ class McpResourceToolsetTests(unittest.IsolatedAsyncioTestCase):
             return_value=client,
         ) as build_client:
             listed = await toolset.tools["list_mcp_resources"].function(ctx, "docs")
-            templates = await toolset.tools["list_mcp_resource_templates"].function(
-                ctx,
-                "docs",
-            )
             read = await toolset.tools["read_mcp_resource"].function(
                 ctx,
                 "docs",
@@ -832,10 +823,6 @@ class McpResourceToolsetTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(listed["resources"][0]["uri"], str(resource.uri))
         self.assertEqual(listed["resources"][0]["mime_type"], "text/markdown")
-        self.assertEqual(
-            templates["resource_templates"][0]["uri_template"],
-            "deepfos://cube/{name}",
-        )
         self.assertEqual(read["content"], [{"type": "text", "text": "hello"}])
         self.assertEqual(
             build_client.call_args.kwargs["request_headers"],
@@ -861,7 +848,6 @@ class McpResourceToolsetTests(unittest.IsolatedAsyncioTestCase):
         assert toolset is not None
         failures = (
             ("list_mcp_resources", "resources", ("docs",)),
-            ("list_mcp_resource_templates", "templates", ("docs",)),
             ("read_mcp_resource", "read", ("docs", "deepfos://guide")),
         )
         for tool_name, stage, args in failures:

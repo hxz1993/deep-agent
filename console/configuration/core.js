@@ -170,14 +170,35 @@ async function confirmAction(options) {
 
 // The server supplies current impact and binds the confirmation to that set.
 // A changed set requires another explicit confirmation, never an automatic retry.
-async function deleteWithImpactConfirmation(path, { title, describeImpact, confirmLabel }) {
+async function withDeletionProgress(label, action) {
+  if (!label) return action();
+  let dialog = document.getElementById("consoleDeletionProgress");
+  if (!dialog) {
+    dialog = document.createElement("dialog");
+    dialog.id = "consoleDeletionProgress";
+    dialog.className = "console-action-dialog console-deletion-progress";
+    dialog.setAttribute("aria-label", "正在处理删除请求");
+    dialog.innerHTML = '<div role="status" aria-live="polite"><span class="loading-spinner" aria-hidden="true"></span><span data-deletion-progress-label></span></div>';
+    dialog.addEventListener("cancel", (event) => event.preventDefault());
+    document.body.appendChild(dialog);
+  }
+  dialog.querySelector("[data-deletion-progress-label]").textContent = label;
+  dialog.showModal();
+  try {
+    return await action();
+  } finally {
+    dialog.close();
+  }
+}
+
+async function deleteWithImpactConfirmation(path, { title, describeImpact, confirmLabel, progressLabel }) {
   let confirmationToken;
   for (;;) {
     try {
-      await apiFetch(path, {
+      await withDeletionProgress(progressLabel, () => apiFetch(path, {
         method: "DELETE",
         ...(confirmationToken ? { body: JSON.stringify({ confirmation_token: confirmationToken }) } : {}),
-      });
+      }));
       return true;
     } catch (error) {
       const detail = error.detail;
@@ -302,16 +323,17 @@ async function loadSkills() {
   return state.skills;
 }
 
-function populateAgentModelSelect(selectedId = null) {
+function populateAgentModelSelect(selectedId = null, effort = null) {
   const select = document.getElementById("agentModelId");
   if (!select) return;
   const models = state.llmModels || [];
   select.disabled = false;
   select.innerHTML = `<option value="" hidden></option>`
     + window.DeepAgentModelOptions.renderGroupedModelOptions(models, {
-      selectedId, emptyLabel: null, enabledOnly: true, groupIcon: (provider) => providerBrand(provider).src,
+      selectedId, emptyLabel: null, enabledOnly: true, picker: true, groupIcon: (provider) => providerBrand(provider).src,
     });
   select.value = selectedId || "";
+  window.agentsAdmin?.setupReasoningPicker(select, effort);
 }
 
 function initTabs() {
@@ -321,6 +343,8 @@ function initTabs() {
     const activate = async () => {
       if (window.agentsAdmin?.isEditorOpen?.() && !(await window.agentsAdmin.requestCloseEditor())) return;
       if (window.mcpAdmin?.isEditorOpen?.() && !(await window.mcpAdmin.requestCloseEditor())) return;
+      if (tab.dataset.tab !== "remote-agents" && window.remoteAgentAdmin
+          && !(await window.remoteAgentAdmin.requestCloseEditor())) return;
       if (tab.dataset.tab !== "integrations" && window.integrationsAdmin?.deactivate() === false) return;
       if (tab.dataset.tab !== "channels" && window.wecomApplicationsAdmin?.deactivate() === false) return;
       tabs.forEach((t) => t.classList.remove("active"));
@@ -344,6 +368,8 @@ function initTabs() {
         return window.skillsAdmin.refresh();
       }
       if (name === "mcp" && window.mcpAdmin) return window.mcpAdmin.refresh();
+      if (name === "agent-service") return window.agentServiceAdmin?.refresh();
+      if (name === "remote-agents") return window.remoteAgentAdmin?.refresh();
       if (name === "integrations") return window.integrationsAdmin?.refresh();
       if (name === "channels" && window.channelsAdmin) return window.channelsAdmin.refresh();
     };
@@ -367,6 +393,79 @@ function parseArgs(text) {
   if (!trimmed) return [];
   if (trimmed.startsWith("[")) return JSON.parse(trimmed);
   return trimmed.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+function bindConsolePaneResize(split, layout, property, { pane, sizePrefix, widthBounds } = {}) {
+  const byHeight = split.getAttribute("aria-orientation") === "horizontal";
+  const initial = Number(split.getAttribute("aria-valuenow"));
+  const currentSize = () => {
+    if (!pane) return Number(split.getAttribute("aria-valuenow"));
+    return byHeight ? pane.offsetHeight : pane.offsetWidth;
+  };
+  const bounds = () => {
+    if (widthBounds) return widthBounds();
+    if (!byHeight) return [Number(split.getAttribute("aria-valuemin")), Number(split.getAttribute("aria-valuemax"))];
+    const style = getComputedStyle(layout);
+    const minimum = parseFloat(style.getPropertyValue(`${sizePrefix}-top-min`));
+    const reserved = parseFloat(style.getPropertyValue(`${sizePrefix}-recent-min`));
+    return [minimum, Math.max(minimum, layout.clientHeight - split.offsetHeight - reserved)];
+  };
+  const syncSize = () => {
+    if (!split.offsetHeight) return;
+    const [minimum, maximum] = bounds();
+    split.setAttribute("aria-valuemin", minimum);
+    split.setAttribute("aria-valuemax", maximum);
+    split.setAttribute("aria-valuenow", currentSize());
+  };
+  const apply = (value) => {
+    const [minimum, maximum] = bounds();
+    const size = Math.round(Math.max(minimum, Math.min(maximum, value)));
+    layout.style.setProperty(property, `${size}${pane ? "px" : "%"}`);
+    split.setAttribute("aria-valuenow", size);
+  };
+  split.addEventListener("keydown", (event) => {
+    const smaller = byHeight ? "ArrowUp" : "ArrowLeft";
+    const larger = byHeight ? "ArrowDown" : "ArrowRight";
+    if (![smaller, larger, "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const [minimum, maximum] = bounds();
+    const step = pane ? 16 : 2;
+    const current = currentSize();
+    apply({ Home: minimum, End: maximum, [smaller]: current - step, [larger]: current + step }[event.key]);
+  });
+  split.addEventListener("dblclick", () => {
+    if (pane) {
+      layout.style.removeProperty(property);
+      syncSize();
+    } else apply(initial);
+  });
+  split.addEventListener("pointerdown", (event) => {
+    if (!event.isPrimary || event.button !== 0) return;
+    event.preventDefault();
+    const startSize = currentSize();
+    const position = (pointer) => byHeight ? pointer.clientY : pointer.clientX;
+    const start = position(event);
+    const scale = pane ? 1 : 100 / layout.clientWidth;
+    const move = (pointer) => {
+      if (pointer.pointerId === event.pointerId) {
+        apply(startSize + (position(pointer) - start) * scale);
+      }
+    };
+    split.setPointerCapture(event.pointerId);
+    split.classList.add("dragging");
+    document.body.classList.add("workspace-pane-resizing");
+    split.addEventListener("pointermove", move);
+    split.addEventListener("lostpointercapture", () => {
+      split.removeEventListener("pointermove", move);
+      split.classList.remove("dragging");
+      document.body.classList.remove("workspace-pane-resizing");
+    }, { once: true });
+  });
+  if (pane) {
+    const resizeObserver = new ResizeObserver(syncSize);
+    resizeObserver.observe(layout);
+    resizeObserver.observe(pane);
+  }
 }
 
 document.addEventListener("DOMContentLoaded", () => {

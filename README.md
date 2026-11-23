@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.15.4`（测试分支）。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.17.5`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -18,12 +18,17 @@ v0.12.0 增加通用 `channel_message`：飞书与企微可信渠道对话自动
 v0.15.0 将 Skill 脚本按原路径放入每次调用的 `skill/` 执行副本，支持同 Skill 多模块引用；
 普通 Python 与 Skill 共用授权文件输入、显式产物上传及 File ID 返回，PTC 使用相同入口。
 旧临时 `main.py` 布局不再兼容，依赖旧位置的脚本须调整；原历史事件、会话和附件不改写。
-随包 `.env` 由脚本自行读取，不注入变量，导出会原样携带。执行规则见 [Skill 指南](docs/guides/skills.md)。
+随包 `.env` 由脚本自行读取，不自动加载其中变量，导出会原样携带。
+v0.15.6 为普通 Python／Skill 增加默认关闭的 `include_context`，按需通过 `DEEP_AGENT_CONTEXT`
+提供非凭据用户资料及本次应用范围；原生与 PTC 共用 Run 缓存。执行规则见 [Skill 指南](docs/guides/skills.md)。
 
 Console 对话测试提供独立的“对话 / 轨迹”页签。会话历史、轨迹、Plan 和持久化 SSE 统一读取
 `chat_session_events`；轨迹按 Sequence 原位展示 Run、模型 Part、工具调用/结果和 Compaction，
 不再从整条 ModelMessage 做第二套拆解，也不额外建立轨迹表。能力边界见
 [`docs/design/18-session-trajectory/`](docs/design/18-session-trajectory)。
+
+v0.15.13 可在轨迹工具栏选择仅导出 JSON，或在运行结束后将授权会话文件一并打包为 ZIP。
+数量、大小和缺失文件以预估及包内清单为准；用法与权限见[轨迹与文件导出](docs/guides/trajectory-export.md)。
 
 v0.5.6 完成 Provider + Model 两层配置：Provider 独占 Pydantic AI 适配类型、地址和密钥，
 Model 只保存 Provider 外键、模型编码与能力属性。Provider 不设置启停层，其可用性由真实连接
@@ -177,31 +182,31 @@ PYTHONPATH=src python -m deep_agent.channels.gateway --host 0.0.0.0 --port 8010
 MySQL 的连接及业务文本字段应使用 `utf8mb4`，避免 Emoji 等字符损失引发保存失败；
 已有数据库需要检查实际字段。详见[字符集部署要求与排查](docs/guides/mysql-character-set.md)。
 
-新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为`007`：生产基线 `001`完整包含原
+新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为 `016`。生产基线 `001` 完整包含重整前的
 Revision 001～012 的最终结构和默认数据：Provider/Model/Agent、MCP、Skill、UI工具、模型目录、
 `chat_sessions + chat_session_events` Event Store 和 `global_settings`。全新初始化不生成 Web Search 配置行；
 旧 `native` 配置读取为未配置，需管理员明确选择搜索供应商，见[Web 工具设计](docs/design/21-web-tools/web-tools-design.md)。
 增量`002`增加企微Channel的Account、Session Binding和Message Run三表；渠道用户由管理员配置
 `session_user_id`，Peer键名使用`userid/chatid`。
 增量 `003` 移除 10 条数据库外键，由后端事务、记录锁和逻辑引用校验维持原有删除规则。
-增量 `004` 新增 `integration_settings`，保存组件 AI 功能的 JSON 配置，不插入初始记录。见[集成配置](docs/guides/integrations.md)。
+增量 `004` 新增 `integration_settings`，保存业务场景的 JSON 配置，不插入初始记录。见[场景配置](docs/guides/integrations.md)。
 增量 `005` 允许 Agent 不配置模型；降级前须先补齐空模型。安装包支持导出、上传安装和自带目录安装，见[Agent 安装包](docs/guides/agent-packages.md)。
 
 增量 `006` 新增企微应用及成员缓存，见[企微应用说明](docs/guides/wecom-applications.md)。
 增量 `007` 为会话事件新增 `usage_model_id` 与逐请求 `usage` JSON，并建立日期／模型索引；管理员统计口径见[用量统计](docs/guides/diagnostic-usage.md)。
+增量 `008` 至 `011` 演进渠道来源与凭据。`012`、`013` 增加结构化输出及文本输出策略，`014` 增加模型和 Agent 的思考档位配置，`015` 增加应用配置及专用 Skill 作用域，`016` 新增 Agent 发布与远程连接配置表。迁移定义以 `migrations/versions/` 为准。
 
-已发布的 `001` 至 `006` 不改写。上线顺序：完整备份 → 停止旧 API/Gateway 写入 → 升级并核验
-`007` → 启动新版 → 业务冒烟；不能让旧代码继续向无外键数据库写入。
+已发布的迁移保持原样。涉及结构升级时，完整备份，停止旧 API/Gateway 写入，再升级并核验目标 Revision，最后启动新版并做业务冒烟。
 迁移预检发现孤儿数据会停止，MySQL 中断后保持维护状态并重跑。具体见
 [无外键部署与回归](docs/guides/application-references.md)。
 
-已经处于旧Revision 012的数据库不能重放`001`，也不能在旧镜像运行时手工修改
+仍使用重整前迁移链、处于旧 Revision 012 的数据库不能重放 `001`，也不能在旧镜像运行时手工修改
 `alembic_version`。必须先完整备份并停止旧实例，再用`maintenance.rebaseline_database`校验物理
 结构和全表内容哈希后只做`012 → 001`改标，随后只允许启动包含新`001`基线的镜像。完整切换边界
 见[`src/maintenance/README.md`](src/maintenance/README.md)。
 
 配置备份会复制全部配置表并只保留会话表结构；上传Skill的原始ZIP不塞入数据库备份。需要完整
-留存或跨环境迁移时，同时在Console Skill页面执行“导出全部”。复制范围按源Alembic Revision自动
+留存或跨环境迁移时，使用 `GET /api/v1/configuration/skills/export` 导出原包，包含应用专用 Skill。Console Skill 页的“导出全部”用于分发通用包。复制范围按源 Alembic Revision 自动
 发现，新增配置表需登记明确逻辑依赖顺序；两张会话事实表、Channel Binding和Channel Run固定留空，
 `channel_accounts`作为配置复制；完整边界见
 [`src/maintenance/README.md`](src/maintenance/README.md)。
@@ -211,11 +216,10 @@ Revision 001～012 的最终结构和默认数据：Provider/Model/Agent、MCP�
 DeepAgent 当前支持：
 
 - 内置工具：
-  - `builtin:general`（通用工具）：只包含 `get_current_time`。
   - `builtin:sandbox`（Python 沙箱）：只包含 `execute_python`。
-  - `builtin:web`（公开网络）：包含 `web_search`、`web_fetch` 与按模型能力注入的
-    `web_image_view`，默认不关联。
-- 系统工具不是 ToolPackage。Harness任务规划、`load_capability`、Skill Resource、`read_file`、
+  - `builtin:web`（公开网络）：包含 `web_search`、`web_fetch`，默认不关联。
+- 运行环境 `runtime:environment` 的 `get_current_time(timezone="UTC")` 对所有业务 Agent 默认可用，返回带偏移的 ISO 时间，支持 `Asia/Shanghai` 等 IANA 时区；无需关联工具包，不进入 PTC。旧 `builtin:general` 引用在读取、保存和安装导出时规范化移除，不回写历史数据。详见[运行环境工具](docs/guides/runtime-environment.md)。
+- 系统工具不是 ToolPackage。Harness任务规划、`load_capability`、Skill Resource、`read_file`、`view_image`、
   `export_file_to_download_center`、`read_tool_result`、`search_tools` 和 MCP Resource
   由运行时按 Agent/Run 条件自动注入，只在 Console 的只读“系统工具”目录中说明。
 - 每个Run只暴露Harness `Planning`的`write_plan`完整快照工具。计划仍以普通Tool Call/Result
@@ -271,9 +275,13 @@ v0.4.18自动注入系统工具`export_file_to_download_center`。当请求具�
 
 ## 测试
 
+测试入口、显式快速组、耗时报告及直接 unittest 命令见 [测试指南](tests/README.md)。
+
 ```bash
-PYTHONPATH=src python3.12 -m unittest discover -s tests -p 'test_*.py'
-node --test tests/frontend/console/*.test.mjs
+# 日常相关回归；无法确定影响面时自动回退全量
+.venv/bin/python scripts/run_tests.py --suite affected --base HEAD
+# 手动完整回归，需要时使用；发布不再强制全量（脚本无参数仍为 all）
+.venv/bin/python scripts/run_tests.py --suite all
 
 # 压缩核心覆盖率门槛（开发依赖，不进入生产镜像）
 python3.12 -m pip install -r requirements-dev.txt

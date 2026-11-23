@@ -12,6 +12,7 @@ import httpx
 
 DEFAULT_MODELS_DEV_CATALOG_URL = "https://models.dev/catalog.json"
 DEFAULT_MODELS_DEV_LABS_URL = "https://models.dev/labs"
+_OPTIONAL_LABS_TIMEOUT_SECONDS = 5.0
 
 _LAB_SEARCH_INDEX = re.compile(
     r"""<script[^>]*id=["']search-index["'][^>]*>([\s\S]*?)</script>""",
@@ -92,7 +93,8 @@ def parse_labs_page(html: str) -> list[dict[str, Any]]:
 
 async def _get_optional_labs(client: httpx.AsyncClient, url: str) -> object:
     try:
-        response = await client.get(url)
+        async with asyncio.timeout(_OPTIONAL_LABS_TIMEOUT_SECONDS):
+            response = await client.get(url)
         response.raise_for_status()
         return parse_labs_page(response.text)
     except Exception:
@@ -110,11 +112,10 @@ async def fetch_models_dev_bundle(
     owns_client = client is None
     if client is None:
         client = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
+    catalog_request = asyncio.create_task(_get_required_json(client, catalog_url, "组合目录"))
+    labs_request = asyncio.create_task(_get_optional_labs(client, labs_url))
     try:
-        catalog, labs = await asyncio.gather(
-            _get_required_json(client, catalog_url, "组合目录"),
-            _get_optional_labs(client, labs_url),
-        )
+        catalog, labs = await asyncio.gather(catalog_request, labs_request)
         try:
             bundle = parse_models_dev_catalog(catalog)
         except ModelsDevCatalogError as exc:
@@ -125,5 +126,8 @@ async def fetch_models_dev_bundle(
             labs=labs,
         )
     finally:
+        catalog_request.cancel()
+        labs_request.cancel()
+        await asyncio.gather(catalog_request, labs_request, return_exceptions=True)
         if owns_client:
             await client.aclose()

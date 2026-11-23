@@ -9,9 +9,9 @@ from pydantic_ai.capabilities import IncludeToolReturnSchemas, ToolSearch
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
-    RetryPromptPart,
     TextPart,
     ToolCallPart,
+    ToolReturnPart,
     ToolSearchCallPart,
     ToolSearchReturnPart,
 )
@@ -21,6 +21,7 @@ from pydantic_ai.toolsets import FunctionToolset
 from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.usage import RunUsage
 
+from deep_agent.agent.history import is_tool_retry
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.tool_discovery import (
@@ -623,6 +624,42 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.deps.tool_discovery.direct_count, MCP_DIRECT_DISCLOSURE_LIMIT)
         self.assertEqual(ctx.deps.tool_discovery.deferred_count, 0)
 
+    async def test_preselection_reuses_ranking_only_for_the_same_run_query_and_catalog(self) -> None:
+        query_tool = "deepfos_search_financial_model"
+        describe_tool = "deepfos_cube_describe"
+        ctx = self._ctx(query_tool)
+        toolset = self._toolset()
+        wrapper = build_mcp_discovery_toolset(
+            [toolset], server_names=["deepfos"], estimator=TokenEstimator.conservative(),
+        )
+        assert wrapper is not None
+        definitions = [
+            *(item.tool_def for item in (await toolset.get_tools(ctx)).values()),
+            ToolDefinition(name="deepfos_platform_folder_list"),
+        ]
+        with patch("deep_agent.agent.tool_discovery.rank_tool_documents", wraps=rank_tool_documents) as rank:
+            await wrapper.prepare_tools(ctx, definitions)
+            self.assertEqual(ctx.deps.tool_discovery.preselected_tools, [query_tool])
+
+            discovered = replace(ctx, discovered_tool_names={describe_tool})
+            await wrapper.prepare_tools(discovered, [replace(tool) for tool in definitions])
+            self.assertEqual(rank.call_count, 1)
+            self.assertEqual(ctx.deps.tool_discovery.direct_count, 2)
+
+            changed_query = replace(ctx, prompt=describe_tool)
+            await wrapper.prepare_tools(changed_query, definitions)
+            self.assertEqual(rank.call_count, 2)
+            self.assertEqual(ctx.deps.tool_discovery.preselected_tools, [describe_tool])
+
+            allowed = [tool for tool in definitions if tool.name != describe_tool]
+            prepared = await wrapper.prepare_tools(changed_query, allowed)
+            self.assertEqual(rank.call_count, 3)
+            self.assertNotIn(describe_tool, ctx.deps.tool_discovery.preselected_tools)
+            self.assertNotIn(describe_tool, [tool.name for tool in prepared])
+
+            await wrapper.prepare_tools(self._ctx(describe_tool), allowed)
+            self.assertEqual(rank.call_count, 4)
+
     async def test_multiple_mcp_servers_share_one_global_preselection_limit(self) -> None:
         ctx = self._ctx("搜索维度成员并更新配置")
         finance = FunctionToolset(
@@ -927,7 +964,7 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(
             any(
-                isinstance(part, RetryPromptPart)
+                is_tool_retry(part)
                 for message in result.all_messages()
                 if isinstance(message, ModelRequest)
                 for part in message.parts
@@ -1121,9 +1158,10 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
             for message in result.all_messages()
             if isinstance(message, ModelRequest)
             for part in message.parts
-            if isinstance(part, RetryPromptPart)
+            if isinstance(part, ToolReturnPart) and part.outcome == "retried"
         ]
         self.assertEqual(len(retries), 1)
+        self.assertEqual(retries[0].retry.cause, "unavailable_tool")
         self.assertIn("search for it first", str(retries[0].content))
 
     async def test_removed_discovery_evidence_requires_search_again(self) -> None:
@@ -1230,7 +1268,9 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output, "search required")
         self.assertTrue(
             any(
-                isinstance(part, RetryPromptPart)
+                isinstance(part, ToolReturnPart)
+                and part.outcome == "retried"
+                and part.retry is not None and part.retry.cause == "unavailable_tool"
                 and "search for it first" in str(part.content)
                 for message in result.new_messages()
                 if isinstance(message, ModelRequest)

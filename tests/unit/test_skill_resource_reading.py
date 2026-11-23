@@ -55,17 +55,27 @@ def _entry(path: str, *, category: str = "asset", readable: bool = False) -> dic
 
 
 class SkillResourceReadingTests(unittest.IsolatedAsyncioTestCase):
-    def test_console_script_preview_does_not_open_model_script_reading(self) -> None:
+    def test_unrecognized_text_is_readable_without_index_flag_or_suffix_allowlist(self) -> None:
+        for path, category in (("scripts/client.js", "script"), ("assets/query.sql", "asset"),
+                               ("references/custom.data", "reference")):
+            with self.subTest(path=path), tempfile.TemporaryDirectory(prefix="TMP_to_delete-source-") as tmpdir:
+                entry = _entry(path, category=category)
+                target = Path(tmpdir) / "source"
+                target.write_text("const answer = 42;", encoding="utf-8")
+                for preview in (False, True):
+                    self.assertTrue(present_resource_entry(entry, console_preview=preview)["readable"])
+                    self.assertEqual(read_resource_page(entry, target, console_preview=preview).content, "const answer = 42;")
+
+    def test_script_source_is_readable_by_model_and_console(self) -> None:
         entry = _entry("scripts/client.py", category="script")
-        self.assertFalse(present_resource_entry(entry)["readable"])
+        self.assertTrue(present_resource_entry(entry)["readable"])
         preview = present_resource_entry(entry, console_preview=True)
         self.assertTrue(preview["readable"])
         self.assertEqual(preview["read_format"], "text")
         with tempfile.TemporaryDirectory(prefix="TMP_to_delete-skill-preview-") as tmpdir:
             path = Path(tmpdir) / "client.py"
             path.write_text("print('<unsafe>')\n", encoding="utf-8")
-            with self.assertRaises(SkillResourceReadError):
-                read_resource_page(entry, path)
+            self.assertEqual(read_resource_page(entry, path).content, "print('<unsafe>')")
             page = read_resource_page(entry, path, console_preview=True)
         self.assertEqual(page.content, "print('<unsafe>')")
         self.assertEqual(page.unit, "line")
@@ -83,19 +93,18 @@ class SkillResourceReadingTests(unittest.IsolatedAsyncioTestCase):
                     with self.assertRaisesRegex(SkillResourceReadError, "not_readable"):
                         read_resource_page(entry, path, console_preview=True)
 
-    def test_console_office_preview_uses_actual_type_inside_script_directory(self) -> None:
+    def test_office_reading_uses_actual_type_inside_script_directory(self) -> None:
         for filename, raw, expected_format, expected_content in (
             ("scripts/guide.docx", _docx_bytes(), "docx", "第一段"),
             ("scripts/template.xlsx", _xlsx_bytes(), "xlsx", "名称,值\n甲,1"),
         ):
             with self.subTest(filename=filename), tempfile.TemporaryDirectory(prefix="TMP_to_delete-skill-preview-") as tmpdir:
                 entry = _entry(filename, category="script")
-                self.assertFalse(present_resource_entry(entry)["readable"])
+                self.assertEqual(present_resource_entry(entry)["read_format"], expected_format)
                 self.assertEqual(present_resource_entry(entry, console_preview=True)["read_format"], expected_format)
                 target = Path(tmpdir) / Path(filename).name
                 target.write_bytes(raw)
-                with self.assertRaises(SkillResourceReadError):
-                    read_resource_page(entry, target)
+                self.assertEqual(read_resource_page(entry, target).format, expected_format)
                 page = read_resource_page(entry, target, limit=2, console_preview=True)
                 self.assertEqual(page.format, expected_format)
                 self.assertTrue(page.content.startswith(expected_content))
@@ -182,7 +191,7 @@ class SkillResourceReadingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(page.metadata["selected_sheet"], "数据")
         self.assertEqual(page.metadata["formula_mode"], "cached_values_only")
 
-    async def test_resource_list_exposes_script_path_but_read_rejects_it(self) -> None:
+    async def test_resource_list_exposes_readable_script_source_for_legacy_index(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             (root / "references").mkdir()
@@ -197,6 +206,7 @@ class SkillResourceReadingTests(unittest.IsolatedAsyncioTestCase):
                 resource_index=[
                     _entry("references/guide.md", category="reference", readable=True),
                     _entry("scripts/run.py", category="script"),
+                    _entry("assets/manual.pdf"),
                 ],
             )
             toolset = build_skill_resource_toolset({"demo": item})
@@ -212,9 +222,11 @@ class SkillResourceReadingTests(unittest.IsolatedAsyncioTestCase):
             )
             script = next(entry for entry in listed["resources"] if entry["category"] == "script")
             self.assertEqual(script["path"], "scripts/run.py")
-            self.assertFalse(script["readable"])
-            self.assertIsNone(script["read_format"])
-            self.assertFalse(listed["scripts_readable"])
+            self.assertTrue(script["readable"])
+            self.assertEqual(script["read_format"], "text")
+            self.assertTrue(listed["scripts_readable"])
+            pdf = next(entry for entry in listed["resources"] if entry["path"].endswith(".pdf"))
+            self.assertEqual((pdf["readable"], pdf["read_format"], pdf["read_unit"]), (True, "pdf", "page"))
             self.assertEqual(set(tools), {"list_skill_resources"})
 
     async def test_resource_toolset_only_lists_resources(self) -> None:

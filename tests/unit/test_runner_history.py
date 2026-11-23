@@ -77,7 +77,8 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("messages", sent[0])
         self.assertNotIn("input", sent[0])
         self.assertEqual(output[-1]["type"], "error")
-        self.assertIn("fixture request rejected", output[-1]["message"])
+        self.assertIn("HTTP 400", output[-1]["message"])
+        self.assertNotIn("fixture request rejected", output[-1]["message"])
         self.assertNotIn("final", [event["type"] for event in output])
 
     async def asyncSetUp(self) -> None:
@@ -499,7 +500,10 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
             await self._flush(session_id, agent_id=self.db_agent.id)
             rows = await self.store.list_events(session_id, limit=100)
             rows = [row for row in rows if row.event_type != "session/title"]
-            self.assertEqual([row.event_type for row in rows], ["user/message"])
+            self.assertEqual([row.event_type for row in rows], ["user/message", "execution/error"])
+            self.assertEqual(rows[-1].status, "interrupted")
+            from deep_agent.services.trajectory_export import _persisted_running
+            self.assertFalse(_persisted_running(rows))
             self.assertEqual(rows[-1].run_id, deps.run_id)
             self.assertTrue(exited.is_set(), "Provider task survived the disconnected consumer")
             self.assertIsNone(registry.get(agent_id=self.db_agent.id, session_id=session_id))

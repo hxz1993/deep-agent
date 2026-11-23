@@ -9,7 +9,7 @@ export const LOG_FILTER_KEYS = ["start", "end", "source", "level", "q", "session
 export const USAGE_FILTER_KEYS = ["start", "end", "timezone", "agent_id", "period"];
 export const CHANNEL_FILTER_KEYS = ["period", "start", "end", "timezone", "account_id", "kind", "query", "offset", "peer_id", "filter_peer_id", "channel_user_id", "channel_group_id"];
 export const channelEntryFilters = filters => ({ period: ["24", "168", "720"].includes(String(filters.period)) ? String(filters.period) : "168" });
-export const DETAIL_KEYS = ["view", "event_id", "run_id"];
+export const DETAIL_KEYS = ["view", "event_id", "run_id", "turn_id"];
 
 const filterKeys = view => view === "channels" ? CHANNEL_FILTER_KEYS : view === "logs" ? LOG_FILTER_KEYS : view === "usage" ? USAGE_FILTER_KEYS : view === "detail" ? DETAIL_KEYS : view === "overview" ? OVERVIEW_FILTER_KEYS : LIST_FILTER_KEYS;
 const selectFilters = (view, filters = {}) => Object.fromEntries(filterKeys(view).filter(key => filters[key] !== undefined && filters[key] !== null && filters[key] !== "" && filters[key] !== false).map(key => [key, String(filters[key])]));
@@ -73,6 +73,14 @@ export function createDiagnosticNavigation({ getHash, history, onNavigate, getSn
   let serial = 0, currentKey = null, currentHash = null, currentRoute = null, pendingEntry = false;
   const cleanHash = route => diagnosticHash(route.view, route.filters, route.id);
   const safeFrom = value => { const parsed = parseDiagnosticRoute(value); return parsed ? cleanHash(parsed) : undefined; };
+  const isFromConfiguration = route => route?.view === "detail" && history.state?.diagnosticsFromConfiguration === true;
+  function entryState(key, from, fromConfiguration) {
+    const source = safeFrom(from);
+    return {
+      diagnosticsKey: key, ...(source ? { diagnosticsFrom: source } : {}),
+      ...(fromConfiguration ? { diagnosticsFromConfiguration: true } : {}),
+    };
+  }
   const trim = () => { while (snapshots.size > 12) { const key = snapshots.keys().next().value; snapshots.delete(key); routes.delete(key); } };
   function remember() {
     const value = getSnapshot();
@@ -91,8 +99,7 @@ export function createDiagnosticNavigation({ getHash, history, onNavigate, getSn
     if (!key) key = `diagnostics-${++serial}`;
     const hash = cleanHash(parsed), stored = routes.get(key);
     currentRoute = !target && stored?.hash === hash ? stored.route : parsed;
-    const from = safeFrom(history.state?.diagnosticsFrom);
-    history.replaceState({ diagnosticsKey: key, ...(from ? { diagnosticsFrom: from } : {}) }, "", hash);
+    history.replaceState(entryState(key, history.state?.diagnosticsFrom, isFromConfiguration(currentRoute)), "", hash);
     currentKey = key; currentHash = hash;
     routes.set(key, { hash, route: currentRoute });
     const saved = snapshots.get(key);
@@ -103,16 +110,16 @@ export function createDiagnosticNavigation({ getHash, history, onNavigate, getSn
     if (!route) return false;
     remember();
     const hash = cleanHash(route), key = replace ? currentKey || `diagnostics-${++serial}` : `diagnostics-${++serial}`;
-    const from = safeFrom(replace ? history.state?.diagnosticsFrom : getHash());
+    const from = replace ? history.state?.diagnosticsFrom : getHash();
     routes.set(key, { hash, route });
     if (replace) snapshots.delete(key);
-    history[replace ? "replaceState" : "pushState"]({ diagnosticsKey: key, ...(from ? { diagnosticsFrom: from } : {}) }, "", hash);
+    history[replace ? "replaceState" : "pushState"](entryState(key, from, replace && isFromConfiguration(route)), "", hash);
     pendingEntry = true;
     onNavigate();
     return true;
   }
   function back(fallback) {
-    if (safeFrom(history.state?.diagnosticsFrom)) { remember(); history.back(); }
+    if (safeFrom(history.state?.diagnosticsFrom) || isFromConfiguration(currentRoute)) { remember(); history.back(); }
     else navigate(fallback, { replace: true });
   }
   function replaceCurrent(target) {
@@ -122,8 +129,7 @@ export function createDiagnosticNavigation({ getHash, history, onNavigate, getSn
     const key = currentKey || history.state?.diagnosticsKey || `diagnostics-${++serial}`;
     currentKey = key;
     routes.set(key, { hash: currentHash, route });
-    const from = safeFrom(history.state?.diagnosticsFrom);
-    history.replaceState({ diagnosticsKey: key, ...(from ? { diagnosticsFrom: from } : {}) }, "", currentHash);
+    history.replaceState(entryState(key, history.state?.diagnosticsFrom, isFromConfiguration(route)), "", currentHash);
   }
   return { enter, remember, navigate, back, replaceCurrent, get route() { return currentRoute; },
     get key() { return currentKey; }, clear: () => { snapshots.clear(); routes.clear(); currentKey = null; currentHash = null; currentRoute = null; pendingEntry = false; } };

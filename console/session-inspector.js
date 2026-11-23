@@ -1,8 +1,11 @@
 import { contextOccupancyPresentation, tokenValue } from "./context-budget-presentation.js?v=20260923-c02";
 import { renderUserIdentity } from "./user-identity.js?v=20260917-release01010";
 import { composerProviderIcon } from "./provider-icons.js?v=20261013-providers";
+import { renderSessionSource } from "./session-display.js?v=session-source-rows";
 // Pure shared inspector markup. Hosts supply identity, historical data and tab state.
 const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+import { modelWithEffort } from './reasoning-ui.js?v=0160';
 
 export function formatTokens(value) {
   if (value === null || value === undefined || value === "") return "—";
@@ -72,6 +75,21 @@ export function inspectorFactHtml(label, valueHtml, options = {}) {
   return `<div class="${classes}"><span>${escapeHtml(label)}</span><strong>${valueHtml}</strong></div>`;
 }
 
+export function renderSessionScope(session = {}, { saved = true } = {}) {
+  const appId = String(session.appId || "").trim();
+  const spaceId = String(session.spaceId || "").trim();
+  const appName = appId ? session.appName || "名称未获取" : "未关联应用";
+  const spaceName = spaceId ? session.spaceName || "名称未获取" : "未关联空间";
+  const copyCode = (value, label) => value
+    ? `<span class="inspector-scope-code"><code title="${escapeHtml(value)}">${escapeHtml(value)}</code><button type="button" class="inspector-copy-btn" data-inspector-copy="${escapeHtml(value)}" title="复制${label}编码" aria-label="复制${label}编码"><i data-lucide="copy" aria-hidden="true"></i></button></span>`
+    : '<span class="inspector-scope-code"><code>—</code></span>';
+  const hint = saved ? "会话创建时记录的应用与空间" : "新会话将使用当前有效调试范围";
+  return `<span class="inspector-scope-value" title="${hint}">
+    <span class="inspector-scope-names"><span title="${escapeHtml(appName)}">${escapeHtml(appName)}</span><span>/</span><span title="${escapeHtml(spaceName)}">${escapeHtml(spaceName)}</span></span>
+    <span class="inspector-scope-codes">${copyCode(appId, "应用")}<span>/</span>${copyCode(spaceId, "空间")}</span>
+  </span>`;
+}
+
 export function renderRunUsageOverview(run = {}, usage = {}) {
   const reported = [run.input_tokens ?? usage.input_tokens, run.output_tokens ?? usage.output_tokens, run.total_tokens ?? usage.total_tokens];
   const hasUsage = reported.some(value => (tokenValue(value) ?? 0) > 0);
@@ -132,6 +150,7 @@ export function renderSessionInspector({
   state = {}, activeSession = {}, model = null, modelProvider = null, context = {}, identity = {}, contextStatus = {},
   usage = {}, run = {}, sessionCache = {}, runCache = {}, runModel = null, agentName = "—", channelOrigin = null, agentChannels = [],
   activeTab = "session", contextContent = "", statusText = "", statusClass = "idle",
+  sessionReasoningEffort = run.reasoning_effort,
 } = {}) {
   // Every Run emits telemetry, including no-op estimates. Only a successful
   // triggered compaction may replace the last persisted comparison.
@@ -179,7 +198,7 @@ export function renderSessionInspector({
     <span title="消息事件数"><i data-lucide="repeat-2"></i>${escapeHtml(savedCount(activeSession.messageCount))}</span>
     <span title="附件数"><i data-lucide="paperclip"></i>${escapeHtml(savedCount(activeSession.attachmentCount))}</span>
   </span>`;
-  const sessionScope = `<span class="inspector-scope-value"><code>${escapeHtml(activeSession.appId || "—")}</code><span>/</span><code>${escapeHtml(activeSession.spaceId || "—")}</code></span>`;
+  const sessionScope = renderSessionScope(activeSession, { saved: Boolean(state.sessionId) });
   const hasChannelTab = Boolean(channelOrigin || agentChannels.length);
   if (!hasChannelTab && activeTab === "channel") activeTab = "session";
   const channelSource = channelOrigin ? `<section class="inspector-section">
@@ -200,8 +219,8 @@ export function renderSessionInspector({
     <div class="inspector-facts">
       ${inspectorFact("会话 ID", state.sessionId || "尚未创建", { mono: true, wide: true, copy: Boolean(state.sessionId), displayValue: state.sessionId?.slice(0, 8) })}
       ${inspectorFact("Agent", agentName, { wide: true })}
-      ${inspectorFactHtml("模型", `<span class="inspector-channel-name">${modelProvider ? `<span class="composer-provider-icon">${composerProviderIcon(modelProvider)}</span>` : ""}${escapeHtml(model?.name || model?.model || "未记录")}</span>`)}
-      ${inspectorFactHtml("会话来源", channelOrigin ? `<span class="inspector-channel-name"><img class="session-source-logo" src="${channelOrigin.logo}" alt="" />${escapeHtml(channelOrigin.platform)}</span>` : `<span class="inspector-channel-name"><img class="session-source-logo" src="./favicon.svg?v=20260922-d-rounded" alt="" />DeepFOS</span>`)}
+      ${inspectorFactHtml("模型", `<span class="inspector-channel-name">${modelProvider ? `<span class="composer-provider-icon">${composerProviderIcon(modelProvider)}</span>` : ""}${escapeHtml(model ? modelWithEffort(model.name || model.model || "未记录", sessionReasoningEffort) : "未记录")}</span>`)}
+      ${inspectorFactHtml("会话来源", renderSessionSource(activeSession))}
       ${inspectorFactHtml("App / Space", sessionScope, { wide: true })}
       ${inspectorFactHtml("会话统计", sessionCounts)}
       ${inspectorFact("Language", context.language || "未记录")}
@@ -230,7 +249,7 @@ export function renderSessionInspector({
       ${inspectorFact("压缩", run.compaction || "—")}
       ${inspectorFact("Conv. ID", run.conversation_id || "—", { mono: true, wide: true })}
       ${inspectorFact("Run ID", run.run_id || "—", { mono: true, wide: true, copy: Boolean(run.run_id) })}
-      ${inspectorFact("模型", runModel?.name || runModel?.model || run.model_id || "未记录", { wide: true })}
+      ${inspectorFact("模型", runModel || run.model_id ? modelWithEffort(runModel?.name || runModel?.model || run.model_id, run.reasoning_effort) : "未记录", { wide: true })}
     </div>
   </section>`;
 

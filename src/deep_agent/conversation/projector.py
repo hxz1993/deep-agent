@@ -4,14 +4,18 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from typing import Any
 
+from deep_agent.agent.tool_names import WIRE_NAMES, is_output_call, is_present_tool
 from deep_agent.agent.observability import token_usage_available
 from deep_agent.agent.planning import is_planning_tool
 from deep_agent.agent.tool_output_limits import artifacts_from_metadata
+from deep_agent.remote_agents.contracts import tool_metadata as remote_agent_metadata
+from deep_agent.remote_agents.journal import EVENT_TYPE as REMOTE_INVOCATION_EVENT, Invocation
 from deep_agent.web.images import safe_web_image_value, web_image_tool_value, view_image_tool_value
 from deep_agent.conversation.models import (
     AssistantConversationItem,
     ConversationArtifact,
     ConversationAttachment,
+    ConversationOutputFile,
     ConversationHistoryResponse,
     ConversationItem,
     ConversationOrder,
@@ -41,6 +45,7 @@ def project_session_events(
     session_id: str | None = None,
 ) -> ConversationHistoryResponse:
     """Project the append-only Event Store into the public chat rendering model."""
+    from deep_agent.agent.file_delivery import presented_files
 
     ordered = sorted(events, key=lambda event: int(_get(event, "sequence", 0)))
     resolved_session_id = session_id or (
@@ -48,16 +53,20 @@ def project_session_events(
     )
     items: list[ConversationItem] = []
     tool_by_call: dict[str, ToolConversationItem | PlanConversationItem] = {}
+    remote_results: dict[tuple[str, str], Any] = {}
     terminal_by_run: dict[str, str] = {}
-    output_names = {}
-    for raw in ordered:
-        metadata = ((_message(raw) or {}).get("metadata") or {})
-        name = (metadata.get("deepagent_output") or {}).get("name")
-        if name:
-            output_names[_get(raw, "run_id")] = name
+    output_calls: set[tuple[str | None, str, str]] = set()
+    deliveries: dict[str, dict[str, ConversationOutputFile]] = {}
+    completed_assistants: dict[str, tuple[Any, dict[str, Any]]] = {}
+    latest_user: UserConversationItem | None = None
 
     for event in group_message_events(ordered):
         event_type = str(_get(event, "event_type", ""))
+        if event_type == REMOTE_INVOCATION_EVENT:
+            payload = _get(event, "payload") or {}
+            if _get(event, "status") == "completed" and payload.get("tool_call_id") and payload.get("run_id"):
+                remote_results[payload["run_id"], payload["tool_call_id"]] = event
+            continue
         if event_type == "output/attempt":
             payload = _get(event, "payload", {})
             if payload.get("accepted") is True and _get(event, "status") == "completed":
@@ -65,6 +74,7 @@ def project_session_events(
                 items.append(StructuredOutputConversationItem(
                     item_id=event_id, name=payload["name"], tool_call_id=payload["tool_call_id"],
                     attempt=payload["attempt"], output=payload["output"], status="completed",
+                    publication_protocol=payload.get("publication_protocol"),
                     turn_id=_get(event, "turn_id"), run_id=_get(event, "run_id"),
                     order=ConversationOrder(sequence=int(_get(event, "sequence"))),
                     source_event_ids=[event_id, *(payload.get("source", {}).get("event_ids") or [])],
@@ -86,28 +96,38 @@ def project_session_events(
         if message is None:
             continue
         metadata = message.get("metadata") or {}
-        output_call_ids = {part.get("tool_call_id") for part in _parts(message)
-                          if part.get("tool_name") == (metadata.get("deepagent_output") or {}).get("name")}
         rejected_dispatch = (metadata.get("deepagent_dispatch") or {}).get("rejected")
         if event_type == "user/message":
             item = _user_item(event, message)
             if item is not None:
                 items.append(item)
+                latest_user = item
             continue
         if event_type == "assistant/message":
             run_id = _optional_str(_get(event, "run_id") or message.get("run_id"))
             assistant_terminal = _assistant_terminal_status(event, message)
             if run_id and assistant_terminal:
                 terminal_by_run[run_id] = assistant_terminal
+            if run_id and _get(event, "status") == "completed":
+                completed_assistants[run_id] = (event, message)
             output_metadata = metadata.get("deepagent_output") or {}
             if not rejected_dispatch and (not output_metadata or output_metadata.get("allow_text_output") is True):
                 items.extend(_assistant_items(event, message))
             for part_offset, part in enumerate(_parts(message)):
                 part_kind = str(part.get("part_kind") or "")
                 call_id = _optional_str(part.get("tool_call_id"))
-                if rejected_dispatch or call_id in output_call_ids:
-                    continue
                 if not call_id:
+                    continue
+                if part_kind == "tool-call" and (tool_name := part.get("tool_name")):
+                    key = (run_id, call_id, tool_name)
+                    is_output = is_output_call(metadata, part, part_offset)
+                    if is_output:
+                        output_calls.add(key)
+                    else:
+                        output_calls.discard(key)
+                    if is_output:
+                        continue
+                if rejected_dispatch:
                     continue
                 if part_kind in _TOOL_CALL_KINDS:
                     tool = _tool_call_item(event, part, part_offset)
@@ -124,16 +144,25 @@ def project_session_events(
                     _apply_result(existing, event, part)
             continue
         if event_type in {"tool/results", "model/request"}:
+            run_id = _optional_str(_get(event, "run_id") or message.get("run_id"))
             for part_offset, part in enumerate(_parts(message)):
                 if metadata.get("deepagent_output_budget") and part.get("part_kind") == "retry-prompt":
-                    continue
-                if part.get("tool_name") and part.get("tool_name") == output_names.get(_get(event, "run_id")):
                     continue
                 if str(part.get("part_kind") or "") not in _TOOL_RESULT_KINDS:
                     continue
                 call_id = _optional_str(part.get("tool_call_id"))
                 if not call_id:
                     continue
+                wire_name = (metadata.get(WIRE_NAMES) or {}).get(str(part_offset))
+                if wire_name and wire_name.startswith("output__"):
+                    continue
+                if not wire_name and (_get(event, "run_id"), call_id, part.get("tool_name")) in output_calls:
+                    continue
+                if (run_id and part.get("part_kind") == "tool-return" and is_present_tool(part.get("tool_name"), wire_name)
+                        and part.get("outcome", "success") == "success"):
+                    files = presented_files(part.get("metadata"))
+                    if files:
+                        deliveries.setdefault(run_id, {}).update((file.id, file) for file in files)
                 existing = tool_by_call.get(call_id)
                 if existing is None:
                     existing = _orphan_tool_result_item(event, part, part_offset)
@@ -141,7 +170,27 @@ def project_session_events(
                     items.append(existing)
                 _apply_result(existing, event, part)
 
+    shown_remote_files: set[str] = set()
     for item in items:
+        if isinstance(item, ToolConversationItem) and item.tool_name in {"delegate_task", "answer_task"}:
+            event = remote_results.get((item.run_id, item.call_id))
+            if event is not None:
+                invocation = Invocation.model_validate(_get(event, "payload"))
+                _apply_result(item, event, {
+                    "tool_name": item.tool_name, "part_kind": "tool-return", "content": invocation.result_payload(),
+                    "metadata": {"remote_agent": invocation.summary(), "generated_files": invocation.result_files()},
+                })
+        if isinstance(item, ToolConversationItem) and (item.metadata or {}).get("remote_agent"):
+            # A result lookup may recover the original files, including when the
+            # original call is outside this page. Keep their first visible cards.
+            if item.tool_name == "remote_task_result":
+                item.artifacts = [
+                    artifact for artifact in item.artifacts
+                    if artifact.role != "generated_file" or artifact.file_id not in shown_remote_files
+                ]
+            shown_remote_files.update(
+                artifact.file_id for artifact in item.artifacts if artifact.role == "generated_file" and artifact.file_id
+            )
         # Older releases repaired failed calls with a default-success ToolDenied.
         # Correct only that legacy sentinel, without rewriting Event facts or
         # treating genuine user rejection / successful tools as run failures.
@@ -164,8 +213,47 @@ def project_session_events(
         terminal = terminal_by_run.get(item.run_id or "")
         if terminal:
             item.status = terminal  # type: ignore[assignment]
+        elif (
+            isinstance(item, ToolConversationItem)
+            and item.status == "awaiting_input"
+            and latest_user is not None
+            and latest_user.order.sequence > item.order.sequence
+        ):
+            # A new user turn supersedes unanswered UI calls. Preserve any real
+            # tool result already matched above, including a later resume result.
+            item.status = "interrupted"
+            item.outcome = "skipped"
+            item.widget = None
 
     _mark_final_assistant_items(items)
+    for item in reversed(items):
+        run_id = item.run_id
+        if run_id not in deliveries or run_id in terminal_by_run or run_id not in completed_assistants:
+            continue
+        if isinstance(item, StructuredOutputConversationItem):
+            item.output_files = list(deliveries.pop(run_id).values())
+        elif isinstance(item, AssistantConversationItem):
+            source_event, _ = completed_assistants[run_id]
+            if str(_get(source_event, "event_id")) in item.source_event_ids:
+                item.phase = "final"
+                item.output_files = list(deliveries.pop(run_id).values())
+
+    # An empty text reply can still deliver files. Reuse its completed message
+    # in the presentation without writing another Event or fabricating prose.
+    for run_id, files in deliveries.items():
+        if run_id in terminal_by_run or run_id not in completed_assistants:
+            continue
+        event, message = completed_assistants[run_id]
+        metadata = message.get("metadata") or {}
+        output_metadata = metadata.get("deepagent_output") or {}
+        if ((output_metadata and not output_metadata.get("allow_text_output"))
+                or (metadata.get("deepagent_dispatch") or {}).get("rejected")):
+            continue
+        item = _assistant_item(event, message, allow_empty=True)
+        if item is not None:
+            item.phase = "final"
+            item.output_files = list(files.values())
+            items.append(item)
 
     items.sort(key=lambda item: (item.order.sequence, item.order.part_offset, item.item_id))
     return ConversationHistoryResponse(
@@ -243,7 +331,9 @@ def _user_item(event: Any, message: Mapping[str, Any]) -> UserConversationItem |
     if not found:
         return None
     event_id = str(_get(event, "event_id"))
+    metadata = message.get('metadata')
     return UserConversationItem(
+        reasoning_effort=_optional_str(metadata.get('reasoning_effort')) if isinstance(metadata, Mapping) else None,
         item_id=f"message:{event_id}",
         status="completed",
         turn_id=_optional_str(_get(event, "turn_id")),
@@ -303,6 +393,7 @@ def _assistant_item(
     message: Mapping[str, Any],
     *,
     part_start: int = 0,
+    allow_empty: bool = False,
 ) -> AssistantConversationItem | None:
     thinking: list[str] = []
     texts: list[str] = []
@@ -315,7 +406,7 @@ def _assistant_item(
         elif kind == "text" and part.get("content"):
             texts.append(str(part["content"]))
             offsets.append(part_start + offset)
-    if not offsets:
+    if not offsets and not allow_empty:
         return None
     event_id = str(_get(event, "event_id"))
     state = str(message.get("state") or "")
@@ -327,7 +418,7 @@ def _assistant_item(
         run_id=_optional_str(_get(event, "run_id") or message.get("run_id")),
         order=ConversationOrder(
             sequence=int(_get(event, "sequence", 0)),
-            part_offset=min(offsets),
+            part_offset=min(offsets, default=part_start),
         ),
         source_event_ids=list(_get(event, "source_event_ids", [event_id])),
         created_at=_datetime(message.get("timestamp")) or _event_datetime(event, "created_at"),
@@ -352,8 +443,10 @@ def _tool_call_item(
     call_id = str(part["tool_call_id"])
     tool_name = _optional_str(part.get("tool_name"))
     pending_status = _pending_tool_status(event, part)
+    wire = (((_message(event) or {}).get("metadata") or {}).get(WIRE_NAMES) or {}).get(str(part_offset))
+    is_planning = not wire and is_planning_tool(tool_name)
     common = dict(
-        item_id=(f"plan:{call_id}" if is_planning_tool(tool_name) else f"tool:{call_id}"),
+        item_id=(f"plan:{call_id}" if is_planning else f"tool:{call_id}"),
         status=pending_status,
         turn_id=_optional_str(_get(event, "turn_id")),
         run_id=_optional_str(_get(event, "run_id")),
@@ -367,16 +460,18 @@ def _tool_call_item(
         call_id=call_id,
         input=part.get("args"),
     )
-    if is_planning_tool(tool_name):
+    if is_planning:
         return PlanConversationItem(**common)
     metadata = dict(part["metadata"]) if isinstance(part.get("metadata"), Mapping) else None
-    return ToolConversationItem(
+    item = ToolConversationItem(
         **common,
         tool_name=tool_name,
-        mode=("deferred" if pending_status == "awaiting_input" else _tool_mode(tool_name, part)),
+        mode=("deferred" if pending_status == "awaiting_input" else _tool_mode(None if wire else tool_name, part)),
         widget=_optional_str((metadata or {}).get("widget")) if pending_status == "awaiting_input" else None,
         metadata=metadata if pending_status == "awaiting_input" or not (metadata or {}).get("widget") else None,
     )
+    item._wire_name = wire
+    return item
 
 
 def _orphan_tool_result_item(
@@ -407,10 +502,11 @@ def _apply_result(
         if source_id not in item.source_event_ids:
             item.source_event_ids.append(source_id)
     item.updated_at = _event_datetime(event, "updated_at")
+    unscoped = not isinstance(item, ToolConversationItem) or not item._wire_name
     item.output = (view_image_tool_value(part.get("content"), part.get("metadata"))
-                   if part.get("tool_name") == "view_image" else
+                   if unscoped and part.get("tool_name") == "view_image" else
                    web_image_tool_value(part.get("content"), part.get("metadata"))
-                   if part.get("tool_name") == "web_image_view"
+                   if unscoped and part.get("tool_name") == "web_image_view"
                    else safe_web_image_value(part.get("content")))
     outcome = _optional_str(part.get("outcome"))
     item.status = _result_status(part, outcome)
@@ -439,6 +535,9 @@ def _apply_result(
         if isinstance(sources, list):
             web_metadata["sources"] = sources
         item.metadata = web_metadata or None
+    remote = remote_agent_metadata(item.tool_name, metadata)
+    if remote is not None and unscoped:
+        item.metadata = {**(item.metadata or {}), "remote_agent": remote}
 
 
 def _artifacts(part: Mapping[str, Any]) -> list[ConversationArtifact]:
@@ -466,7 +565,7 @@ def _result_status(part: Mapping[str, Any], outcome: str | None) -> str:
         return "rejected"
     if normalized in {"failed", "failure", "error"}:
         return "failed"
-    if kind == "retry-prompt" or normalized == "retry":
+    if kind == "retry-prompt" or normalized in {"retry", "retried"}:
         return "removed"
     return "completed"
 

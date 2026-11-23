@@ -28,7 +28,7 @@ from tests.helpers.sqlite_stores import (
 from tests.helpers.request_identity import install_test_user_header
 from tests.integration.helpers.mcp import streamable_http_echo_server
 
-ECHO_TOOL_NAME = "echo_echo_request_headers"
+ECHO_TOOL_NAME = "mcp__echo__echo_request_headers"
 
 
 async def aclose_test_context(*, engine: Any | None = None) -> None:

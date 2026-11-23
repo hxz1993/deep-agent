@@ -78,16 +78,15 @@ class WebFetchSettingsApiTests(unittest.TestCase):
         self.assertEqual(persisted["api_key"], "fixture-retained-key")
 
     def test_old_client_omission_preserves_saved_follow_but_explicit_system_wins(self) -> None:
-        for provider in ("deepseek", "kimi"):
-            with self.subTest(provider=provider):
-                self.put({"mode": "provider", "provider": provider,
-                          "api_key": "fixture-follow-key", "fetch_mode": "follow_search"})
-                value = self.put({"mode": "provider", "provider": provider})
-                self.assertEqual(value["fetch_mode"], "follow_search")
-                self.assertEqual(self.stored().value["fetch_mode"], "follow_search")
-                self.assertEqual(self.stored().value["api_key"], "fixture-follow-key")
-                value = self.put({"mode": "provider", "provider": provider, "fetch_mode": "system"})
-                self.assertEqual(value["fetch_mode"], "system")
+        provider = "deepseek"
+        self.put({"mode": "provider", "provider": provider,
+                  "api_key": "fixture-follow-key", "fetch_mode": "follow_search"})
+        value = self.put({"mode": "provider", "provider": provider})
+        self.assertEqual(value["fetch_mode"], "follow_search")
+        self.assertEqual(self.stored().value["fetch_mode"], "follow_search")
+        self.assertEqual(self.stored().value["api_key"], "fixture-follow-key")
+        value = self.put({"mode": "provider", "provider": provider, "fetch_mode": "system"})
+        self.assertEqual(value["fetch_mode"], "system")
 
     def test_provider_reference_survives_legacy_model_cleanup_without_copying_key(self) -> None:
         provider = asyncio.run(self.stores.llm_configuration.create_provider(LlmProviderCreate(
@@ -127,31 +126,36 @@ class WebFetchSettingsApiTests(unittest.TestCase):
                     "model": "keep-until-save"}
         self.seed(existing)
         sources = [{"title": "DeepFOS docs", "url": "https://docs.deepfos.com/", "snippet": "Documentation"}]
-        for provider in ("deepseek", "kimi"):
-            with self.subTest(provider=provider), \
-                 patch("deep_agent.web.runtime.execute_deepseek_search", new=AsyncMock(return_value=sources)) as deepseek_search, \
-                 patch("deep_agent.web.runtime.execute_search", new=AsyncMock(return_value={"search_results": sources})) as kimi_search, \
-                 patch("deep_agent.web.runtime.search_client") as kimi_client, \
-                 patch("deep_agent.web.runtime.execute_deepseek_fetch", new=AsyncMock()) as deepseek_fetch, \
-                 patch("deep_agent.web.runtime.execute_kimi_fetch", new=AsyncMock()) as kimi_fetch:
-                response = self.client.post(self.url + "/test", headers=self.headers, json={
-                    "version": 1,
-                    "value": {"mode": "provider", "provider": provider,
-                              "api_key": "fixture-draft-key", "fetch_mode": "follow_search"},
-                })
-                self.assertEqual(response.status_code, 200, response.text)
-                self.assertTrue(response.json()["ok"])
-                self.assertEqual(response.json()["provider"], provider)
-                self.assertNotIn("fixture-draft-key", response.text)
-                if provider == "deepseek":
-                    deepseek_search.assert_awaited_once()
-                    self.assertEqual(deepseek_search.call_args.kwargs["api_key"], "fixture-draft-key")
-                    kimi_search.assert_not_awaited()
-                    kimi_client.assert_not_called()
-                else:
-                    kimi_search.assert_awaited_once()
-                    kimi_client.assert_called_once_with("fixture-draft-key", None)
-                    deepseek_search.assert_not_awaited()
-                deepseek_fetch.assert_not_awaited()
-                kimi_fetch.assert_not_awaited()
-                self.assertEqual(self.stored().value, existing)
+        with patch("deep_agent.web.runtime.execute_deepseek_search",
+                   new=AsyncMock(return_value={"results": sources})) as search, patch(
+                       "deep_agent.web.runtime.execute_deepseek_fetch", new=AsyncMock(),
+                   ) as fetch:
+            response = self.client.post(self.url + "/test", headers=self.headers, json={
+                "version": 1,
+                "value": {"mode": "provider", "provider": "deepseek",
+                          "api_key": "fixture-draft-key", "fetch_mode": "follow_search"},
+            })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(response.json()["provider"], "deepseek")
+        self.assertNotIn("fixture-draft-key", response.text)
+        search.assert_awaited_once()
+        self.assertEqual(search.call_args.kwargs["api_key"], "fixture-draft-key")
+        fetch.assert_not_awaited()
+        self.assertEqual(self.stored().value, existing)
+
+    def test_removed_kimi_config_is_unavailable_without_overwriting_stored_value(self) -> None:
+        historical = {"mode": "provider", "provider": "kimi", "api_key": "fixture-old-key",
+                      "fetch_mode": "follow_search"}
+        self.seed(historical)
+        response = self.client.get(self.url, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        value = response.json()["value"]
+        self.assertEqual(value["mode"], "unconfigured")
+        self.assertEqual(value["fetch_mode"], "system")
+        self.assertFalse(value["api_key_set"])
+        self.assertTrue(value["configuration_error"])
+        for method, suffix in ((self.client.put, ""), (self.client.post, "/test")):
+            response = method(self.url + suffix, headers=self.headers, json={"value": historical})
+            self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(self.stored().value, historical)

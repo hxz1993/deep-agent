@@ -50,27 +50,25 @@ console/
 
 ## 功能概览
 
-系统导航“初始化指南”只打开 `tutorialsDialog` 教程下载弹框，不切换页面、不自动下载。
-教程使用单选卡片选择本地 `downloads/` PDF，只有明确点击弹框底部“下载”才触发下载；相对地址需兼容网关前缀。
-替换文档时同步核对卡片名称和页数，保留来源原件，不引入外部文档依赖。
+系统导航“开发调试”按需打开居中原生 dialog，不切换底层页面；旧 `#/developer` 链接在工作台上打开弹框。
+弹框有快速上手、Coding 开发两段说明和两项下载，提示词常显并支持复制。沿用公共主题、字体、图标和紧凑文件按钮。
+资料来自管理员 `GET /api/v1/developer-resources`；下载通过 `daFetch` 和 Blob，关闭时中止未完成请求并忽略迟到结果，不中断后台聊天流。
+固定安装与验收步骤在包内 README；提示词只包含服务地址和安装连接引导，不含凭据与下载链接。初始化 PDF 原静态地址仅为旧链接兼容，开发 Skill 仍仅由管理员接口提供。
 
-“集成”由 `configuration/integrations.js` 管理，一级导航使用 `puzzle` 图标，复用渠道页的普通表格布局，不展示分组、分割线或二级标题。
-条目取自 `GET /api/v1/integrations`，前端将目录条目平铺显示；不补固定条目、不创建初始化记录。按集成编码维护编辑器与摘要渲染，
-当前两个集成均通过现有 Agent 下拉选择，表格“配置”列显示 Agent 名称；JSON 是底层存储，不向用户提供通用 Key/Value 编辑器。
-列表名称下展示所属组件副标题，不加行首图标。配置使用固定尺寸左右分栏弹框，左侧 40% 选择 Agent（空值显示非斜体的“请设置”占位），右侧 60% 提供“接口示例 / 适用功能”页签，默认展示接口示例；接口条目使用 `code`、`settings`，API 示例仍与 OpenAPI 共源。数据流模型配置目前仅在原型中，不加入正式目录。
-切页和关闭弹框中止读请求并忽略迟到结果，保存期间阻止重复提交和离开编辑器；30秒无响应时中止客户端请求、解锁并提示结果待确认，需重新打开集成页核对。契约见
-[`../docs/guides/integrations.md`](../docs/guides/integrations.md)。
+侧栏「服务发布」位于「设置」和「诊断」之间，包含「组件场景」「消息渠道」「发布 Agent」。组件场景由 `configuration/integrations.js` 管理，使用 `puzzle` 图标。左侧显示场景列表，右侧显示当前场景的配置和接口示例。条目取自 `GET /api/v1/integrations`，前端不补条目或初始化配置。关联 Agent 的触发区直接展开选项，回填当前 Agent。下拉底部清空只修改草稿，点击保存才生效。JSON 是底层存储。切页中止目录和接口示例读取，保存期间防重复提交，超时提示核对保存结果。契约见[场景配置](../docs/guides/integrations.md)。
 
 观察页面先读取 Run Status；已有活动 Run 时，`session-observer.js` 通过带固定 `run_id` 的只读
 `GET /sessions/{id}/live`接收原有 SSE 实时变化，当前 POST SSE 页面不重复订阅。
 连接先建立、随后读取 History；按服务端 Run 起点 Sequence 和目标 Run ID 排除待重放内容及后续 Run，
 保留已保存用户输入，串行重放后继续接收增量。终态后忽略迟到正文，`observation_end`校准历史后关闭。
-此连接只观察打开时已在运行的那次执行；空闲会话不订阅、不自动跟随企微后续新消息。
+此连接只观察一次执行。普通聊天在会话打开期间通过独立的 `/activity` SSE 发现新一轮，
+继续复用指定 Run 的观察与历史校准。渠道会话依旧按指定 Run 观察。
 
 聊天请求在SSE开始前被明确拒绝（4xx，408超时除外）时，保留当前输入消息与后端detail错误，不执行历史恢复；新会话此时尚未落库，查询History会用404覆盖真正原因。网络中断、超时和5xx仍恢复可能已保存的历史。
 断线仅重连同一 Run；无重放缓存时回退 `history-follower.js`串行读取该 Run 的状态与 History，
 不得因状态返回新 Run 而继续跟随。正常终态 History 成功读取后才解锁。
-切会话/Agent 时中止旧 History/观察请求并忽略迟到结果。发起执行的 POST SSE 保持后台消费至终态，不能因切换而 Abort（后端会将该连接断开视为中断运行）；旧流不得更新新视图。页面卸载清理所有连接，仍不保证关闭页面后继续运行。刷新正文保留滚动和未变化 DOM 的折叠状态。
+切会话或 Agent 时中止旧 History 和观察请求并忽略迟到结果。发起执行的 POST SSE 保持后台消费至终态，用于更新对应会话的列表状态。页面卸载时清理连接，普通聊天已开始的 Run 继续执行。重新打开会话时按当前 Run 恢复观察，完成后读取历史。刷新正文保留滚动和未变化 DOM 的折叠状态。
+会话列表保持原有排序。Console 用 `include_active_runs=true` 获取运行中的 `active_run_id`。本页发起、正在观察或列表返回该字段的会话用删除位置的转圈显示生成状态，仍可重命名。终态按同一 Run 清除转圈，重新加载列表读当前状态。Console 发出删除请求前查询运行状态，运行中先停止。每个控制台页面最多持有 5 条生成连接，达到上限时保留未提交输入与交互结果，已有连接继续。切走只保留生成连接，释放旧视图；切回或打开其他客户端发起的会话时，按固定 Run 恢复观察。聊天与 Agent 的模型下拉在打开时定位到当前选项。思考档位的手动选择按模型 ID 保留在当前页面内存中，后续发送和切回同一模型时复用。未手动选择时沿用 Agent 与供应商默认规则。
 History 中运行工具一律只读，不能因工具目录补齐 widget 自动挂 HITL；只有正式 awaiting_input 可交互。
 
 | 功能 | 实现 |
@@ -85,8 +83,8 @@ History 中运行工具一律只读，不能因工具目录补齐 widget 自动�
 | 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/guides/experience/ai-title-generator.md`](../docs/guides/experience/ai-title-generator.md)） |
 | 能力面板 | `GET /api/v1/tools` |
 | 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
-| 内置工具目录 | 配置中心展示`builtin:general`、`builtin:sandbox`、`builtin:ptc`（程序编排）、`builtin:web`、`builtin:document`；Agent按包选择，旧`builtin:code-mode`不作为新目录项展示；目录行复用UI工具的`ui-tool-tree-node`及公共资源布局，不依赖Skill旧卡片样式，交互仍按`data-tool-catalog-code`独立绑定 |
-| 系统工具目录 | 配置中心按任务规划、Skill、文件、工具结果、MCP 工具发现、MCP Resource 分组展示自动注入工具；不参与 Agent 配置 |
+| 内置工具目录 | 配置中心展示`builtin:sandbox`、`builtin:ptc`（程序编排）、`builtin:web`、`builtin:document`；Agent按包选择，旧`builtin:code-mode`不作为新目录项展示；目录行复用UI工具的`ui-tool-tree-node`及公共资源布局，不依赖Skill旧卡片样式，交互仍按`data-tool-catalog-code`独立绑定 |
+| 系统工具目录 | 配置中心按基础运行、文件与结果、Skill、MCP、渠道消息五组展示自动注入工具；不参与 Agent 配置 |
 | 渠道配置 | 配置中心维护企微Account、Agent、Bot凭证和启停；顶部展示渠道网关部署/运行状态，列表展示机器人连接状态；快捷命令弹框从公共只读目录获取，与渠道 `/help` 共用定义 |
 | 任务计划 | 只识别`write_plan`完整快照；仅当前Run直播展示，任何Run终态后隐藏，重新打开History不恢复；同Turn Deferred由后端恢复PlanStore |
 | Skill | 独立 Skill 列表与详情；上传包安装/替换/单个与全部导出/删除；资源目录复用本地Lucide文件图标，按后缀区分Excel/CSV绿色、Python蓝色、Word蓝色、PDF红色、PPT橙色、图片紫色；单行展示图标、相对路径和可用文件大小，完整路径悬停可见，不重复分类/MIME说明；所有目录项可选，文本/Word/Excel可读、脚本源码复用公共高亮代码块、图片经鉴权读取并复用图片弹框样式；PDF/PPTX等显示下载Skill包占位，不展示可执行性判断；Agent 使用独立 `skills` 列表选择 |
@@ -100,6 +98,13 @@ Markdown 排版加载本地 `github-markdown-css`，由 `theme.js` 随 Console �
 v0.6.7起，轨迹把`run_code`显示为独立`PTC`类型，并在详情中提供带Python高亮与复制能力的
 Code页签；用户输入详情中的附件与Context Reference分区展示。这里只改变Event的Console投影，
 不增加Event字段或普通ConversationItem类型。
+PTC Calls 的 Code 优先使用可选 `source_location`，按 UTF-8 字节范围精确标记调用表达式，
+同一行重复调用也不混淆；跨片段按同 Run 的外层 call_id 回读原源码，不复制正文。
+无定位的旧记录沿用行号／函数名匹配；有定位但原片段未加载时明确提示，不标错当前片段。
+甘特图计时、布局和其他页签保持原逻辑。
+模型弹框仅 OpenAI／OpenAI Compatible 提供“API 协议”选择，缺省 Chat Completions，
+Responses 通过既有 tags 中的 `openai_responses` 保存；不是能力复选框，不丢弃其他标签。
+切 Provider 保留协议草稿，目录刷新只刷新能力；Responses 时隐藏 Chat 专用高级设置并保留其标记。
 
 普通对话中的思考与工具标题共用弱灰色、小图标和文字左对齐；标题后的展开箭头仅悬停/焦点时出现
 （触屏保持可见），左侧标注线只显示在展开正文。思考实时显示“思考中…”和动态提示，结束后
@@ -109,8 +114,7 @@ Code页签；用户输入详情中的附件与Context Reference分区展示。�
 ModelRetry 撤回的工具通过 SSE `tool_call_removed` 删除直播项，History 的 `status=removed`
 同样不进入普通对话正文，避免重新打开后显示成完成；原始 History 和轨迹仍保留撤回事实。
 
-`execute_python`返回的生成文件在聊天工具卡与轨迹中展示名称、MIME、大小和可复制File ID；本地
-FileStore复用现有下载链接，平台FileStore不新增代理下载接口。页面不得渲染Base64或宿主临时路径。
+生成文件、工具图片预览和下载入口从轨迹详情查看。对话的工具区保留可展开的原始结果，文件交付和图片展示使用回复正文的 FileStore 链接。
 
 v0.3.12 的配置卡只读展示工具披露策略：附件包为“有附件时可用”，大型 MCP 为“自动预选 Top 3 / 搜索 Top 5”。聊天中的 `search_tools` 是运行诊断过程，默认折叠显示为“搜索MCP工具”，不伪装成业务 MCP 工具。
 
@@ -224,11 +228,14 @@ Headers JSON使用透明输入层与语法高亮层重叠，两层及高亮token
 
 - 平台用户身份只读，通过 `GET /api/v1/request-context` 获取；随后调用`GET /api/v1/admin/access`。
 - 顶部用户菜单通过同源`GET /api/v1/current-user`读取账号中心用户名；接口不可用时只回退显示已认证
-  User ID，不阻断Console初始化，也不让浏览器直接访问账号中心。
+  User ID；用户资料异步补齐，不等待它才展示 App/Space 或验证管理员权限，也不让浏览器直接访问账号中心。
+- 请求上下文刷新后同步更新顶部调试应用、空白会话说明和右侧概览；空白会话显示应用名称及编码，
+  已有会话概览仍使用其保存的范围。手动刷新会话时重读上下文，同源其他标签页修改调试 App 时也同步回显。
 - 只有`allowed=true`且包含`enterprise_admin`角色时才初始化工作台、配置中心和诊断页面。普通用户、
   固定`admin`、401或权限服务503均显示整页门禁，不得继续请求管理数据；直接Hash访问也不能绕过。
 - 当前控制台只允许覆盖 `app`；Space 根据标准 App 编码自动去掉末尾三位，Language 固定为 `zh-cn`。
 - Console 调试值使用 `X-Deep-Agent-App` / `X-Deep-Agent-Language` 穿过平台网关；后端再转成 MCP 所需的标准 `app` / `space` / `language`，不要从浏览器直接发送会触发网关路由校验的 `app` Header。
+- MCP 列表与对话测试共用调试应用入口和浏览器上下文。HTTP 会话应用在无有效应用时先用同一个选择器确认，确认后刷新作用域、返回 MCP 列表并触发原行的一次检测。取消选择不发送检测请求。
 - 控制台 API 根地址统一由 `api.js` 基于 `document.baseURI` 的上一级动态解析；本机 `/console/`、平台多级代理 `<服务前缀>/console/` 共用同一规则，其他模块不要自行拼接域名或服务前缀。
 - 调试 App 变化会停止当前流并重新加载页面状态；旧缓存中的 Space、Language 和自定义后端地址会被清理。
 - 控制台请求固定使用当前同源后端。本地联调直接访问本机 `8000/console/`，不在浏览器中切换后端地址。
@@ -277,8 +284,8 @@ Headers JSON使用透明输入层与语法高亮层重叠，两层及高亮token
   第二行保留下钻条件与视图操作，不显示时间范围或自定义输入；时间信息与自定义设置合入时间框浮层。header预留固定行高，加载提示不得挤动内容起点。
   概览/列表加载提示放在第二行左侧普通文档流中，空闲隐藏文案；不得在表格或筛选工具条右上方绝对定位覆盖控件。慢请求回归需拦截并延迟列表响应，核对加载前后表头坐标不变。
   最近提问38px单行，右侧“Agent · 用户名 · MM-DD HH:mm”自然宽度整体右对齐，完整时间保留title；会话列表50px双行，次行“Session ID前8位 · 最新提问”，分隔点悬停原位切换复制图标，不加“最近问题：”前缀，ID与问题同色。
-  列表固定每页50条，分页放在表格底部右侧，去除组合外框及多余分隔线；表格滚动区填满分页之上的剩余高度。表头5列（会话、Agent、用户、状态、最近活动），来源通过 Agent 前的渠道图标表达，普通会话保留 Bot 图标；多余列宽交给会话列。移除末尾进入图标，行点击进入详情。`diagnostic-columns.js`以相邻列互补方式有界拖拽，支持键盘方向键，离页释放监听。
-  概览只接收Agent/时间条件；搜索框在左侧，用户与状态在同一行右侧且无边框，与关键词/状态/下钻条件同属列表私有状态，切概览不传入URL或聚合请求。筛选两行固定高度但间距紧凑；查询输入不叠加紫色焦点光圈。复制Session ID成功后原位显示Lucide小勾1500ms，再恢复复制图标，同时保留共享Toast；失败不显示小勾。默认 Agent、用户、状态、最近活动使用固定列宽，剩余空间交给会话列；拖拽时遵循相邻列互补边界。
+  列表固定每页50条，分页放在表格底部右侧，去除组合外框及多余分隔线；表格滚动区填满分页之上的剩余高度。表头7列（会话、Agent、会话来源、用户、App ID、状态、最近活动），Agent 列显示机器人图标和名称，会话来源列复用测试页概览的来源图标和名称；多余列宽交给会话列。移除末尾进入图标，行点击进入详情。`diagnostic-columns.js`以相邻列互补方式有界拖拽，支持键盘方向键，离页释放监听。
+  概览只接收Agent/时间条件；搜索框在左侧，用户与状态在同一行右侧且无边框，与关键词/状态/下钻条件同属列表私有状态，切概览不传入URL或聚合请求。筛选两行固定高度但间距紧凑；查询输入不叠加紫色焦点光圈。复制Session ID成功后原位显示Lucide小勾1500ms，再恢复复制图标，同时保留共享Toast；失败不显示小勾。默认 Agent、会话来源、用户、App ID、状态、最近活动使用固定列宽，剩余空间交给会话列；拖拽时遵循相邻列互补边界。
   趋势按容器实测宽度重算横坐标，保持184px高、固定文字/圆点尺寸；ResizeObserver离页必须断开，不触发数据请求。
   “范围内有执行异常”不等同“最近一轮异常”，提问数下钻的列表仍按会话计数。
   用户只显示平台User ID对应用户名，不显示头像/邮箱；候选从当前时间与Agent范围内的去重会话用户分页查询，支持原始ID/Username，实际筛选提交ID；
@@ -444,7 +451,7 @@ Console会话渲染模块边界：
 
 会话概览的 App / Space 只展示会话主表创建时保存的 `app_id / space_id`，缺失显示横杠“—”，不得用当前测试上下文兜底。当前请求的 App、Space、Language、User ID 集中在顶部“调试”按钮及其浮层中；普通会话列表和详情接口均返回原始归属。
 
-轨迹类型和详情页签仅做中文展示映射；执行状态保留原来的英文 Completed、Running、Pending、Interrupted、Failed，内部 kind、协议和原始数据保持不变；计划显示“计划”，run_code 标签保留 PTC。上下文引用保留在用户输入详情中，不再额外生成独立 CONTEXT 轨迹行。
+轨迹列表状态和状态说明使用英文，时刻和耗时右对齐，状态统一左对齐。右侧详情正文沿用原有中英文文案，包括「Token 用量」「缓存统计」和「思考过程」。类型徽标沿用中文，run_code 保留 PTC，业务正文与原始字段保持原文。上下文引用保留在用户输入详情中，不再额外生成独立 CONTEXT 轨迹行。
 
 空值按字段保留既有中文或横杠及原有字体颜色，不统一替换为 `No`，数值 0 保留。会话概览只显示 Agent 名称，隐藏内部 Agent ID；不展示后台 Token 估算方式。聊天正文统一 12px。
 
@@ -682,7 +689,7 @@ Agent 更新人由服务端批量返回 `updated_by_user.username`，缺失时�
 
 ### 失败 Run 的实时轨迹一致性（2026-10-22）
 
-持久化助手按 `run_id + source.message_ordinal` 标识响应；首个事实替换同 Run 最早未替换的直播助手，即使 error/cancelled 已关闭其 active 指针。该响应后续 Part 或状态更新只更新原行，不能删除下一 Loop。失败、停止及完成的纯思考响应分别显示“模型响应失败／已停止／模型思考”，仅运行中显示“模型处理中”；原思考与状态事实保持。行为回归见 `trajectory-facts.test.mjs`。
+持久化助手按 `run_id + source.message_ordinal` 标识响应；首个事实替换同 Run 最早未替换的直播助手，即使 error/cancelled 已关闭其 active 指针。该响应后续 Part 或状态更新只更新原行，不能删除下一 Loop。失败、停止、完成与运行中的纯思考响应分别显示 Model response failed、Interrupted、Model reasoning、Model processing。行为回归见 `trajectory-facts.test.mjs`。
 
 ### UI 续跑工具配对（2026-10-23）
 
@@ -703,3 +710,30 @@ GET /skills/references/agents 只投影 Agent.id/name/skills，管理员权限�
 Skill 列表筛选默认显示“全部 Skill”，第二项“未被引用”，独立分割线后为引用 Agent 默认顺序；三个口径分别使用 library/unlink/bot 图标。表格所有筛选都将自定义稳定排列在内置之前，名称旁仅保留内置标签；未被引用使用弱灰色 unlink 图标和文字。共享下拉通过可选 option.data-icon/data-separator-before 复用此展示，未标记的控件行为不变。
 
 引用 Agent 名称和浮层内容只展示，不点击回筛选；筛选只通过顶部下拉操作。引用标签及标签旁间隙点击无操作，不进入详情；仅其余行区域进入 Skill 详情。+N 数字是独立浮层热区，悬停／键盘聚焦显示下划线，必须阻止事件冒泡到行导航。
+
+
+### 运行时目录展示分组（2026-11-05）
+
+`configuration/system-tools.js` 只将只读目录聚合为基础运行、文件与结果、Skill、MCP、渠道消息五组；`runtime:basic` 是 Console 展示编码，不写入 Agent 或安装包。后端领域、工具名称及逐工具注入条件保持不变，未知领域保留在列表末尾。不要根据展示分组决定运行装配、授权或 PTC 可用性。
+
+
+### 流式与轨迹展示开销（2026-11-05）
+
+text/thinking 只合并展示（75 ms），协议事实及工具／人审不缓冲；所有语义边界刷新，销毁取消任务。折叠工具原始详情按需挂载，文件／图片／下载入口保持可用；History 更新恢复展开工具时，先通过 presenter 挂载详情，再恢复代码状态。隐藏轨迹仍接收事实但不写 DOM，跨会话与 reset 必须释放旧行／详情缓存。图标使用 render-scheduler.js 的局部 SVG 创建，不能向不支持 root 的 Lucide createIcons 传无效参数。固定回放及边界见 docs/reports/2026-11-05-console-rendering-performance.md；浏览器瞬时堆采样不能作为泄漏或客户 OOM 修复结论。
+
+## 高频展示与恢复
+
+Markdown 依赖缺失、Mermaid 加载失败及图语法失败三类警告每页各记一次，逐图错误及源码保留；库恢复后仍重试正常渲染，不替换全局 console。普通 SSE／Live 继续实时，只有 History fallback 常规完整读取节流为三秒，状态仍每秒检查，首读、变化、刷新、重试和终态强制校准。不要使用 event head 作为 History 唯一变化版本，同 Sequence 的 checkpoint 仍可能更新。
+
+### 统计分区与 G2 图表（2026-11-05）
+
+会话概览按 metrics/trend/agents/activity 分区，最多两并发，完成后仅替换所属区域；旧 overview 请求缺省仍完整返回。用量报表与明细并行，贡献会话跟随明细，不等待主图；各区独立报错／重试。保留请求代次与 AbortController，不让迟到报表清掉用户新选择；未返回的统计显示“—”，不能冒充零。
+
+G2 使用本地 5.4.8，识别 `g2` 严格 JSON 围栏（`{type:"g2",config:{...}}` 或直接 spec）。自定义元素在终态且进入视口时才创建隔离 frame，断开时释放；不得改成流式逐帧构建。frame 仅 allow-scripts、随机 nonce CSP，配置通过 postMessage 传入，不拼进 HTML、不开放网络数据或任意 JS；Tooltip 使用可信 textContent，保留完整配置的复制／失败回退。库与许可证随 Console 分发，不需要 npm 构建；依赖交接见 deploy/dependency-images.md。
+固定的 G2、主题及 frame 脚本由父页面携当前同源登录态限量读取，再以 nonce 内联到隔离 frame；不向 frame 传凭据，不用 opaque frame 直接请求网关资源或父页面 Blob URL。多图共享加载，最后一个消费者断开时中止请求并释放资源；超时覆盖资源读取与渲染，失败后可切换回图表重试。
+
+图表／配置切换位于同一卡片标题栏，两个视图的内容区均为 300px；配置代码独立滚动，保留完整复制与换行。切换复用原图表实例，不改变卡片总高度或外层滚动位置。
+
+### 轨迹与文件导出（2026-11-06）
+
+`trajectory-export.js` 为工作台和管理员诊断共用菜单、预估弹框与请求控制器。仅轨迹仍在浏览器下载原 v1 JSON，运行中可用；ZIP 要求运行结束及历史就绪，并在用户选择时按需读取完整 Events，不给正常聊天增加全量读取。先预估获得序号与摘要，再读取快照，提交时服务端重验；不得从提交 JSON 或模型文本授予文件权限。取消、切会话、切 Agent 和关闭弹框只中止独立导出请求，迟到响应不触发下载。未知大小与部分成功分别提示，完整性以包内 manifest 为准；见 `docs/guides/trajectory-export.md`。

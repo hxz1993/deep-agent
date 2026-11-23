@@ -49,7 +49,7 @@ function loadAgentConfigurationUi() {
 test("新建和历史 null 能力配置都不隐式选择任何工具包", () => {
   const ui = loadAgentConfigurationUi();
   const selected = ui.buildCapabilitySelectionSet(null, [
-    { code: "builtin:general" },
+    { code: "builtin:ptc" },
     { code: "builtin:sandbox" },
     { code: "mcp:optional" },
     { code: "ui:builtin" },
@@ -84,7 +84,7 @@ test("新建 Agent 使用空数组初始化工具包关联", () => {
 test("后端 category 直接驱动工具包分组", () => {
   const ui = loadAgentConfigurationUi();
   const grouped = ui.groupCapabilities([
-    { code: "builtin:general", category: "builtin", label: "通用工具" },
+    { code: "builtin:ptc", category: "builtin", label: "程序编排" },
     { code: "builtin:sandbox", category: "builtin", label: "Python 沙箱" },
     { code: "mcp:demo", category: "mcp" },
   ]);
@@ -92,7 +92,7 @@ test("后端 category 直接驱动工具包分组", () => {
   assert.deepEqual([...grouped.groups], ["builtin", "mcp"]);
   assert.deepEqual(
     Array.from(grouped.byGroup.builtin, (toolPackage) => toolPackage.code),
-    ["builtin:general", "builtin:sandbox"],
+    ["builtin:ptc", "builtin:sandbox"],
   );
   assert.equal(ui.capabilityGroup({ category: "builtin" }), "builtin");
   assert.equal(ui.capabilityGroup({ category: "mcp" }), "mcp");
@@ -122,20 +122,20 @@ test("Agent 内置工具卡片优先展示中文名称和技术类型", () => {
   const ui = loadAgentConfigurationUi();
   const card = ui.window.agentsAdmin.renderCapCard(
     {
-      code: "builtin:general",
+      code: "builtin:ptc",
       category: "builtin",
-      label: "通用工具",
+      label: "程序编排",
       source: "builtin",
-      description: "进程内通用工具",
-      tools: [{ name: "get_current_time", description: "获取当前 UTC 时间。" }],
+      description: "进程内程序编排",
+      tools: [{ name: "run_code", description: "编排已授权工具。" }],
     },
-    new Set(["builtin:general"]),
+    new Set(["builtin:ptc"]),
   );
 
-  assert.match(card, /通用工具/);
+  assert.match(card, /程序编排/);
   assert.match(card, /内置/);
-  assert.match(card, /value="builtin:general"/);
-  assert.doesNotMatch(card, /get_current_time/);
+  assert.match(card, /value="builtin:ptc"/);
+  assert.doesNotMatch(card, /run_code/);
   assert.match(card, /data-lucide="hammer"/);
 });
 

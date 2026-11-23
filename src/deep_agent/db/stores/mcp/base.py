@@ -71,9 +71,10 @@ class McpServerStoreBase(SessionBoundMixin):
         data: McpServerUpdate,
         *,
         inspection: dict | None | object = _INSPECTION_UNSET,
+        expected: McpServer | None = None,
     ) -> McpServer | None:
         async with self._write() as db:
-            row = await self._get_by_name(db, name)
+            row = await self._lock_current_config(db, name, expected)
             if row is None:
                 return None
             updates = data.model_dump(exclude_unset=True)
@@ -89,15 +90,27 @@ class McpServerStoreBase(SessionBoundMixin):
         self,
         name: str,
         inspection: dict,
+        *,
+        expected: McpServer | None = None,
     ) -> McpServer | None:
         async with self._write() as db:
-            row = await self._get_by_name(db, name)
+            row = await self._lock_current_config(db, name, expected)
             if row is None:
                 return None
             row.inspection = inspection
             await db.flush()
             await db.refresh(row)
             return row
+
+    async def _lock_current_config(
+        self, db: AsyncSession, name: str, expected: McpServer | None,
+    ) -> McpServer | None:
+        row = await lock_optional(db, McpServer, McpServer.name, name)
+        if row is not None and expected is not None and (
+            row.transport != expected.transport or row.config != expected.config
+        ):
+            raise ReferenceConflict("MCP 配置已变化，请刷新后重试。")
+        return row
 
     async def rename_with_agent_references(
         self,
@@ -121,7 +134,6 @@ class McpServerStoreBase(SessionBoundMixin):
                     raise PermissionError("stdio MCP 已停止支持；历史配置不能重命名")
                 if new_name == old_name:
                     return McpRenameStoreResult(row=row, updated_agent_names=[])
-
                 conflict = await self._get_by_name(db, new_name)
                 if conflict is not None:
                     raise ValueError(f"MCP server already exists: {new_name}")

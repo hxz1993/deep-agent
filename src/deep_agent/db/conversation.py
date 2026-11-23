@@ -9,14 +9,18 @@ import json
 import sys
 from collections import defaultdict
 from contextlib import asynccontextmanager
+from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Protocol, runtime_checkable
 
+import anyio
 from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 from sqlalchemy import and_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from deep_agent.agent.history import first_user_prompt
+from deep_agent.agent.tool_names import WIRE_NAMES
 from deep_agent.db.event_codec import (
     MESSAGE_EVENT_TYPES,
     attachment_part_references,
@@ -24,9 +28,10 @@ from deep_agent.db.event_codec import (
     group_message_events,
     event_contains_call,
     message_parts,
+    message_payload,
     tool_part_references,
 )
-from deep_agent.db.session_list import SessionListFilters, SessionSummaryRow
+from deep_agent.db.session_list import SessionFilterOptions, SessionListFilters, SessionSummaryRow
 from deep_agent.db.session_scope import NO_AGENT_SCOPE, SessionOwner, normalize_agent_scope, runtime_session_key
 from deep_agent.db.stores.chat_session.base import ChatSessionStoreBase
 from deep_agent.db.stores.event.base import LifecycleStatus, SessionEventSnapshot, SessionEventStore, _compaction_anchor
@@ -37,6 +42,31 @@ from deep_agent.db.serialization import serialize_message
 _MESSAGE_TERMINAL_STATUSES = {"completed", "pending", "cancelled", "failed", "interrupted"}
 
 __all__ = ["SessionStore", "SqlConversationCoordinator", "SqlConversationStore"]
+
+
+@dataclass(frozen=True)
+class AutomaticTitleFallback:
+    title: str
+    attachment_count: int
+    context_count: int
+
+
+@dataclass
+class MessagePartWriteState:
+    """Confirmed event rows belonging to one active Run."""
+
+    head: tuple[str, str, str, int, str | None] | None = None
+    events: tuple[ChatSessionEvent, ...] = ()
+
+
+async def _settle_db_task(task: asyncio.Task[Any]) -> Any:
+    with anyio.CancelScope(shield=True):
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+        return task.result()
 
 
 @runtime_checkable
@@ -54,6 +84,7 @@ class SessionStore(Protocol):
         turn_id: str | None = None, run_id: str | None = None,
         first_message_ordinal: int = 0, terminal_status: str | None = None,
         usage_model_id: str | None = None, usage_provider_id: str | None = None,
+        automatic_title: AutomaticTitleFallback | None = None,
     ) -> list[SessionEventSnapshot]: ...
 
     async def append_message_parts(
@@ -108,6 +139,9 @@ class SessionStore(Protocol):
     async def list_session_summaries(
         self, filters: SessionListFilters,
     ) -> tuple[list[SessionSummaryRow], int]: ...
+    async def list_session_filter_options(
+        self, *, user_id: str, agent_id: str | None = None,
+    ) -> SessionFilterOptions: ...
     async def list_events(
         self, session_id: str, **filters: Any,
     ) -> list[SessionEventSnapshot]: ...
@@ -189,6 +223,11 @@ class SqlConversationCoordinator:
             return []
         return await self._events.get_raw_history(session_id)
 
+    async def get_history_pair(
+        self, session_id: str, *, agent_id: str | None = None,
+    ) -> tuple[list[ModelMessage], list[ModelMessage]]:
+        return await self._events.get_history_pair(session_id, agent_id=normalize_agent_scope(agent_id))
+
     async def append(
         self, session_id: str, messages: list[ModelMessage], *,
         agent_id: str | None = None, user_id: str | None = None,
@@ -196,6 +235,7 @@ class SqlConversationCoordinator:
         turn_id: str | None = None, run_id: str | None = None,
         first_message_ordinal: int = 0, terminal_status: str | None = None,
         usage_model_id: str | None = None, usage_provider_id: str | None = None,
+        automatic_title: AutomaticTitleFallback | None = None,
     ) -> list[SessionEventSnapshot]:
         if not messages and terminal_status is None:
             return []
@@ -203,11 +243,14 @@ class SqlConversationCoordinator:
             raise ValueError("Invalid Run terminal status")
         scope, user = self._required_identity(agent_id, user_id)
         async with self._write() as db:
-            existing_owner = await self._chat_sessions._get_owner(
-                db, scope, session_id, for_update=True
+            now = datetime.now(timezone.utc)
+            # _ensure locks the Agent and session and checks ownership before we
+            # read or append any message events in this transaction.
+            session = await self._chat_sessions._ensure(
+                db, session_id, agent_id=scope, user_id=user,
+                app_id=app_id, space_id=space_id,
+                initial_title=first_user_prompt(messages), now=now,
             )
-            if existing_owner.exists and existing_owner.user_id != user:
-                raise PermissionError("Session belongs to another user")
             creates_turn = any(
                 isinstance(message, ModelRequest)
                 and any(isinstance(part, UserPromptPart) for part in message.parts)
@@ -220,12 +263,7 @@ class SqlConversationCoordinator:
                 raise ValueError(
                     "Message Events require turn_id, or run_id for a new user turn"
                 )
-            now = datetime.now(timezone.utc)
-            title = first_user_prompt(messages) if not existing_owner.exists else None
-            session = await self._chat_sessions._ensure(
-                db, session_id, agent_id=scope, user_id=user,
-                app_id=app_id, space_id=space_id, title=title, now=now,
-            )
+            has_previous_events = int(session.next_sequence) > 1
             part_mode = any(
                 "deepagent_message_ordinal" in (getattr(message, "metadata", None) or {})
                 for message in messages
@@ -238,7 +276,7 @@ class SqlConversationCoordinator:
                 ))).scalars())
                 part_mode = any(isinstance(row.payload.get("source"), dict) for row in persisted)
             if part_mode and run_id:
-                rows = await self._events._append_message_parts(
+                rows, _ = await self._events._append_message_parts(
                     db, session, messages, turn_id=resolved_turn_id, run_id=run_id,
                     first_message_ordinal=first_message_ordinal, terminal_status=terminal_status,
                     usage_model_id=usage_model_id, usage_provider_id=usage_provider_id,
@@ -249,7 +287,21 @@ class SqlConversationCoordinator:
                     first_message_ordinal=first_message_ordinal,
                     terminal_status=terminal_status,
                     usage_model_id=usage_model_id, usage_provider_id=usage_provider_id,
+                    session_locked=True,
                 )
+            if automatic_title is not None and rows and rows[0].event_type == "user/message":
+                if not has_previous_events or await self._events._latest_title(db, session_id) is None:
+                    fallback = await self._events._append_title(
+                        db, session, title=automatic_title.title, source="fallback",
+                        source_event_id=rows[0].event_id, turn_id=resolved_turn_id, run_id=run_id,
+                        details={
+                            "context_count": automatic_title.context_count,
+                            "attachment_count": automatic_title.attachment_count,
+                            "image_used": False,
+                        },
+                        now=now, session_locked=True,
+                    )
+                    rows.append(fallback)
             return [SessionEventSnapshot.from_row(row) for row in rows]
 
     async def append_message_parts(
@@ -258,27 +310,66 @@ class SqlConversationCoordinator:
         first_message_ordinal: int = 1, app_id: str | None = None,
         space_id: str | None = None, terminal_status: str | None = None,
         usage_model_id: str | None = None, usage_provider_id: str | None = None,
+        write_state: MessagePartWriteState | None = None,
     ) -> list[SessionEventSnapshot]:
         if not run_id or not turn_id:
             raise ValueError("Message parts require run_id and turn_id")
         if terminal_status is not None and terminal_status not in _MESSAGE_TERMINAL_STATUSES:
             raise ValueError("Invalid message terminal status")
         scope, user = self._required_identity(agent_id, user_id)
-        async with self._write() as db:
-            owner = await self._chat_sessions._get_owner(db, scope, session_id, for_update=True)
-            if owner.exists and owner.user_id != user:
-                raise PermissionError("Session belongs to another user")
-            session = await self._chat_sessions._ensure(
-                db, session_id, agent_id=scope, user_id=user,
-                app_id=app_id, space_id=space_id,
-                title=first_user_prompt(messages) if not owner.exists else None,
-            )
-            rows = await self._events._append_message_parts(
-                db, session, messages, turn_id=turn_id, run_id=run_id,
-                first_message_ordinal=first_message_ordinal, terminal_status=terminal_status,
-                usage_model_id=usage_model_id, usage_provider_id=usage_provider_id,
-            )
-            return [SessionEventSnapshot.from_row(row) for row in rows]
+        if self._session_factory.kw.get("expire_on_commit", True):
+            # Only reuse rows whose loaded values survive the transaction.
+            write_state = None
+
+        async def append() -> list[SessionEventSnapshot]:
+            async with self._write() as db:
+                # _ensure locks the Agent and Session and validates the session owner.
+                session = await self._chat_sessions._ensure(
+                    db, session_id, agent_id=scope, user_id=user,
+                    app_id=app_id, space_id=space_id,
+                    initial_title=first_user_prompt(messages),
+                    read_event_head=write_state is not None, touch=False,
+                )
+                next_sequence = int(session.next_sequence)
+                event_head_id = session.event_head_id if write_state is not None else None
+                head = (session_id, turn_id, run_id, next_sequence, event_head_id)
+                committed = None
+                if write_state is not None:
+                    if write_state.head == head and (next_sequence == 1 or event_head_id is not None):
+                        committed = write_state.events
+                    # A failed or uncertain commit may make this state stale.
+                    write_state.head = None
+                    write_state.events = ()
+                rows, stored = await self._events._append_message_parts(
+                    db, session, messages, turn_id=turn_id, run_id=run_id,
+                    first_message_ordinal=first_message_ordinal, terminal_status=terminal_status,
+                    usage_model_id=usage_model_id, usage_provider_id=usage_provider_id,
+                    committed=committed,
+                )
+                snapshots = [SessionEventSnapshot.from_row(row) for row in rows]
+                if write_state is not None:
+                    # Keep published payloads independent of the writer's state.
+                    snapshots = deepcopy(snapshots)
+                    if session.next_sequence != next_sequence:
+                        event_head_id = rows[-1].event_id
+                    head = (session_id, turn_id, run_id, int(session.next_sequence), event_head_id)
+            if write_state is not None:
+                write_state.head = head
+                write_state.events = stored
+            return snapshots
+
+        if self._session_factory.kw["bind"].dialect.name != "sqlite":
+            return await append()
+        # aiosqlite can still hold the write lock after a cancelled SQL await.
+        # Finish persisting the already-confirmed facts before cancellation
+        # starts another transaction to close this Run.
+        writing = asyncio.create_task(append())
+        try:
+            return await asyncio.shield(writing)
+        except asyncio.CancelledError:
+            with contextlib.suppress(Exception):
+                await _settle_db_task(writing)
+            raise
 
     async def append_lifecycle(
         self, session_id: str, *, event_type: str, status: LifecycleStatus,
@@ -312,7 +403,6 @@ class SqlConversationCoordinator:
         or blindly retried. Cancellation before commit rolls back. Once commit
         has begun, settle it before closing its session and confirm the fact.
         """
-        import anyio
         from copy import deepcopy
         from deep_agent.agent.structured_output import output_id_for
         from deep_agent.structured_output.schema import json_bytes, validate_output_name
@@ -339,15 +429,6 @@ class SqlConversationCoordinator:
             raise ValueError("Output attempt requires its Turn and Run")
         event_id = output_id_for(session_id, run_id, ordinal, part_index)
         scope, user = self._required_identity(agent_id, user_id)
-
-        async def settle(task):
-            with anyio.CancelScope(shield=True):
-                while not task.done():
-                    try:
-                        await asyncio.shield(task)
-                    except asyncio.CancelledError:
-                        continue
-                return task.result()
 
         async def write_attempt(db):
             owner = await self._chat_sessions._get_owner(db, scope, session_id, for_update=True)
@@ -425,15 +506,15 @@ class SqlConversationCoordinator:
                         await acquire_write_barrier(db)
                         expected = await write_attempt(db)
                     except BaseException:
-                        await settle(asyncio.create_task(db.rollback()))
+                        await _settle_db_task(asyncio.create_task(db.rollback()))
                         raise
                     committing = asyncio.create_task(db.commit())
                     try:
                         await asyncio.shield(committing)
                     except asyncio.CancelledError:
-                        await settle(committing)
+                        await _settle_db_task(committing)
                     except BaseException:
-                        await settle(asyncio.create_task(db.rollback()))
+                        await _settle_db_task(asyncio.create_task(db.rollback()))
                         raise
                     return expected
         except BaseException:
@@ -1087,7 +1168,13 @@ class SqlConversationCoordinator:
             updated_after=filters.updated_after, updated_before=filters.updated_before,
             has_messages=filters.has_messages, sort=filters.sort,
             query=filters.query, source_type=filters.source_type, source_id=filters.source_id,
+            app_id=filters.app_id, unassigned_app=filters.unassigned_app,
         )
+
+    async def list_session_filter_options(
+        self, *, user_id: str, agent_id: str | None = None,
+    ) -> SessionFilterOptions:
+        return await self._chat_sessions.list_filter_options(user_id=user_id, agent_id=agent_id)
 
     async def interrupt_running(self) -> int:
         return await self._events.interrupt_running()
@@ -1097,8 +1184,10 @@ SqlConversationStore = SqlConversationCoordinator
 
 
 def _common_message_suffix(raw: list[ModelMessage], projected: list[ModelMessage]) -> int:
-    raw_payloads = [serialize_message(message) for message in raw]
-    projected_payloads = [serialize_message(message) for message in projected]
+    from deep_agent.agent.tool_names import model_tool_history
+
+    raw_payloads = [serialize_message(message) for message in model_tool_history(raw)]
+    projected_payloads = [serialize_message(message) for message in model_tool_history(projected)]
     count = 0
     while count < min(len(raw_payloads), len(projected_payloads)):
         original = raw_payloads[-1 - count]
@@ -1118,6 +1207,9 @@ def _common_message_suffix(raw: list[ModelMessage], projected: list[ModelMessage
                     {key: value for key, value in part.items() if key != "timestamp"}
                     if part.get("part_kind") == "tool-return" else part
                     for part in payload.get("parts", [])
+                    # A generated instruction baseline is added after the
+                    # prompt's event is committed, as with the request envelope.
+                    if part.get("part_kind") != "instruction-baseline"
                 ]
             if original.get("instructions") is None:
                 original.pop("instructions", None)
@@ -1172,6 +1264,7 @@ def _tool_evidence(rows: list[ChatSessionEvent]) -> list[dict[str, Any]]:
         metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
         factual_content = metadata.get("inline_fallback", content)
         artifact_id = _find_artifact_id(metadata) or _find_artifact_id(result_part)
+        aliases = ((message_payload(call or result) or {}).get("metadata") or {}).get(WIRE_NAMES) or {}
         outcome = ("failed" if result_part.get("part_kind") == "retry-prompt" or metadata.get("error")
                    else (result_part.get("outcome") or "success") if result else "pending")
         item = project_tool_evidence(
@@ -1185,6 +1278,7 @@ def _tool_evidence(rows: list[ChatSessionEvent]) -> list[dict[str, Any]]:
                 ),
                 "call_id": call_id,
                 "tool_name": (call_ref or result_ref or {}).get("tool_name"),
+                "wire_name": aliases.get(str((call_ref or result_ref)["part_offset"])),
                 "call_event_id": call.event_id if call else None,
                 "call_part_offset": call_ref.get("part_offset") if call_ref else None,
                 "result_event_id": result.event_id if result else None,

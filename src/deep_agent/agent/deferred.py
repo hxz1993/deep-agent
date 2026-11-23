@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic_ai import DeferredToolRequests, DeferredToolResults, ToolDenied
@@ -17,7 +18,14 @@ class DeferredResultConflict(ValueError):
         super().__init__("工具确认已处理或已失效，请刷新会话后继续；本次未重复执行。")
 
 
-async def validate_deferred_results(store, session_id: str, results: DeferredToolResults | None) -> None:
+@dataclass(frozen=True)
+class DeferredReasoning:
+    effort: str
+    model_id: str | None
+    provider_id: str | None
+
+
+async def validate_deferred_results(store, session_id: str, results: DeferredToolResults | None) -> DeferredReasoning | None:
     """Accept results only for the current durable pending response.
 
     Call after ownership validation and again under the session execution lock.
@@ -29,6 +37,8 @@ async def validate_deferred_results(store, session_id: str, results: DeferredToo
 
     rows = await store.list_all_events(session_id)
     pending: dict[str, str] = {}
+    effort = None
+    origin_run = None
     for event in group_message_events([
         row.public_dict() if hasattr(row, "public_dict") else row for row in rows
     ]):
@@ -37,7 +47,10 @@ async def validate_deferred_results(store, session_id: str, results: DeferredToo
         # does not invalidate the still-pending response; a durable result does.
         if kind == "user/message":
             pending = {}
+            metadata = (event.get("payload", {}).get("message") or {}).get("metadata")
+            effort = metadata.get("reasoning_effort") if isinstance(metadata, dict) else None
         elif kind == "assistant/message":
+            origin_run = event.get("run_id")
             pending = {
                 ref["call_id"]: ref["tool_name"]
                 for ref in tool_part_references(event) if ref["role"] == "call"
@@ -51,12 +64,23 @@ async def validate_deferred_results(store, session_id: str, results: DeferredToo
             or not set(results.metadata) <= submitted
             or set(results.calls) & set(results.approvals)):
         raise DeferredResultConflict()
+    if not isinstance(effort, str):
+        return None
+    # The usage carrier may be the user event when a response contains only
+    # a deferred call. Restrict to chat requests in the same durable run.
+    models = {
+        (call["model_id"], call.get("provider_id")) for row in rows if row.run_id == origin_run
+        for call in (row.usage or {}).get("calls", [])
+        if call.get("purpose") == "chat" and call.get("model_id")
+    }
+    model_id, provider_id = next(iter(models)) if len(models) == 1 else (None, None)
+    return DeferredReasoning(effort, model_id, provider_id)
 
 
-def serialize_deferred(requests: DeferredToolRequests) -> dict[str, Any]:
+def serialize_deferred(requests: DeferredToolRequests, tool_names=None, display_names=None) -> dict[str, Any]:
     return {
-        "calls": [_tool_call_part_dict(part) for part in requests.calls],
-        "approvals": [_tool_call_part_dict(part) for part in requests.approvals],
+        "calls": [_tool_call_part_dict(part, tool_names or {}, display_names or {}) for part in requests.calls],
+        "approvals": [_tool_call_part_dict(part, tool_names or {}, display_names or {}) for part in requests.approvals],
     }
 
 
@@ -75,9 +99,12 @@ def build_deferred_tool_results(items: list[DeferredToolResultItem]) -> Deferred
     return results
 
 
-def _tool_call_part_dict(part: ToolCallPart) -> dict[str, Any]:
+def _tool_call_part_dict(part: ToolCallPart, tool_names, display_names) -> dict[str, Any]:
+    identity = tool_names.get(part.tool_name)
+    display_name = display_names.get(part.tool_name)
     return {
-        "tool": part.tool_name,
+        "tool": identity.public if identity else part.tool_name,
         "args": part.args_as_dict(),
         "tool_call_id": part.tool_call_id,
+        **({"display_name": display_name} if display_name else {}),
     }

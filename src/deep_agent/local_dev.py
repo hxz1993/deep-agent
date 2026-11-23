@@ -11,6 +11,7 @@ from typing import Any
 from deep_agent.local_security import (
     LOCAL_CONSOLE_ADMIN_SCOPE_KEY,
     LOCAL_CURRENT_USERNAME_SCOPE_KEY,
+    LOCAL_DEV_SCOPE_KEY,
     enable_local_runtime,
 )
 
@@ -44,7 +45,11 @@ _FALSE_VALUES = frozenset({"0", "false", "no", "off"})
 
 
 def _read_only_diagnostic_post(path: str) -> bool:
-    """Allow only the JSON aliases of existing administrator diagnostic reads."""
+    """Allow explicit diagnostic reads and ephemeral trajectory exports only."""
+    ordinary_prefix = "/api/v1/sessions/"
+    if path.startswith(ordinary_prefix):
+        parts = path[len(ordinary_prefix):].split("/")
+        return len(parts) == 2 and bool(parts[0]) and parts[1] == "trajectory-export"
     prefix = "/api/v1/diagnostics/"
     if not path.startswith(prefix):
         return False
@@ -54,7 +59,7 @@ def _read_only_diagnostic_post(path: str) -> bool:
     if len(parts) == 2:
         return parts[0] == "sessions" or (parts[0] == "usage" and parts[1] in {"details", "sessions", "export"})
     if len(parts) == 3:
-        return (parts[0] == "sessions" and parts[2] == "events" and bool(parts[1])) or (
+        return (parts[0] == "sessions" and parts[2] in {"events", "trajectory-export"} and bool(parts[1])) or (
             parts[0] == "channels" and bool(parts[1]) and parts[2] in {"overview", "peers", "sessions"})
     return False
 
@@ -155,6 +160,13 @@ class LocalIdentityAdapter:
                 )(scope, receive, send)
                 return
 
+        path = scope.get("path", "")
+        public_service = "/api/v1/agent-service"
+        artifact_download = path.startswith(f"{public_service}/tasks/") and path.endswith("/download")
+        if path == f"{public_service}/mcp" or path.startswith(f"{public_service}/a2a/") or artifact_download:
+            await self.app(scope, receive, send)
+            return
+
         forwarded_scope = dict(scope)
         incoming_headers = scope.get("headers") or []
         headers = [
@@ -164,6 +176,7 @@ class LocalIdentityAdapter:
         ]
         headers.extend(self.identity.request_headers())
         forwarded_scope["headers"] = headers
+        forwarded_scope[LOCAL_DEV_SCOPE_KEY] = True
         if self.identity.console_admin_bypass:
             forwarded_scope[LOCAL_CONSOLE_ADMIN_SCOPE_KEY] = True
         local_username = self.identity.username or (

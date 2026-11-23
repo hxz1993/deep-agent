@@ -13,7 +13,7 @@ from deep_agent.agent.attachments import (
     resolve_history_for_llm,
     resolve_user_prompt,
 )
-from deep_agent.db.serialization import deserialize_message, serialize_message
+from deep_agent.db.serialization import StoredUserPromptPart, deserialize_message, serialize_message
 from deep_agent.schemas.attachment import AttachmentRef
 from tests.helpers.conversation import project_model_messages
 
@@ -22,7 +22,7 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
     @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
     async def test_audio_reference_keeps_authorization_without_native_input(self, download):
         ref = AttachmentRef(id="audio-file", name="voice.amr", mime="audio/amr", input_mode="reference")
-        raw = ModelRequest(parts=[UserPromptPart(content=refs_from_attachments("平台转写", [ref]))])
+        raw = ModelRequest(parts=[StoredUserPromptPart(content=refs_from_attachments("平台转写", [ref]))])
         restored = deserialize_message(serialize_message(raw))
         indexed = index_attachment_refs(messages=[restored])
         self.assertIn("audio-file", indexed)
@@ -51,6 +51,19 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
         )
 
     @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
+    async def test_ordinary_chat_can_select_a_native_image_by_its_file_id(self, download):
+        download.return_value = b"img-bytes"
+        ref = AttachmentRef(id="image-1", name="a.jpg", mime="image/jpeg")
+        prompt = await resolve_user_prompt("", [ref], {}, include_native_file_id=True)
+        raw = ModelRequest(parts=[StoredUserPromptPart(content=refs_from_attachments("", [ref]))])
+        history = await resolve_history_for_llm(
+            [raw], current_user_index=0, request_headers={}, include_native_file_id=True,
+        )
+        for parts in (prompt, history[0].parts[0].content):
+            self.assertIn("file_id: image-1", parts[0].content)
+            self.assertEqual(parts[1].data, b"img-bytes")
+
+    @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
     async def test_image_is_forwarded_without_local_model_gate(self, mock_download: AsyncMock) -> None:
         mock_download.return_value = b"img-bytes"
         parts = await resolve_user_prompt(
@@ -77,7 +90,7 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
         ref = attachment_ref_dict(
             AttachmentRef(id="f1", name="a.png", mime="image/png"),
         )
-        msg = ModelRequest(parts=[UserPromptPart(content=["hello", ref])])
+        msg = ModelRequest(parts=[StoredUserPromptPart(content=["hello", ref])])
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             payload = serialize_message(msg)
@@ -111,7 +124,7 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
         self.assertIn("mime: application/pdf", current[0].content)
         self.assertNotIn("read_file", current[0].content)
         self.assertNotIn("parse_document", current[0].content)
-        raw = ModelRequest(parts=[UserPromptPart(content=refs_from_attachments("read", [ref]))])
+        raw = ModelRequest(parts=[StoredUserPromptPart(content=refs_from_attachments("read", [ref]))])
         history = await resolve_history_for_llm([raw], current_user_index=0, request_headers={})
         self.assertNotIn("read_file", str(history[0].parts[0].content))
         download.assert_not_awaited()
@@ -121,7 +134,7 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
         history = [
             ModelRequest(
                 parts=[
-                    UserPromptPart(
+                    StoredUserPromptPart(
                         content=[
                             attachment_ref_dict(
                                 AttachmentRef(id="old-id", name="old.jpg", mime="image/jpeg")
@@ -182,7 +195,7 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
                 extracted_text="[附件: note.txt]\nhi",
             )
         )
-        messages = [ModelRequest(parts=[UserPromptPart(content=["hello", ref])])]
+        messages = [ModelRequest(parts=[StoredUserPromptPart(content=["hello", ref])])]
         timeline = project_model_messages(messages)
         self.assertEqual(len(timeline), 1)
         self.assertEqual(timeline[0].text, "hello")
@@ -197,7 +210,7 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
         indexed = index_attachment_refs(
             attachments=[current],
             messages=[
-                ModelRequest(parts=[UserPromptPart(content=[old])]),
+                ModelRequest(parts=[StoredUserPromptPart(content=[old])]),
             ],
         )
         self.assertEqual(set(indexed), {"current", "old"})

@@ -117,7 +117,7 @@ async def media(body: MediaRequest, ctx: AppContextDep, account: ChannelAccountD
         log_event('webhook_bridge_completed', **fields, byte_size=len(data))
         return Response(data, media_type=mime, headers=headers)
     except Exception as exc:
-        log_event('webhook_bridge_failed', **fields, error_type=type(exc).__name__, error_code=getattr(exc, 'code', None))
+        log_event('webhook_bridge_failed', **fields, exception=exc, error_code=getattr(exc, 'code', None))
         raise
 
 
@@ -138,7 +138,7 @@ async def send_message(body: SendRequest, ctx: AppContextDep, account: ChannelAc
         log_event('webhook_bridge_completed', **fields, count=result['part_count'])
         return result
     except Exception as exc:
-        log_event('webhook_bridge_failed', **fields, error_type=type(exc).__name__, error_code=getattr(exc, 'code', None))
+        log_event('webhook_bridge_failed', **fields, exception=exc, error_code=getattr(exc, 'code', None))
         raise
 
 
@@ -172,6 +172,6 @@ async def send_component(body: ComponentRequest, ctx: AppContextDep, account: Ch
         log_event('webhook_bridge_completed', **fields, count=1)
         return result
     except Exception as exc:
-        log_event('webhook_bridge_failed', **{**fields, 'phase': getattr(exc, 'stage', 'send')}, error_type=type(exc).__name__,
+        log_event('webhook_bridge_failed', **{**fields, 'phase': getattr(exc, 'stage', 'send')}, exception=exc,
                   error_code=getattr(exc, 'code', None))
         raise

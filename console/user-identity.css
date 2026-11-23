@@ -25,5 +25,3 @@
 .user-account-host .user-popover[hidden] { display:none; }
 .user-account-profile { display:block; width:100%; padding-bottom:4px; }
 .diagnostic-sessions-page .diagnostic-user-options .da-user-contact { margin:0; }
-.diagnostic-sessions-page .diagnostic-session-row { grid-template-columns:var(--diagnostic-columns,minmax(240px,1fr) 140px 260px 100px 70px 150px); }
-.diagnostic-sessions-page .diagnostic-session-table { min-width:1020px; }

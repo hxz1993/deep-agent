@@ -93,10 +93,8 @@ class StructuredOutputDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(next(c for c in inspected if c["name"] == "updated_by")["type"].length, 128)
                 self.assertEqual(await db.run_sync(lambda conn: sa.inspect(conn).get_foreign_keys("agent_output_configs")), [])
                 self.assertEqual(await db.run_sync(lambda conn: sum(len(sa.inspect(conn).get_foreign_keys(t)) for t in sa.inspect(conn).get_table_names())), 0)
-            # Preserve the deployed 011->012 checks above. Current ORM CRUD
-            # requires the separately authorized 013 config column, so only this next
-            # phase advances to 013 rather than querying new columns at 012.
-            await self._migrate(url, "013")
+            # Exercise current ORM CRUD only after upgrading the historical fixture.
+            await self._migrate(url, "016")
             factory = async_sessionmaker(source, expire_on_commit=False)
             stores = create_data_stores(resolve_dialect(url), factory)
             row = await stores.agent.create_unique(AgentCreate(name="新 Agent 🧪", prompt="内容 👋📊🙂", output_config=CONFIG), user_id="trusted-user")
@@ -167,11 +165,11 @@ class StructuredOutputDatabaseTests(unittest.IsolatedAsyncioTestCase):
             # restoration uses the real production import transaction boundary.
             with tempfile.TemporaryDirectory(prefix="TMP_to_delete_output_backup_") as temp:
                 backup = await export_backup(url, environment="fixture", output_root=Path(temp), git_commit="fixture")
-                self.assertEqual(backup.revision, "013")
+                self.assertEqual(backup.revision, "016")
                 self.assertEqual(backup.row_counts["agent_output_configs"], 2)
                 self.assertEqual(backup.row_counts["chat_sessions"], 0)
                 self.assertEqual(backup.row_counts["chat_session_events"], 0)
-                await self._migrate(restore_url, "013")
+                await self._migrate(restore_url, "016")
                 restored = create_async_engine(restore_url)
                 plan = await build_configuration_import_plan(backup.path, target_engine=restored)
                 self.assertEqual(next(item for item in plan.rows["agent_output_configs"] if item["agent_id"] == row.id)["json_schema"], CONFIG["json_schema"])
@@ -184,6 +182,8 @@ class StructuredOutputDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await restore_stores.agent.get_output_config(row.id)).json_schema, CONFIG["json_schema"])
                 self.assertTrue((await restore_stores.agent.get_by_id(enabled.id)).structured_output_enabled)
 
+            await self._migrate(url, "014", downgrade=True)
+            await self._migrate(url, "013", downgrade=True)
             # Each guard is independently exercised without deleting user data:
             # only this test's rows are cleared between the disposable fixtures.
             with self.assertRaisesRegex(RuntimeError, "output_configs=2"):

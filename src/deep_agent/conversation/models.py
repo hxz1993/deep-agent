@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from deep_agent.time import UtcDatetime
 
@@ -29,6 +29,11 @@ class ConversationAttachment(BaseModel):
     mime: str | None = None
     byte_size: int | None = None
     content_hash: str | None = None
+
+
+class ConversationOutputFile(ConversationAttachment):
+    preview_url: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    preview_scope: tuple[str | None, str | None] | None = Field(default=None, exclude=True)
 
 
 class ConversationArtifact(BaseModel):
@@ -59,6 +64,7 @@ class ConversationItemBase(BaseModel):
 
 class UserConversationItem(ConversationItemBase):
     kind: Literal["user_message"] = "user_message"
+    reasoning_effort: str | None = Field(default=None, exclude_if=lambda value: value is None)
     text: str | None = None
     attachments: list[ConversationAttachment] = Field(default_factory=list)
     context_refs: list[dict[str, Any]] = Field(default_factory=list)
@@ -69,6 +75,7 @@ class AssistantConversationItem(ConversationItemBase):
     phase: Literal["process", "final"] = "process"
     thinking: str | None = None
     text: str | None = None
+    output_files: list[ConversationOutputFile] | None = Field(default=None, exclude_if=lambda value: value is None)
     conversation_id: str | None = None
     model_name: str | None = None
     provider_name: str | None = None
@@ -78,6 +85,7 @@ class AssistantConversationItem(ConversationItemBase):
 
 
 class ToolConversationItem(ConversationItemBase):
+    _wire_name: str | None = PrivateAttr(default=None)
     kind: Literal["tool"] = "tool"
     call_id: str
     tool_name: str | None = None
@@ -109,6 +117,8 @@ class StructuredOutputConversationItem(ConversationItemBase):
     tool_call_id: str
     attempt: int
     output: Any
+    publication_protocol: Literal["a2a", "mcp", "http"] | None = Field(default=None, exclude_if=lambda value: value is None)
+    output_files: list[ConversationOutputFile] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 ConversationItem = (

@@ -1,6 +1,6 @@
 # 网络搜索与网页抓取
 
-更新：2026-10-16。本地实现说明，不代表 Alpha 已部署。
+更新：2026-11-22。本地实现说明，不代表 Alpha 已部署。
 
 ## 配置入口
 
@@ -8,7 +8,7 @@
 
 | 搜索服务 | 凭据 | 网页抓取 |
 | --- | --- | --- |
-| DeepSeek、Kimi | 沿用已配置的同类型供应商，或单独 API Key | 跟随搜索／系统内置 |
+| DeepSeek | 沿用已配置的同类型供应商，或单独 API Key | 跟随搜索／系统内置 |
 | Tavily、Exa、You.com | 单独 API Key | 系统内置 |
 | DuckDuckGo | 无需 Key | 系统内置 |
 | 暂不配置 | 无 | 系统内置；搜索调用提示未配置 |
@@ -17,9 +17,26 @@
 
 ## 工具行为
 
-- `web_search(query)`：直接调用检索服务，返回来源。DeepSeek 使用独立 `/v1/tools/search`，固定请求前5条，不使用聊天模型；搜索词为1～128个Unicode字符，过长会要求调整，不截断查询。有效空结果返回“未找到结果”。Kimi 保留独立 Search API。
-- `web_fetch(url)`：系统内置直接获取公开页面；跟随模式调用 DeepSeek 或 Kimi 的 `/v1/tools/fetch`。两家统一返回请求URL、标题和Markdown正文，附来源、供应商及耗时。不提前截断正文，超大内容由现有工具结果外置与 `read_tool_result` 续读处理。
+- `web_search` 按所选供应商装配参数，并将原生 JSON 或 DDGS 结果列表交给模型。DeepAgent 默认请求 5 条，模型可指定条数。来源和耗时作为轨迹元数据记录。
+- `web_fetch` 跟随 DeepSeek 时只传 `url`，直接返回原生 `title` 和 `content` 等字段。系统内置支持 `url` 和可选的 `max_content_length`，模型可以只取一段预览。默认保留全文，下载上限使用 SDK 默认的 50 MiB。系统内置将 HTML 转为保留来源链接的 Markdown，JSON 正文保留原格式。超大工具结果沿用外置和 `read_tool_result` 续读。
 - `view_image(items)`：已合并原网络图片查看，归属“文件”运行工具。支持图片及PDF选页、附件/Skill/已授权公网来源；只提供给当前视觉主模型，不进入PTC。正文图片链接不等于看过图片。详见[图像查看](image-viewing.md)。
+
+| DeepSeek 参数 | 用途 |
+| --- | --- |
+| `query` | 必填，1～128 个 Unicode 字符。可用 DeepSeek 支持的 `site:` 等语法。 |
+| `count` | 模型可指定 1～50 条，DeepAgent 默认请求 5 条。 |
+| `need_content` | 模型可请求随结果提供可用的网页正文，默认关闭。 |
+| `ori_question` | 模型可填写 1～128 字符的原始问题。省略时优先使用本轮 128 字符以内的用户文本。更长的问题由模型提炼与本次搜索相关的部分。 |
+| `localization` | 可选 IP 地址，供 DeepSeek 判断搜索应偏向哪个地区。例如同一句「附近的博物馆」，地区线索不同会影响排序。普通搜索省略此参数，DeepAgent 不会自动填入访问者或服务器 IP。 |
+
+参见 [DeepSeek Search 接口](https://api-docs.deepseek.com/api/search/)。
+
+| 供应商 | 模型可选择的原生参数示例 |
+| --- | --- |
+| [Tavily](https://docs.tavily.com/api-reference/endpoint/search) | `max_results`、`search_depth`、`include_raw_content`、域名及日期过滤 |
+| [Exa](https://exa.ai/docs/reference/search) | `numResults`、`type`、`contents`、`includeDomains` |
+| [You.com](https://you.com/docs/api-reference/search/v1-search) | `count`、`extraction`、`freshness`、语言和域名过滤 |
+| [DuckDuckGo](https://github.com/deedy5/ddgs) | DDGS 的 `max_results`、`region`、`safesearch`、`timelimit`、`page` |
 
 供应商失败会保留脱敏错误，不自动换供应商或退回系统内置；瞬时网络、429等错误仅在现有有界时间和次数内重试。带凭据、私网、回环及元数据URL不能作为抓取目标。云服务内部的重定向/DNS无法由本地核验，不声称与本地固定IP下载完全等价。
 
@@ -46,12 +63,8 @@
 
 历史 `model` 继续兼容接收，但忽略且不再存储；响应的兼容字段为 `null`。DeepSeek 测试和实际调用均迁移到独立Search端点，自定义聊天网关不一定支持新路径，需要自行验证。官方基址和 `/v1` 基址可正常拼接，自定义网关保留原域名及路径前缀，不绕过网关直连官方。
 
-当前请求构建位于 `web/provider_api.py`，DeepSeek读取 `content`，Kimi读取 `markdown`；不得把 `summary` 当作网页原文。结果事件根据真实 `web_fetch.mode` 标注本地或供应商执行，调用开始时不猜测执行方式。
+旧 Kimi 搜索配置读取时显示为不可用，网页抓取使用系统内置。重新选择搜索供应商后更新原配置行。Kimi 模型连接与网络搜索配置独立。
 
-## 实测限制
-
-2026-10-16 的同页实测中，Kimi保留图片Markdown占位，图片地址可被改写且替代文字未原样保留；DeepSeek没有返回该页的图片链接。两家首页抓取只包含局部正文，不能作为整站目录。Kimi对Python JSON文档返回 `403 security_risk`，而文档中心及其自身接口文档成功，需按目标站点分别判断。
-
-详细来源：[DeepSeek Fetch](https://api-docs.deepseek.com/api/fetch/)、[Kimi Fetch](https://platform.kimi.com/docs/api/tools-fetch)。验收数据见[本轮报告](../design/21-web-tools/web-search-fetch-20261016-validation.md)。
+结果事件根据真实 `web_fetch.mode` 标注本地或供应商执行，供应商正文可用性以目标网页的实际响应为准。参见 [DeepSeek Fetch](https://api-docs.deepseek.com/api/fetch/)。
 
 旧版`web_image_view`的事件、URL引用和预览继续可读；新请求仅披露`view_image`。Web能力包现在仅包含`web_search`与`web_fetch`，公网查看仍需此包授权，不因工具迁移扩大访问权限。

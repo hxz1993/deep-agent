@@ -100,7 +100,7 @@ class StructuredOutputBoundaryTests(unittest.IsolatedAsyncioTestCase):
                         requests, executed = [], []
                         def respond(messages, info):
                             requests.append(info)
-                            output = ToolCallPart("lease_result", {"ok": True}, f"output-{len(requests)}")
+                            output = ToolCallPart("output__lease_result", {"ok": True}, f"output-{len(requests)}")
                             if len(requests) == 1:
                                 other = ToolCallPart(name, {}, "never-dispatched")
                                 return ModelResponse(parts=[output, other] if output_first else [other, output])
@@ -127,7 +127,7 @@ class StructuredOutputBoundaryTests(unittest.IsolatedAsyncioTestCase):
                                 DeferredToolResults(calls={"never-dispatched": True}))
 
     async def test_mixed_actual_mcp_both_orders_never_reaches_server_tool(self):
-        from tests.integration.helpers.mcp import ECHO_TOOL_NAME, streamable_http_echo_server, url_echo_toolset
+        from tests.integration.helpers.mcp import ECHO_TOOL_WIRE_NAME, streamable_http_echo_server, url_echo_toolset
         for stream in (False, True):
             for output_first in (False, True):
                 with self.subTest(stream=stream, output_first=output_first):
@@ -137,9 +137,9 @@ class StructuredOutputBoundaryTests(unittest.IsolatedAsyncioTestCase):
                         def respond(messages, info):
                             nonlocal count
                             count += 1
-                            output = ToolCallPart("lease_result", {"ok": True}, f"out-{count}")
+                            output = ToolCallPart("output__lease_result", {"ok": True}, f"out-{count}")
                             if count == 1:
-                                call = ToolCallPart(ECHO_TOOL_NAME, {}, "never-mcp")
+                                call = ToolCallPart(ECHO_TOOL_WIRE_NAME, {}, "never-mcp")
                                 return ModelResponse(parts=[output, call] if output_first else [call, output])
                             return ModelResponse(parts=[output])
                         runner, _ = self.runner(respond, toolsets=[url_echo_toolset(url)])
@@ -159,9 +159,9 @@ class StructuredOutputBoundaryTests(unittest.IsolatedAsyncioTestCase):
                         nonlocal count
                         count += 1
                         if count == 1:
-                            return ModelResponse(parts=[ToolCallPart("lease_result", {"ok": True}, "same"),
-                                ToolCallPart("lease_result", {"ok": True}, "same" if duplicate_ids else "other")])
-                        return ModelResponse(parts=[ToolCallPart("lease_result", {"ok": True}, "accepted")])
+                            return ModelResponse(parts=[ToolCallPart("output__lease_result", {"ok": True}, "same"),
+                                ToolCallPart("output__lease_result", {"ok": True}, "same" if duplicate_ids else "other")])
+                        return ModelResponse(parts=[ToolCallPart("output__lease_result", {"ok": True}, "accepted")])
                     runner, _ = self.runner(respond)
                     sid = uuid4().hex
                     result, _ = await self.execute(runner, sid, stream=stream)
@@ -181,7 +181,7 @@ class StructuredOutputBoundaryTests(unittest.IsolatedAsyncioTestCase):
                         kind = order[min(count - 1, 2)]
                         if kind == "text":
                             return ModelResponse(parts=[TextPart("cannot bypass the output tool")])
-                        return ModelResponse(parts=[ToolCallPart("lease_result", "{" if kind == "parse" else {}, f"invalid-{count}")])
+                        return ModelResponse(parts=[ToolCallPart("output__lease_result", "{" if kind == "parse" else {}, f"invalid-{count}")])
                     runner, _ = self.runner(respond)
                     sid = uuid4().hex
                     if stream:
@@ -230,11 +230,11 @@ class StructuredOutputBoundaryTests(unittest.IsolatedAsyncioTestCase):
                     nonlocal count
                     count += 1
                     if count == 1:
-                        return ModelResponse(parts=[ToolCallPart("lease_result", {}, "invalid-before-confirm")])
+                        return ModelResponse(parts=[ToolCallPart("output__lease_result", {}, "invalid-before-confirm")])
                     if count == 2:
                         return ModelResponse(parts=[ToolCallPart("confirm", {}, "pending-confirm")])
-                    self.assertEqual(info.output_tools[0].name, "lease_result")
-                    return ModelResponse(parts=[ToolCallPart("lease_result", {"ok": True}, "after-confirm")])
+                    self.assertEqual(info.output_tools[0].name, "output__lease_result")
+                    return ModelResponse(parts=[ToolCallPart("output__lease_result", {"ok": True}, "after-confirm")])
                 runner, _ = self.runner(respond, toolsets=[ExternalToolset([CONFIRM])])
                 sid = uuid4().hex
                 pending, _ = await self.execute(runner, sid)
@@ -289,7 +289,7 @@ class StructuredOutputBoundaryTests(unittest.IsolatedAsyncioTestCase):
                     if text_first and len(calls) == 1:
                         return ModelResponse(parts=[TextPart("missing output consumes the same correction budget")])
                     if len(calls) <= 2:
-                        return ModelResponse(parts=[ToolCallPart("lease_result", {}, f"invalid-{len(calls)}")])
+                        return ModelResponse(parts=[ToolCallPart("output__lease_result", {}, f"invalid-{len(calls)}")])
                     return ModelResponse(parts=[ToolCallPart("confirm", {}, "frozen-confirm")])
                 runner, _ = self.runner(respond, toolsets=[ExternalToolset([CONFIRM])])
                 sid = uuid4().hex
@@ -340,7 +340,7 @@ async def _resume_in_fresh_process(path, agent_id, session_id, invalid):
         nonlocal count, schema
         count += 1
         schema = info.output_tools[0].parameters_json_schema
-        return ModelResponse(parts=[ToolCallPart("lease_result", {} if invalid else {"ok": True}, "resumed-output")])
+        return ModelResponse(parts=[ToolCallPart("output__lease_result", {} if invalid else {"ok": True}, "resumed-output")])
     agent = Agent(FunctionModel(response), deps_type=AgentDeps, toolsets=[ExternalToolset([CONFIRM])], retries=2)
     runner = AgentRunner(agent, stores.coordinator, UsageLimits(request_limit=20))
     runner._output_config_loader = AsyncMock(return_value=CONTRACT_DATA)

@@ -36,50 +36,46 @@ function loadInspectionUi(overrides = {}) {
   return window.__McpInspectionUI;
 }
 
-test("内部 MCP 缺少有效 App 时提示真实配置入口", () => {
-  const ui = loadInspectionUi();
-  const server = { request_context: { mode: "inherit" } };
-  assert.match(ui.missingInspectionAppHint(server, { app: null }), /未提供测试 App.*「对话测试」右上角「调试上下文」/);
-  assert.equal(ui.missingInspectionAppHint(server, { app: "platform001" }), "");
-  assert.equal(ui.missingInspectionAppHint({ ...server, config: { headers: { App: "static001" } } }, { app: null }), "");
-  assert.equal(ui.missingInspectionAppHint({ request_context: { mode: "isolated" } }, { app: null }), "");
-});
-
-test("失败提示查询后端有效 App 并保留原错误", async () => {
-  const requests = [];
-  const server = { request_context: { mode: "inherit" } };
-  const ui = loadInspectionUi({
-    window: { DeepAgentConsoleAPI: { requestContext: async () => { requests.push("context"); return { app: null }; } } },
-  });
-  const message = await ui.inspectionFailureMessage(server, "MCP 初始化失败（TimeoutError）");
-  assert.match(message, /^MCP 初始化失败（TimeoutError）。当前请求未提供测试 App/);
-  assert.equal(requests.length, 1);
-});
-
-test("API 鉴权或网络失败不会被改写成缺少测试 App", async () => {
-  const messages = [];
-  let contextRequests = 0;
-  const window = { DeepAgentConsoleAPI: { requestContext: async () => { contextRequests++; return { app: null }; } } };
+test("HTTP 会话应用缺少有效 App 时先打开共享选择器", async () => {
+  const chooser = [];
+  const button = {};
+  const window = { DeepAgentConsoleContext: {
+    effectiveContext: { app: null },
+    open: (trigger, options) => chooser.push([trigger, options.inspectMcp]),
+  } };
   loadInspectionUi({
     window,
-    apiFetch: async () => { throw new Error("权限不足"); },
-    showToast: (message) => messages.push(message),
+    apiFetch: async () => assert.fail("选择前不能发起检测"),
   });
-  const label = { textContent: "检测" };
-  const button = { querySelector: () => label, isConnected: true };
-  await window.mcpAdmin.inspect("deepfos", button, { request_context: { mode: "inherit" } });
-  assert.deepEqual(messages, ["权限不足"]);
-  assert.equal(contextRequests, 0);
-  assert.equal(button.disabled, false);
-  assert.equal(label.textContent, "检测");
+  await window.mcpAdmin.inspect("deepfos", button, { transport: "url", request_context: { mode: "inherit" } });
+  assert.deepEqual(chooser, [[button, "deepfos"]]);
 });
 
-test("App 已生效或上下文查询失败时不推断为 App 未配置", async () => {
-  for (const requestContext of [async () => ({ app: "inherited001" }), async () => { throw new Error("network"); }]) {
-    const ui = loadInspectionUi({
-      window: { DeepAgentConsoleAPI: { requestContext } },
+test("已有 App 或其它 MCP 模式直接检测，并保留实际失败信息", async () => {
+  for (const [transport, mode, app] of [
+    ["url", "inherit", "test001"],
+    ["url", "isolated", null],
+    ["url", "bound_app", null],
+    ["builtin", "inherit", null],
+  ]) {
+    const requests = [];
+    const messages = [];
+    const window = { DeepAgentConsoleContext: {
+      effectiveContext: { app },
+      open: () => assert.fail("这条检测无需选择应用"),
+    } };
+    loadInspectionUi({
+      window,
+      apiFetch: async (path, options) => { requests.push([path, options.method]); throw new Error("权限不足"); },
+      showToast: (message) => messages.push(message),
     });
-    assert.equal(await ui.inspectionFailureMessage({ request_context: { mode: "inherit" } }, "MCP Ping 失败"), "MCP Ping 失败");
+    const label = { textContent: "检测" };
+    const button = { querySelector: () => label, isConnected: true };
+    await window.mcpAdmin.inspect("target", button, { transport, request_context: { mode } });
+    assert.deepEqual(messages, ["权限不足"]);
+    assert.deepEqual(requests, [["/api/v1/mcp/target/inspect", "POST"]]);
+    assert.equal(button.disabled, false);
+    assert.equal(label.textContent, "检测");
   }
 });
 
@@ -126,17 +122,20 @@ test("MCP 高亮层与输入层共用字形度量且高亮不撑大输入框", (
   assert.match(styles, /\.json-input > \.json-input-highlight\s*\{[^}]*position: absolute;[^}]*height: 100%;/);
 });
 
-test("MCP Header 来源使用互斥的外部固定和内部继承", () => {
-  assert.match(template, /Headers JSON/);
-  assert.doesNotMatch(template, /Headers JSON（可选）/);
+test("MCP 请求上下文使用互斥的外部固定、会话应用和绑定应用", () => {
+  assert.match(template, /<span>请求上下文<\/span>/);
+  assert.doesNotMatch(template, /Headers JSON/);
   assert.match(template, /value="isolated" checked[\s\S]*外部固定/);
-  assert.match(template, /value="inherit"[\s\S]*内部继承/);
+  assert.match(template, /value="inherit"[\s\S]*会话应用/);
+  assert.match(template, /value="bound_app"[\s\S]*绑定应用/);
+  assert.match(template, /id="mcpBoundApp" aria-haspopup="dialog"\s+aria-controls="integrationAppPicker"/);
   assert.match(template, /class="json-input" id="mcpFixedHeaders"/);
   assert.match(template, /id="mcpHeadersHighlight"/);
+  assert.match(template, /id="mcpHeaders"[^>]*aria-label="固定请求头"/);
   assert.doesNotMatch(template, /mcp-json-editor-bar/);
-  assert.match(source, /mcpFixedHeaders"\)\?\.classList\.toggle\("hidden", mode === "inherit"\)/);
+  assert.match(source, /mcpFixedHeaders"\)\?\.classList\.toggle\("hidden", mode !== "isolated"\)/);
   assert.match(source, /if \(mode === "isolated"\) \{[\s\S]*config\.headers = headers;/);
-  assert.match(source, /允许透传：/);
+  assert.match(source, /允许透传其他请求头：/);
   assert.doesNotMatch(source, /data-context-help/);
   assert.doesNotMatch(source, /仅发送这里配置的固定 Header/);
   assert.match(styles, /\.json-input:focus-within/);
@@ -417,4 +416,21 @@ test("未取得的资源清单不能误报为资源为空", () => {
   assert.match(html, /尚未取得资源清单/);
   assert.doesNotMatch(html, /此服务暂无资源/);
   assert.match(ui.renderMcpCatalog({resources: {count: 0, snapshot_status: "ready", definitions: []}}, "resources"), /此服务暂无资源/);
+});
+
+test("MCP 列表同列显示模式，绑定项分行回显应用名和编码", () => {
+  const ui = loadInspectionUi();
+  const bound = ui.renderMcpContext({ request_context: {
+    mode: "bound_app", target_app_name: "年度预算", target_app_id: "budget001",
+    target_space_name: "预算空间", target_space_id: "budget",
+  }});
+  assert.match(bound, /title="年度预算 · budget001 · 预算空间 · budget"/);
+  assert.match(bound, /绑定应用[\s\S]*<span class="mcp-context-app-name">年度预算<\/span>\s*<code class="mcp-context-app-id">budget001<\/code>/);
+  const codeOnly = ui.renderMcpContext({ request_context: { mode: "bound_app", target_app_id: "budget001" } });
+  assert.doesNotMatch(codeOnly, /mcp-context-app-name/);
+  assert.match(codeOnly, /<code class="mcp-context-app-id">budget001<\/code>/);
+  const inherited = ui.renderMcpContext({ request_context: { mode: "inherit" } });
+  assert.match(inherited, /会话应用/);
+  assert.doesNotMatch(inherited, /提问应用|mcp-context-target/);
+  assert.doesNotMatch(ui.renderMcpContext({ request_context: { mode: "isolated" } }), /mcp-context-target/);
 });

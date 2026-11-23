@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Coroutine
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -43,6 +44,7 @@ class ActiveRunRegistry:
 
     def __init__(self) -> None:
         self._runs: dict[tuple[str | None, str], ActiveRun] = {}
+        self._background: set[asyncio.Task[None]] = set()
         self._lock = RLock()
         self._deletion_lock = asyncio.Lock()
         self._deletion_scope: tuple[str | None, str | None, str | None] | None = None
@@ -133,11 +135,12 @@ class ActiveRunRegistry:
         session_id: str,
         user_id: str | None,
         reason: str = "cancel_api",
+        run_id: str | None = None,
     ) -> bool:
         key = (agent_id, session_id)
         with self._lock:
             entry = self._runs.get(key)
-            if entry is None or entry.user_id != user_id:
+            if entry is None or entry.user_id != user_id or (run_id is not None and entry.run_id != run_id):
                 return False
             entry.status = "cancel_requested"
             entry.observe_cancellation(reason)
@@ -153,6 +156,20 @@ class ActiveRunRegistry:
             entry.status = "cancel_requested"
             entry.observe_cancellation("server_shutdown")
             entry.cancellation_token.cancel()
+
+    def start_background(self, execution: Coroutine[None, None, None]) -> None:
+        """Keep the execution owned by this process while its HTTP stream can disconnect."""
+        task = asyncio.create_task(execution)
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+
+    async def drain_background(self) -> None:
+        if not self._background:
+            return
+        _, pending = await asyncio.wait(tuple(self._background), timeout=5)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
 
     def get(self, *, agent_id: str | None, session_id: str) -> ActiveRun | None:
         with self._lock:

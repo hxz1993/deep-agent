@@ -2,7 +2,7 @@
 
 DeepAgent v0.3.18 将 Skill 与 ToolPackage 分离，v0.3.20 收口上传 Skill 的运行文件，v0.3.23
 将Skill文件与会话附件统一到 `read_file`。Agent 的 `capabilities` 继续控制可执行工具，
-`skills` 只控制任务说明、References 和 Assets；选择 Skill 不会自动授予 MCP 或其他工具权限。
+`skills` 控制任务说明、References、Assets 和脚本源码的读取；选择 Skill 不会自动授予 MCP 或其他工具权限。
 
 ## 管理入口
 
@@ -12,8 +12,9 @@ Console 配置中心的“Skill”页面提供：
 - Agent 筛选包含全部、未被引用及有现存 Skill 的 Agent；引用列显示一个 Agent，其余通过 +N 浮层展开。关联配置仍在 Agent 页维护。
 - 状态列表示当前实例的运行文件是否就绪，不代表业务配置或查询验证结果。引用查询失败明确提示，不把未知关系当成未引用。
 - 点击列表进入文件详情，返回保留筛选和列表位置；首次进入不自动读取详情。
-- 上传 ZIP 安装、替换当前包、重新加载、导出和删除。
-- 单个上传Skill可直接导出原始ZIP；“导出全部”生成包含清单和全部上传Skill独立ZIP的集合包。
+- 点击选择或拖拽一个或多个 ZIP，确认后逐包装入；每个 ZIP 对应一个 Skill。安装失败时在该文件下显示 HTTP 状态和服务端返回的错误详情。
+- 替换当前包、重新加载、导出和删除。
+- 单个上传 Skill 可导出原始 ZIP；“导出全部”打包通用上传 Skill。应用专用包在应用详情管理，配置备份的独立导出包含两类上传包。见[场景配置](integrations.md)。
 - 查看 Manifest、Reference/Asset 和脚本索引。
 - 在 Agent 独立编辑页的 Skill 区域选择允许使用的 Skill。
 
@@ -26,9 +27,7 @@ Builtin Skill 随代码发布，只读且不能替换或删除。上传包保存
 Skill按本次Run实际工具描述判断格式支持，不假定有图片查看或附件脚本访问能力。它不含可执行
 脚本，不修改文件、业务数据或解析供应商配置。
 
-上传包在每个 Pod 只生成 `runtime-skills/<code>/` 一份当前运行副本。服务启动、安装、替换
-和手工“重新加载”负责同步；普通 Run 只读本地目录，不访问平台文件服务。运行副本丢失或同步
-失败时，该 Skill 暂时跳过，其他 Skill、工具和普通回答继续工作。
+每个 Pod 按内部存储键维护一份 `runtime-skills/` 当前运行副本。服务启动、安装、替换和手工重新加载负责同步；普通 Run 优先读就绪副本，副本缺失时使用与启动同步相同的服务端身份拉取原包。同步失败时暂时跳过该 Skill。应用专用包的管理 API 使用原包编码，模型在运行时使用应用作用域别名。
 
 替换当前包时，即使 ZIP内容 Hash没有变化，后端也会先检查平台原包：原包正常返回 `noop`；
 原 File ID已经失效则重新上传、更新数据库 File ID、恢复当前运行目录并返回 `repaired`。因此
@@ -36,7 +35,7 @@ Skill按本次Run实际工具描述判断格式支持，不假定有图片查看
 
 Skill覆盖以稳定`code`为准，不以显示名称为准：
 
-- “上传安装”不会自动覆盖。同`code`已存在时返回409。
+- “上传安装”只新增。同一作用域内的 `code` 已存在时返回 409；通用包和不同 App 的专用包可以同名。
 - “替换ZIP”是显式覆盖入口；新包`code`必须与当前路径中的`code`完全一致，否则返回422。
 - 内容Hash相同时返回`noop`；若平台原包已丢失，则同Hash替换会修复原包并返回`repaired`。
 - 显示名称相同但`code`不同，是两个独立Skill。
@@ -64,7 +63,7 @@ skill.zip
 ├── .env                  可选，随包配置文件，由脚本自行读取
 ├── references/           可按需读取的文本、DOCX、XLSX、PPTX或PDF资料
 ├── assets/               文本、图片或模板资产
-└── scripts/ 或 tools/    允许保存和列出，不能当资源正文读取
+└── scripts/ 或 tools/    文本脚本源码可按需读取；执行仍仅支持 Python
 ```
 
 支持根目录 `.env`，以及 `assets/` 下的 `.env` 或 `*.env` 文本配置。文件出现在 Skill 资源列表中，
@@ -79,11 +78,13 @@ ZIP 最大 10 MiB，解压后最大 50 MiB、最多 256 个文件、目录深度
 绝对路径、符号链接、加密 ZIP、重复路径和压缩炸弹。模型可分页读取索引内的文本、DOCX逻辑块
 、PPTX逻辑块、XLSX物理行及PDF物理页文本层。`read_file` 不解析图片OCR或旧DOC/XLS/PPT文件。Agent 显式关联“文档解析”后，
 `parse_document` 可读取已授权且当前供应商支持的这些资源，保留原生正文与页码；
-供应商和格式边界见[文档解析指南](document-parsing.md)。脚本可以列出路径，但不能
-通过文件工具读取源码。
+供应商和格式边界见[文档解析指南](document-parsing.md)。已关联 Skill 的文本脚本和辅助模块
+可以通过 `list_skill_resources` 取得路径，再用 `read_file` 分页读取源码。仅含脚本的 Skill
+也会提供读取入口；不要求关联 `builtin:sandbox`，读取不会执行代码。编译产物和二进制脚本
+不能作为文本源码读取。旧包无需重新安装，不回写旧资源索引；安装与执行限额不变。
 
-一个 ZIP只能包含一个 Skill。培训 Library或第三方合集包如果包含多个同级 `SKILL.md`，需要先拆成
-多个 ZIP分别安装；API会返回 422而不是隐式创建多条配置。
+一个 ZIP 只能包含一个 Skill。混合 Codex 与 DeepAgent 技能的资料合集，先解压，再上传其中独立的 DeepAgent Skill ZIP。
+若多个 Skill 以目录形式放在一起，需按 Skill 分别打包。此类合集会被 API 拒绝；Console 会在错误下提示如何处理。
 
 ## Console 文件预览
 
@@ -91,7 +92,7 @@ ZIP 最大 10 MiB，解压后最大 50 MiB、最多 256 个文件、目录深度
 
 PNG、JPEG、GIF、WebP及SVG通过当前管理员鉴权读取，点击图片可放大，点击空白、关闭按钮或按ESC收起。图片只保留当前预览的浏览器临时URL，离开后释放，不生成平台文件。
 
-PDF、PPTX及其他当前没有预览器的文件显示“暂不支持在线预览，请下载 Skill 包后查看”，并提供现有原包下载入口。旧索引中的可读标记不会使Console把PDF／PPTX作为文本读取。这里是管理预览能力，Agent的`read_file`仍按原格式能力工作，不能读取脚本源码；安装白名单和脚本执行规则不变。
+PDF、PPTX及其他当前没有预览器的文件显示“暂不支持在线预览，请下载 Skill 包后查看”，并提供现有原包下载入口。旧索引中的可读标记不会使Console把PDF／PPTX作为文本读取。这里是管理预览能力，Agent的`read_file`仍按自身格式能力工作，并可按需读取已关联Skill的文本脚本源码；安装白名单和脚本执行规则不变。
 
 ## API
 
@@ -115,12 +116,14 @@ Agent 创建/更新接口增加独立字段：
 
 ```json
 {
-  "skills": ["deepagent-diagnostics"]
+  "skills": ["deepfos-readonly-analysis"]
 }
 ```
 
 新建 Agent 默认 `[]`；更新不传时保持原值，显式 `null` 返回 422。Skill自身没有启停状态；是否
 参与运行只由Agent的`skills`关联决定。仍被 Agent 引用的上传 Skill不能删除。
+原内置 `deepagent-diagnostics` 已下架。旧 Agent 中的该引用在运行、配置回读和导出时忽略，
+旧 ZIP 仍可预检和安装，控制台会提示该项已退役并自动跳过。诊断方法见[诊断会话指南](diagnostic-sessions.md#排查清单)。
 
 ## 模型运行
 
@@ -134,13 +137,19 @@ Agent.skills
 → 初始只披露 Skill 名称和简介
 → 模型按需调用 load_capability
 → Harness 返回完整 SKILL.md
-→ list_skill_resources 获得精确路径
-→ read_file(resource={type: skill, skill_code, path}) 按需读取素材
+→ list_skill_resources 获得素材、脚本及辅助模块的精确路径
+→ read_file(resource={type: skill, skill_code, path}) 按需读取素材或脚本源码
 → Agent同时关联 builtin:sandbox 时，可 execute_skill_script
 ```
 
 `load_capability` 使用 Pydantic AI 官方 Tool Call/Return，正常进入 History，并参与取消和上下文
 压缩的工具配对。Skill正文、资源和脚本都不能覆盖系统/Agent Prompt或业务权限。
+加载时仍只披露 `SKILL.md` 正文，不自动把整包脚本塞进上下文；模型需要了解参数、实现或依赖时，
+按目录读取对应源文件。读取和执行继续使用不同权限与工具。
+`read_file` 对会话附件、可信产物及已关联 Skill 中的文本不设置后缀或 MIME 白名单：
+Python、JavaScript、SQL、SVG 源码及未识别后缀均可尝试读取；未知类型按实际内容尝试文本读取，
+二进制内容不会伪装成源码。DOCX/XLSX/PPTX/PDF 仍使用对应解析器，图片使用 `view_image`。
+本次不调整上传类型策略、Skill ZIP 资产白名单、Python 脚本安装及执行规则。
 
 Run终态的 `context.skills` 会列出 configured、available、loaded和 unavailable，便于确认配置的
 Skill是否已就绪及本轮实际加载了哪些正文。该状态不写数据库，客户端不适配也不影响聊天。
@@ -168,14 +177,59 @@ Alembic 010 删除`skill_packages.enabled`。旧值不再影响运行时：升�
 Python 进程和临时目录。PTC 调用这两个工具也走同一实现，不产生另一套脚本协议。
 
 ```text
-execute_python(code, inputs?, files?)
-execute_skill_script(skill_code, script_path, arguments?, inputs?, resource_paths?, files?)
+execute_python(code, inputs?, files?, include_context=False)
+execute_skill_script(skill_code, script_path, arguments?, inputs?, resource_paths?, files?, include_context=False)
 files = [{"file_id": "当前会话授权文件ID", "path": "inputs/source.pdf"}]
 ```
 
 普通 Python 继续直接执行代码并提供 `inputs` 变量，不改为文件入口，也不获得 Skill 目录访问能力。
 Skill 只接受当前 Agent 已选择且已索引的 UTF-8 `.py` 路径；同 Skill 的 Python 模块自动携带，
 非代码资源仍按 `resource_paths` 精确选择。组装执行副本时校对索引指纹，更新冲突明确失败。
+
+### 按需读取当前用户与应用范围
+
+自 v0.15.6 起，两工具的 `include_context` 默认 `False`：不查询用户资料，也不继承宿主同名变量。
+只有脚本需要按当前用户访问客户系统、填写域账号或取得本次应用范围时，才传 `True`。
+普通计算、格式转换和固定账号 API 无须开启。无需在 Skill 的 metadata 增加配置。
+原生和 PTC 调用使用相同参数与实现；PTC 本身不能直接读取环境变量。
+
+开启后，脚本可读取单个 JSON 环境变量 `DEEP_AGENT_CONTEXT`：
+`include_context` 只决定是否注入，不改变下述固定结构；两个执行工具的模型可见说明也包含完整格式、读取示例及失败规则。
+
+```python
+import json
+import os
+
+context = json.loads(os.environ["DEEP_AGENT_CONTEXT"])
+username = context["user"]["username"]
+if not username:
+    raise RuntimeError("缺少当前用户名，请检查用户资料服务和 include_context 参数")
+```
+
+```json
+{
+  "user": {
+    "id": "user-001", "username": "zhangsan", "nickname": "张三",
+    "display_name": "zhangsan", "email": "zhangsan@example.com", "avatar_url": null
+  },
+  "app": "budget001", "space": "budget", "language": "zh_CN",
+  "resolution": "resolved", "error": null
+}
+```
+
+身份来自服务端可信请求，App、Space、Language 使用本次有效请求范围，不由模型填写用户资料。
+执行上下文与 MCP 转发白名单独立，缩窄 MCP Header 不会清空这些字段；资料查询所需的认证仅留在服务端，不注入脚本。
+`resolution` 为 `resolved`、`local`、`empty` 或 `unavailable`。成功响应中的空值保留，
+不拿 User ID 或固定账号代替缺失的用户名；`display_name` 沿用当前用户接口的 username 语义。
+同一 Run 第一次开启时解析一次，并发调用合并，普通 Python、不同 Skill 和 PTC 共用结果；
+默认关闭的后续调用仍不注入。共享账号资料服务另保留 30 秒成功缓存，不要求先打开 Console。
+
+资料查询失败或 5 秒超时不阻止脚本执行：仅保留 `user.id`，其余业务字段为 `null`，
+`resolution` 为 `unavailable`，`error` 包含安全的 `code/message`。同 Run 不反复请求失败服务。
+脚本应在业务请求前检查所需字段；不得回退到包内固定账号冒充当前用户。
+环境中不包含 Cookie、Token、API Key 或任意 Header，不自动加载 `.env`，不修改进程全局环境。
+需要客户固定密钥时继续在 `.env` 自行读取；运行身份不写入 Skill 包、输入文件或执行协议帧。
+执行器不自动回显该环境变量；脚本自行打印、返回或写入产物的内容仍由脚本负责。
 
 ### 每次 Skill 调用的目录
 

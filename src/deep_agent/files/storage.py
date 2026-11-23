@@ -4,12 +4,13 @@ import asyncio
 import hashlib
 import os
 import sqlite3
+import tempfile
 import uuid
 import zlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Mapping, Protocol, runtime_checkable
+from typing import BinaryIO, Mapping, Protocol, runtime_checkable
 
 from deep_agent.db.dialect import DbDialect
 from deep_agent.local_security import local_runtime_enabled
@@ -121,12 +122,10 @@ def _display_size(byte_size: int) -> tuple[float, str]:
 class _BoundedPlatformFile(File):
     """Keep platform discovery/auth/request construction, bound response bytes."""
 
-    def __init__(self, root: PlatformAPI, max_bytes: int):
+    def __init__(self, root: PlatformAPI, max_bytes: int, sink: BinaryIO | None = None):
         super().__init__(root)
         self.max_bytes = max_bytes
-        # The generic SDK logger includes request headers. This new path never
-        # logs caller credentials or full file URLs.
-        self.log = lambda *_args, **_kwargs: None
+        self.sink = sink
 
     async def get(self, url, params=None, header=None):
         # Keep the component's standard header merge (including internal auth)
@@ -155,15 +154,20 @@ class _BoundedPlatformFile(File):
             decoder = zlib.decompressobj(31 if encoding == "gzip" else 15) if encoding != "identity" else None
             wire_size = 0
             payload = bytearray()
+            size = 0
             async for chunk in response.content.iter_chunked(64 * 1024):
                 wire_size += len(chunk)
                 if wire_size > wire_limit:
                     raise FileStoreSizeLimitError("File exceeds download size limit")
                 while chunk:
-                    decoded = decoder.decompress(chunk, self.max_bytes - len(payload) + 1) if decoder else chunk
-                    if len(payload) + len(decoded) > self.max_bytes:
+                    decoded = decoder.decompress(chunk, min(64 * 1024, self.max_bytes - size + 1)) if decoder else chunk
+                    size += len(decoded)
+                    if size > self.max_bytes:
                         raise FileStoreSizeLimitError("File exceeds download size limit")
-                    payload.extend(decoded)
+                    if self.sink is None:
+                        payload.extend(decoded)
+                    else:
+                        self.sink.write(decoded)
                     chunk = decoder.unconsumed_tail if decoder else b""
             if decoder and (not decoder.eof or decoder.unused_data):
                 raise FileStoreError("Invalid platform file transfer encoding")
@@ -297,6 +301,24 @@ class PlatformFileStore:
         except FileStoreError:
             raise
         except Exception:
+            raise FileStoreError("Platform file download failed") from None
+
+    async def open_download(
+        self, file_id: str, request_headers: Mapping[str, str], *, expected_size: int,
+    ) -> BinaryIO:
+        _validate_download_limit(expected_size)
+        handle = tempfile.TemporaryFile()
+        try:
+            client = _BoundedPlatformFile(PlatformAPI(header=dict(request_headers)), expected_size, sink=handle)
+            await client.download(file_id)
+            if handle.tell() != expected_size:
+                raise FileStoreIntegrityError("Platform file size mismatch")
+            handle.seek(0)
+            return handle
+        except BaseException as exc:
+            handle.close()
+            if isinstance(exc, (FileStoreError, asyncio.CancelledError)):
+                raise
             raise FileStoreError("Platform file download failed") from None
 
     async def delete(
@@ -525,13 +547,24 @@ class LocalFileStore:
     ) -> LocalFileMetadata:
         return await asyncio.to_thread(self._describe_sync, file_id, dict(request_headers))
 
+    async def describe_available(
+        self, file_id: str, request_headers: Mapping[str, str],
+    ) -> LocalFileMetadata:
+        return await asyncio.to_thread(
+            self._describe_sync, file_id, dict(request_headers), check_blob=True,
+        )
+
     def _describe_sync(
         self,
         file_id: str,
         request_headers: Mapping[str, str],
+        *,
+        check_blob: bool = False,
     ) -> LocalFileMetadata:
         row = self._row(file_id)
         self._authorize(row, request_headers)
+        if check_blob and not self._blob_path(row).is_file():
+            raise FileStoreNotFoundError("File contents are not available")
         return LocalFileMetadata(
             id=str(row["file_id"]),
             file_name=str(row["file_name"]),
@@ -610,6 +643,50 @@ class LocalFileStore:
         if hashlib.sha256(data).hexdigest() != row["sha256"]:
             raise FileStoreIntegrityError("Local file hash mismatch")
         return data
+
+    async def open_download(
+        self, file_id: str, request_headers: Mapping[str, str], *, expected_size: int,
+    ) -> BinaryIO:
+        _validate_download_limit(expected_size)
+        worker = asyncio.create_task(asyncio.to_thread(
+            self._open_verified_download, file_id, dict(request_headers), expected_size,
+        ))
+        try:
+            return await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            while not worker.done():
+                try:
+                    await asyncio.shield(asyncio.wait({worker}))
+                except asyncio.CancelledError:
+                    continue
+            if not worker.cancelled() and worker.exception() is None:
+                worker.result().close()
+            raise
+
+    def _open_verified_download(self, file_id, request_headers, expected_size):
+        row = self._row(file_id)
+        self._authorize(row, request_headers)
+        if int(row["byte_size"]) != expected_size:
+            raise FileStoreIntegrityError("Local file size mismatch")
+        try:
+            handle = self._blob_path(row).open("rb")
+        except OSError as exc:
+            raise FileStoreIntegrityError("Local file Blob is unavailable") from exc
+        try:
+            digest = hashlib.sha256()
+            remaining = expected_size
+            while chunk := handle.read(min(64 * 1024, remaining + 1)):
+                remaining -= len(chunk)
+                if remaining < 0:
+                    break
+                digest.update(chunk)
+            if remaining or digest.hexdigest() != row["sha256"]:
+                raise FileStoreIntegrityError("Local file integrity mismatch")
+            handle.seek(0)
+            return handle
+        except BaseException:
+            handle.close()
+            raise
 
     async def delete(
         self,

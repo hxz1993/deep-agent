@@ -87,9 +87,12 @@ def enrich(rows, dimension, report):
     return rows
 
 
-async def report_data(ctx, selected):
+async def report_data(ctx, selected, *, dimension=None):
     async with query_budget():
-        return await UsageQueries(ctx.db_session_factory).report(selected)
+        queries = UsageQueries(ctx.db_session_factory)
+        if dimension:
+            return await queries.detail_report(selected, dimension=dimension)
+        return await queries.report(selected)
 
 
 @router.get("")
@@ -106,7 +109,7 @@ async def get_usage(request: Request, ctx: AppContextDep, caller: RequestUserDep
 
 
 async def detail_data(request, ctx, caller, selected, dimension, sort, descending, limit, offset):
-    report = await report_data(ctx, selected)
+    report = await report_data(ctx, selected, dimension=dimension)
     rows = enrich(report["groups"][dimension], dimension, report)
     profiles = {}
     rows.sort(key=lambda row: (row[sort], row["key"]), reverse=descending)

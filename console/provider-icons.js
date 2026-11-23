@@ -12,6 +12,7 @@ export const COMPOSER_PROVIDER_BRANDS = {
   minimax: "./assets/provider-logos/minimax.ico",
   stepfun: "./assets/provider-logos/stepfun.svg",
   google: "./assets/provider-logos/google-gemini.png",
+  xai: "./assets/provider-logos/xai.svg",
   openai_compatible: "./assets/provider-logos/openai-compatible.svg",
 };
 
@@ -34,4 +35,14 @@ export function composerProviderIcon(provider) {
   const providerType = composerProviderType(provider);
   const src = COMPOSER_PROVIDER_BRANDS[providerType];
   return `<img src="${escapeHtml(src)}" alt="" data-provider-type="${escapeHtml(providerType)}" />`;
+}
+
+export function catalogProviderIcon(provider) {
+  const id = String(provider?.id || "").trim().toLowerCase();
+  const aliases = { "minimax-cn": "minimax", zhipuai: "zai" };
+  return composerProviderIcon({
+    provider_type: aliases[id] || id,
+    id,
+    name: provider?.label,
+  });
 }

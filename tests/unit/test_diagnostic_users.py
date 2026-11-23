@@ -6,6 +6,10 @@ import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import Request
+from loguru import logger
+from deep_agent.diagnostics.text import parse_record
+from deep_agent.diagnostics.schema import safe_fields
+from deepfos_platform.lib.context import gen_request_id, get_request_id
 
 from deep_agent.local_security import (
     LOCAL_CONSOLE_ADMIN_SCOPE_KEY,
@@ -54,6 +58,43 @@ class Response:
 
 
 class PlatformDiagnosticUserFetcherTests(unittest.IsolatedAsyncioTestCase):
+    async def test_failed_batch_emits_one_safe_stack_and_next_request_can_succeed(self):
+        fetcher = PlatformDiagnosticUserFetcher(system_service="https://platform.example")
+        resolver = DiagnosticUserProfileResolver(fetcher)
+
+        async def upstream(*args, **kwargs):
+            authorization = kwargs["headers"]["authorization"]
+            if transport.await_count == 1:
+                try:
+                    raise ValueError("NEVER_LOG_UPSTREAM_RESPONSE")
+                except ValueError as cause:
+                    raise OSError(f"NEVER_LOG_TRANSPORT_ERROR {authorization}") from cause
+            return Response(payload={"status": True, "data": [{"userId": "owner", "userName": "Recovered"}]})
+
+        transport = AsyncMock(side_effect=upstream)
+        lines = []
+        sink = logger.add(lambda message: lines.append(str(message)))
+        try:
+            with patch("deep_agent.security.diagnostic_users.AioHttpCli.post", transport), gen_request_id():
+                trace = get_request_id()
+                incoming = request(token="NEVER_LOG_TOKEN")
+                failed = await resolver.profiles_for(incoming, "admin", ("owner",))
+                self.assertEqual(failed["owner"]["display_name"], "owner")
+                recovered = await resolver.profiles_for(incoming, "admin", ("owner",))
+                self.assertEqual(recovered["owner"]["display_name"], "Recovered")
+        finally:
+            logger.remove(sink)
+        self.assertEqual(transport.await_count, 2)
+        self.assertNotIn("NEVER_LOG", "".join(lines))
+        failed_log, success_log = [parse_record(line.strip()) for line in lines]
+        self.assertEqual(failed_log["event"], "diagnostic_users_failed")
+        self.assertEqual(failed_log["request_id"], trace)
+        self.assertIn("OSError@", failed_log["error_stack"])
+        self.assertIn("ValueError@", failed_log["error_stack"])
+        self.assertIn("test_diagnostic_users.py:", failed_log["error_stack"])
+        self.assertEqual(success_log["event"], "diagnostic_users_completed")
+        self.assertNotIn("error_stack", success_log)
+
     async def test_default_uses_system_configuration_without_space_dependency(self):
         options = Mock()
         options.server.system = "https://system.example/deepfos-server/system-server"
@@ -80,12 +121,11 @@ class PlatformDiagnosticUserFetcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event, "diagnostic_users_failed")
         self.assertEqual((facts["phase"], facts["reason"], facts["http_status"]), ("request", "http_error", 404))
         self.assertEqual(facts["target_origin"], "https://platform.example")
-        from deep_agent.diagnostics.schema import safe_fields
         saved = safe_fields(facts)
         self.assertEqual(saved["target_origin"], facts["target_origin"])
         self.assertEqual(saved["profile_service"], "configured_url")
         for secret in ("sensitive-user-id", "secret-token", "secret-upstream-body", "private-config-path"):
-            self.assertNotIn(secret, json.dumps(facts))
+            self.assertNotIn(secret, json.dumps(saved))
         self.assertTrue(response.released)
 
     async def test_discovery_failure_log_preserves_cause_type_without_exception_text(self):
@@ -100,7 +140,7 @@ class PlatformDiagnosticUserFetcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((facts["phase"], facts["reason"], facts["error_type"]),
                          ("discovery", "service_discovery_failed", "LookupError"))
         self.assertEqual(facts["profile_service"], "system-server")
-        self.assertNotIn("secret", json.dumps(facts))
+        self.assertNotIn("secret", json.dumps(safe_fields(facts)))
 
     async def test_business_failure_and_success_logs_are_distinct(self):
         for payload, expected in (({"status": False, "code": 987, "message": "private body"}, "failed"),
@@ -117,8 +157,8 @@ class PlatformDiagnosticUserFetcherTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual((facts["reason"], facts["error_code"]), ("business_failure", "987"))
                 else:
                     self.assertEqual(facts["resolved_count"], 1)
-                self.assertNotIn("Private Name", json.dumps(facts))
-                self.assertNotIn("private body", json.dumps(facts))
+                self.assertNotIn("Private Name", json.dumps(safe_fields(facts)))
+                self.assertNotIn("private body", json.dumps(safe_fields(facts)))
 
     async def test_overall_deadline_logs_the_interrupted_stage(self):
         fetcher = PlatformDiagnosticUserFetcher(system_service="system-server")

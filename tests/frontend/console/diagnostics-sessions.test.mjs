@@ -1,4 +1,4 @@
-import { channelOriginPresentation } from "../../../console/session-display.js";
+import { renderSessionSource } from "../../../console/session-display.js";
 import { renderUserIdentity } from "../../../console/user-identity.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -58,7 +58,7 @@ function sessionHarness(request = async () => overview()) {
   };
   let selectCallback;
   const copied = [], toasts = [];
-  const context = vm.createContext({ channelOriginPresentation, renderUserIdentity,
+  const context = vm.createContext({ renderSessionSource, renderUserIdentity,
     URL, URLSearchParams, Date, Intl, AbortController, setTimeout, clearTimeout,
     document: { baseURI: "https://console.example/console/", addEventListener(name, handler) { documentListeners.set(name, handler); } },
     window: { location: { href: "https://console.example/console/" }, DeepAgentConsole: { toast: (...args) => toasts.push(args) } },
@@ -90,6 +90,27 @@ function sessionHarness(request = async () => overview()) {
     select(key, value) { selectCallback(key, value); },
   };
 }
+
+test("a busy diagnostic read retries once and a cancelled read never retries", async () => {
+  const busy = Object.assign(new Error("诊断查询繁忙，请稍后重试"), { status: 503 });
+  let attempts = 0;
+  const reader = createSessionReader(async () => {
+    if (++attempts === 1) throw busy;
+    return session();
+  });
+  assert.equal((await reader.begin().get("session")).session_id, "session-full-id");
+  assert.equal(attempts, 2);
+
+  const cancelled = createSessionReader(async () => {
+    attempts += 1;
+    throw busy;
+  });
+  const pending = cancelled.begin().get("session");
+  await turn();
+  cancelled.cancel();
+  await assert.rejects(pending, { name: "AbortError" });
+  assert.equal(attempts, 3);
+});
 
 test("direct detail waits for its readonly template without starting workspace requests", async () => {
   const gate = deferred(), h = sessionHarness(async () => session());
@@ -194,7 +215,7 @@ function centerHarness(initialHash = diagnosticTarget("logs", { q: "original", l
   const logs = { activated: [], saved: { scroll: 88, selectedId: "log-record" }, snapshot() { return this.saved; }, activate(...args) { this.activated.push(args); }, deactivate() {}, clear() { this.saved = null; } };
   const sessions = { activated: [], saved: { scroll: 321, filters: { ...filters, offset: 50 } }, snapshot() { return this.saved; }, activate(...args) { this.activated.push(args); }, deactivate() {}, clear() { this.saved = null; } };
   const channels = { activated: [], saved: { filters: { period: "720", account_id: "account-a" } }, snapshot() { return this.saved; }, activate(...args) { this.activated.push(args); }, deactivate() {}, clear() { this.saved = null; } };
-  const context = vm.createContext({ channelOriginPresentation, renderUserIdentity,
+  const context = vm.createContext({ renderSessionSource, renderUserIdentity,
     location: { get hash() { return navigation.hash; } }, history: navigation.history,
     document: { getElementById: () => node(), querySelectorAll: () => [] },
     window: { addEventListener(name, callback) { handlers.set(name, callback); }, dispatchEvent() {}, DeepAgentConsole: { showPage(page, options) { navCalls.push({ page, options }); } } },
@@ -217,6 +238,8 @@ test("diagnostic routes accept only internal views and preserve complete IDs wit
   const route = parseDiagnosticRoute(diagnosticTarget("detail", { view: "trajectory", event_id: "e&1", run_id: "r+1", token: "secret", prompt: "private", return: "https://evil.example" }, "session:exact-ID"));
   assert.equal(route.id, "session:exact-ID");
   assert.deepEqual(route.filters, { view: "trajectory", event_id: "e&1", run_id: "r+1" });
+  const turn = parseDiagnosticRoute(diagnosticHash("detail", { view: "conversation", turn_id: "turn:full+id" }, "session:exact-ID"));
+  assert.deepEqual(turn.filters, { view: "conversation", turn_id: "turn:full+id" });
 });
 
 test("session range defaults to seven days, freezes supplied UTC range, enforces 31 days and half-open order", () => {
@@ -265,6 +288,18 @@ test("navigation does not collide with a history key preserved across reload", (
   assert.notEqual(h.entries[0].state.diagnosticsKey, h.entries[1].state.diagnosticsKey);
   h.snapshot = { scroll: 44 }; h.nav.back(diagnosticTarget("overview")); h.pop();
   assert.equal(h.restored.scroll, 321);
+});
+
+test("session opened from configuration keeps its source entry when changing views and going back", () => {
+  const origin = { configurationReturn: { tab: "agent-service", state: { publication: "reports", task: "task-1" } } };
+  const h = navigationHarness("#/configuration", origin);
+  h.history.pushState({ diagnosticsFromConfiguration: true }, "", diagnosticHash("detail", { view: "conversation" }, "session-1"));
+  h.pop();
+  h.nav.replaceCurrent(diagnosticTarget("detail", { view: "trajectory" }, "session-1"));
+  assert.equal(h.history.state.diagnosticsFromConfiguration, true);
+  h.nav.back(diagnosticTarget("overview"));
+  assert.equal(h.hash, "#/configuration");
+  assert.deepEqual(h.history.state, origin);
 });
 
 test("external return addresses are rejected and direct detail fallback remains inside Console", () => {
@@ -398,6 +433,25 @@ test("failed status filter never leaves other-filter results or counts on screen
   assert.doesNotMatch(h.root.innerHTML, /真实会话|共 128 项|共 0 项|没有匹配会话/);
 });
 
+test("the Agent and saved session source have separate adjacent columns", async () => {
+  const items = [
+    { ...session(), session_id: "mcp", agent_name: "MCP Agent", source_type: "mcp" },
+    { ...session(), session_id: "wecom", agent_name: "Channel Agent", source_type: "channel:wecom" },
+    { ...session(), session_id: "internal", agent_name: "Console Agent" },
+  ];
+  const h = sessionHarness(async () => ({ total: items.length, items }));
+  h.activate("list"); await settle();
+  const headers = [...h.root.innerHTML.matchAll(/role="columnheader">([^<]+)/g)].map(([, label]) => label);
+  assert.deepEqual(headers, ["会话", "Agent", "会话来源", "用户", "App ID", "状态", "最近活动"]);
+  for (const item of items) {
+    const agent = `<span class="diagnostic-agent-name" role="cell"><span class="diagnostic-session-icon">${icon("bot")}</span><span class="diagnostic-agent-title" title="${item.agent_name}">${item.agent_name}</span></span>`;
+    const source = `<span class="diagnostic-session-source" role="cell">${renderSessionSource(item)}</span>`;
+    assert.ok(h.root.innerHTML.includes(
+      `${agent}\n          ${source}`,
+    ), item.session_id);
+  }
+});
+
 test("failed page query hides the previously known total and disables pagination", async () => {
   const h = sessionHarness(async path => {
     if (new URL(path, "http://local").searchParams.get("offset") === "50") throw { status: 503 };
@@ -518,11 +572,12 @@ test("loading status lives in header, outside the list controls and rows", async
 });
 
 test("new session query wins over late response and deactivation ignores all late data", async () => {
-  const gates = [deferred(), deferred()]; let index = 0;
+  const gates = [deferred(), deferred(), deferred()]; let index = 0;
   const h = sessionHarness(() => gates[index++].promise); h.activate("overview");
   h.activate("list", { ...filters, user_id: "new-owner" });
   assert.equal(h.requests[0].signal.aborted, true);
-  gates[1].resolve({ items: [], total: 2 }); await settle(); gates[0].resolve(overview()); await settle();
+  assert.equal(h.requests[1].signal.aborted, true);
+  gates[2].resolve({ items: [], total: 2 }); await settle(); gates[0].resolve(overview()); gates[1].resolve(overview()); await settle();
   assert.equal(h.controller.snapshot().data.total, 2);
   const late = deferred(), h2 = sessionHarness(() => late.promise); h2.activate(); h2.controller.deactivate();
   assert.equal(h2.requests[0].signal.aborted, true); late.resolve(overview()); await settle();
@@ -777,7 +832,7 @@ test("production session controller does not import live workspace state or writ
 
 test("diagnostic request uses same-origin API helper, no App, no cache and propagates permission loss", async () => {
   const calls = [], events = [];
-  const context = vm.createContext({ channelOriginPresentation, renderUserIdentity,  AbortController, setTimeout, clearTimeout,
+  const context = vm.createContext({ renderSessionSource, renderUserIdentity,  AbortController, setTimeout, clearTimeout,
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
     window: { serviceUrl: path => `/prefix/${path}`, daFetch: async (path, options) => { calls.push({ path, options }); return { ok: false, status: 403, json: async () => ({ detail: "denied" }) }; }, dispatchEvent: event => events.push(event) },
   });
@@ -983,4 +1038,50 @@ test("a refused menu navigation does not leave a stale pending filter payload", 
   await h.context.openDiagnostics("sessions"); // showPage guard did not change the route.
   h.navigation.history.replaceState(null, "", "#/diagnostics/sessions/list"); h.context.setDiagnosticsActive(true);
   assert.equal(h.sessions.activated.at(-1)[0].filters.query, undefined);
+});
+
+
+test("overview loads independent panels with at most two requests and preserves completed panels", async () => {
+  const gates = new Map(["metrics", "trend", "agents", "activity"].map(key => [key, deferred()]));
+  let active = 0, maximum = 0;
+  const h = sessionHarness(path => {
+    const key = new URL(path, "http://test").searchParams.get("section");
+    active++; maximum = Math.max(maximum, active);
+    return gates.get(key).promise.finally(() => active--);
+  });
+  h.activate("overview");
+  assert.equal(h.requests.length, 2);
+  assert.match(h.root.innerHTML, /正在加载/);
+  gates.get("metrics").resolve({metrics:overview().metrics}); await settle();
+  assert.match(h.root.innerHTML, /<strong>5<\/strong>/);
+  assert.equal(h.controller.snapshot().data.trend, undefined);
+  assert.equal(h.controller.snapshot().overviewComplete, false);
+  assert.equal(h.requests.length, 3);
+  gates.get("agents").resolve({agents:overview().agents}); await settle();
+  gates.get("activity").resolve({recent_questions:overview().recent_questions}); await settle();
+  assert.match(h.root.innerHTML, /实际问题/);
+  assert.match(h.root.innerHTML, /正在加载/);
+  gates.get("trend").resolve({trend:overview().trend}); await settle();
+  assert.equal(h.controller.snapshot().overviewComplete, true);
+  assert.equal(maximum, 2);
+  assert.equal(h.requests.length, 4);
+});
+
+test("overview failed panel retries alone and never clears another panel", async () => {
+  let attempts = 0;
+  const h = sessionHarness(async path => {
+    const section = new URL(path, "http://test").searchParams.get("section");
+    if (section === "trend" && attempts++ === 0) throw new Error("network unavailable");
+    const data = overview();
+    return section === "metrics" ? {metrics:data.metrics} : section === "trend" ? {trend:data.trend} : section === "agents" ? {agents:data.agents} : {recent_questions:data.recent_questions};
+  });
+  h.activate("overview"); await settle(); await settle();
+  assert.equal(h.controller.snapshot().overviewComplete, false);
+  assert.match(h.root.innerHTML, /data-overview-section="trend"/);
+  assert.match(h.root.innerHTML, /实际问题/);
+  const before = h.requests.length;
+  await h.click({sessionAction:"retry-overview", overviewSection:"trend"}); await settle();
+  assert.equal(h.requests.length, before + 1);
+  assert.equal(h.controller.snapshot().overviewComplete, true);
+  assert.match(h.root.innerHTML, /实际问题/);
 });

@@ -7,9 +7,15 @@ import re
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
+from deepfos_platform.log import is_exception_stack
+
 from .messages import describe
 
 EVENTS = {
+    "published_agent_access_failed": "发布 Agent 接入校验失败",
+    "published_agent_task": "发布 Agent 任务",
+    "remote_agent_operation": "远程 Agent 调用",
+    "integration_app_context": "已检查会话应用专用配置",
     "document_configuration_updated": "文档解析配置已更新",
     "document_parse_started": "文档解析开始",
     "document_parse_phase": "文档解析阶段更新",
@@ -41,6 +47,8 @@ EVENTS = {
     "agent_cancel_observed": "执行取消来源已记录",
     "agent_cancel_api_received": "收到停止请求",
     "agent_stream_closed": "会话发送连接已结束",
+    "agent_run_phase": "Agent 执行阶段耗时",
+    "message_persistence_timing": "会话消息持久化耗时",
     "agent_run_pending": "执行等待人工操作", "message_persistence_failed": "会话内容保存失败",
     "output_post_accept_failed": "输出已保存，辅助收尾失败",
     "manual_compaction_started": "上下文压缩开始", "manual_compaction_completed": "上下文压缩结束",
@@ -143,24 +151,44 @@ BUNDLE_FIELDS = BUNDLE_NUMBER_FIELDS | frozenset({
     "request_id", "session_id", "run_id", "agent_id", "tool_call_id", "provider_name",
     "model_name", "tool", "phase", "status", "elapsed_ms", "byte_size", "reason_code",
 })
+AGENT_OPERATION_IDS = {
+    "published_agent_access_failed": {"publication_id"},
+    "published_agent_task": {"task_id", "publication_id"},
+    "remote_agent_operation": {"task_id", "connection_id"},
+}
+AGENT_OPERATION_FIELDS = frozenset({
+    "request_id", "session_id", "run_id", "agent_id", "protocol", "phase", "status",
+    "error_type", "reason", "duration_ms", "artifact_count", "byte_size", "http_status",
+})
 BOOLEAN_FIELDS = frozenset({"cache_hit", "has_more", "parse_merge_tables", "parse_relevel_titles", "parse_layout_visualization"})
 PERSISTENCE_NUMBER_FIELDS = frozenset({
     "write_message_count", "write_part_count", "message_ordinal", "part_index",
     "stored_part_count", "incoming_part_count", "database_error_code",
     "message_identity_merges", "response_id_mismatches",
 })
+PERSISTENCE_TIMING_FIELDS = frozenset({"lock_wait_ms", "assemble_ms", "transaction_ms", "publish_ms"})
+EXCEPTION_EVENTS = frozenset({
+    "agent_run_failed",
+    "channel_registration_failed", "diagnostic_users_failed", "diagnostic_users_fallback",
+    "published_agent_access_failed", "remote_agent_operation", "wecom_profile_failed",
+    "webhook_bridge_failed", "webhook_failed",
+    "channel_adapter_start_failed", "channel_delivery_failed", "channel_identity_unavailable",
+    "channel_processing_failed",
+    "channel_preview_failed", "document_parse_failed", "title_generation_failed",
+})
 
 
 def _persistence_fields(fields: dict, result: dict) -> None:
-    """Failure-only vocabulary; no arbitrary SQL, exception or payload text."""
+    """Allowlisted persistence facts without SQL, exception or payload text."""
     choices = {
         "persistence_reason": {"immutable_part_conflict", "database_integrity", "database_operational",
                                "database_data", "database_driver", "timeout", "invalid_value", "unexpected"},
         "db_dialect": {"mysql", "postgresql", "sqlite"},
         "write_stage": {"assemble", "append", "publish"},
-        "write_hook": {"unknown", "_prepare_model_node", "after_model_request", "after_node_run",
+        "write_hook": {"unknown", "_prepare_model_node", "after_model_request", "wrap_model_request",
+                       "after_node_run", "context_compaction",
                        "before_tool_execute", "wrap_tool_execute", "after_tool_execute",
-                       "wrap_run_event_stream", "terminal", "status_finalization", "event_worker"},
+                       "wrap_run_event_stream", "stream_end", "terminal", "status_finalization", "event_worker"},
         "conflict_field": {"part_kind", "content", "args", "tool_name", "tool_call_id", "tool_kind",
                            "metadata", "provider_details", "id", "signature", "provider_name", "outcome",
                            "tools_added", "tools_removed", "other", "parts_count", "metadata.deepagent_timing",
@@ -269,16 +297,23 @@ def safe_fields(fields: dict, *, event: str | None = None) -> dict:
     # record. Limit each specialized event's entire scalar set as well: adding
     # its fields to every base fact can exceed the wire limit before any prose
     # or tool names are included, and trimming those cannot recover the record.
+    stack = fields.get("error_stack")
     adapting = event == "document_adaptation_completed"
     layout = event in LAYOUT_EVENTS
     bundle = event in BUNDLE_EVENTS
-    if adapting:
+    operation_ids = AGENT_OPERATION_IDS.get(event)
+    if operation_ids:
+        allowed = AGENT_OPERATION_FIELDS | operation_ids
+        fields = {key: value for key, value in fields.items() if key in allowed}
+    elif adapting:
         fields = {key: value for key, value in fields.items() if key in ADAPTATION_FIELDS}
     elif layout:
         fields = {key: value for key, value in fields.items() if key in LAYOUT_FIELDS}
     elif bundle:
         fields = {key: value for key, value in fields.items() if key in BUNDLE_FIELDS}
     result = {}
+    if event in EXCEPTION_EVENTS and is_exception_stack(stack):
+        result["error_stack"] = stack
     for name in BOOLEAN_FIELDS:
         if type(fields.get(name)) is bool:
             result[name] = fields[name]
@@ -293,6 +328,11 @@ def safe_fields(fields: dict, *, event: str | None = None) -> dict:
     }:
         result["document_api_path"] = fields["document_api_path"]
     event_identifiers = {"adaptation_version"} if adapting else {"layout_version"} if layout else {"reason_code"} if bundle else set()
+    if operation_ids:
+        event_identifiers = operation_ids
+        protocol = fields.get("protocol")
+        if type(protocol) is str and protocol in {"a2a", "mcp", "codex", "codebuddy"}:
+            result["protocol"] = protocol
     for name in IDENTIFIER_FIELDS | event_identifiers:
         value = fields.get(name)
         # No coercion/repr: even exception __str__ and custom number objects may
@@ -300,6 +340,10 @@ def safe_fields(fields: dict, *, event: str | None = None) -> dict:
         if type(value) is str and TOKEN.fullmatch(value) and "://" not in value:
             result[name] = value
     event_numbers = ADAPTATION_NUMBER_FIELDS if adapting else LAYOUT_NUMBER_FIELDS if layout else BUNDLE_NUMBER_FIELDS if bundle else set()
+    if operation_ids:
+        event_numbers = {"artifact_count"}
+    elif event == "message_persistence_timing":
+        event_numbers = PERSISTENCE_TIMING_FIELDS
     for name in NUMBER_FIELDS | event_numbers:
         value = fields.get(name)
         if type(value) in (int, float) and 0 <= value <= 10**15 and math.isfinite(value):
@@ -309,7 +353,7 @@ def safe_fields(fields: dict, *, event: str | None = None) -> dict:
     if type(name) is str and re.fullmatch(r"[\w .:/()\-|\\]{1,100}", name) and "://" not in name:
         result["agent_name"] = name
     _model_api_fields(fields, result)
-    if event == "message_persistence_failed":
+    if event in {"message_persistence_failed", "message_persistence_timing"}:
         _persistence_fields(fields, result)
     origin = _safe_model_origin(fields.get("target_origin"))
     if origin is not None:

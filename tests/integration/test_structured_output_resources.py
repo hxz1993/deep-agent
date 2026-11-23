@@ -75,7 +75,7 @@ class StructuredOutputResourceTests(unittest.IsolatedAsyncioTestCase):
             if enabled:
                 await self.stores.agent.update_unique(aid, AgentUpdate(structured_output_enabled=True), user_id="resource-operator")
             def response(messages, info):
-                return ModelResponse(parts=[ToolCallPart("resource_result", {"ok": True}, "resource-output")] if enabled else [TextPart("ordinary")])
+                return ModelResponse(parts=[ToolCallPart("output__resource_result", {"ok": True}, "resource-output")] if enabled else [TextPart("ordinary")])
             statements, capture = self.sql_capture()
             event.listen(self.engine.sync_engine, "before_cursor_execute", capture)
             started = perf_counter()
@@ -105,7 +105,7 @@ class StructuredOutputResourceTests(unittest.IsolatedAsyncioTestCase):
         _METRICS["runtime_configuration_reads"] = measurements
 
     async def test_agent_list_10_100_1000_has_constant_sql_and_real_username_batches(self):
-        measurements, seeded, expected_flags = [], 0, {}
+        measurements, seeded = [], 0
         for count in (10, 100, 1000):
             async with self.ctx.db_session_factory() as db:
                 new_agents, new_configs = [], []
@@ -114,7 +114,6 @@ class StructuredOutputResourceTests(unittest.IsolatedAsyncioTestCase):
                     new_agents.append({"id": aid, "name": f"resource-{index:04}", "prompt": "fixture",
                         "capabilities": [], "skills": [], "ui_tool_selection": {}, "updated_by": f"user-{index:04}",
                         "structured_output_enabled": mode == 1 or (mode == 2 and bool(index % 2))})
-                    expected_flags[aid] = mode == 2
                     if mode:
                         new_configs.append({"agent_id": aid, "name": f"result_{index}",
                             "description": "definition must not be loaded by the list",
@@ -134,7 +133,7 @@ class StructuredOutputResourceTests(unittest.IsolatedAsyncioTestCase):
             started = perf_counter()
             try:
                 with patch.object(diagnostic_users, "_RESOLVER", resolver):
-                    response = await self.client.get("/api/v1/agents", headers=self.headers)
+                    response = await self.client.get("/api/v1/agents?include_updater=true", headers=self.headers)
             finally:
                 event.remove(self.engine.sync_engine, "before_cursor_execute", capture)
             self.assertEqual(response.status_code, 200, response.text[:200])
@@ -144,14 +143,14 @@ class StructuredOutputResourceTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(all(len(batch) <= 100 for batch in batches))
             self.assertTrue(all(row["updated_by_user"]["username"] == "username-"+row["updated_by"] for row in rows))
             self.assertEqual(len(statements), 1)
-            self.assertEqual({row["id"]: row["allow_text_output"] for row in rows}, expected_flags)
-            self.assertEqual(sum(row["allow_text_output"] for row in rows), count // 3)
-            self.assertIn("agent_output_configs.allow_text_output", statements[0].lower())
-            for column in ("json_schema", "agent_output_configs.name", "agent_output_configs.description"):
+            for column in ("agent_output_configs", "agents.prompt", "agents.structured_output_enabled"):
                 self.assertNotIn(column, statements[0].lower())
-            self.assertTrue(all("output_config" not in row for row in rows))
+            self.assertTrue(all(
+                {"prompt", "output_config", "allow_text_output", "structured_output_enabled"}.isdisjoint(row)
+                for row in rows
+            ))
             measurements.append({"agents": count, "sql": len(statements), "output_config_selects": 0,
-                "boolean_only_config_selects": 1, "allow_text_output_true": count // 3,
+                "boolean_only_config_selects": 0,
                 "username_fetch_batches": [len(batch) for batch in batches], "elapsed_ms": round((perf_counter()-started)*1000, 2)})
         _METRICS["agent_list_scaling"] = measurements
 
@@ -207,7 +206,7 @@ class StructuredOutputResourceTests(unittest.IsolatedAsyncioTestCase):
         state = StructuredOutputState(contract)
         def response(messages, info):
             captured.append(info)
-            return ModelResponse(parts=[ToolCallPart("resource_result", {"text": "synthetic"}, "resource-call")])
+            return ModelResponse(parts=[ToolCallPart("output__resource_result", {"text": "synthetic"}, "resource-call")])
         await SdkAgent(FunctionModel(response), output_type=state.output_types).run("synthetic")
         self.assertEqual(captured[0].output_tools[0].parameters_json_schema["properties"]["text"]["description"], contract["json_schema"]["properties"]["text"]["description"])
         estimator = TokenEstimator.for_model("synthetic-resource", provider_type="test")

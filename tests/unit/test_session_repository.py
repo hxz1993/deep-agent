@@ -4,6 +4,7 @@ import unittest
 
 from pydantic_ai.messages import ModelRequest, UserPromptPart
 
+from deep_agent.db.serialization import StoredUserPromptPart
 from deep_agent.db.session_list import SessionListFilters
 from deep_agent.schemas.agent import AgentCreate
 from tests.helpers.sqlite_stores import make_sqlite_stores
@@ -25,7 +26,7 @@ class ChatSessionStoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_list_summaries_joins_agent_and_counts_messages(self) -> None:
         await self.store.append(
             "sess-1",
-            [ModelRequest(parts=[UserPromptPart(content=[
+            [ModelRequest(parts=[StoredUserPromptPart(content=[
                 "hello sql",
                 {"kind": "attachment-ref", "id": "file-1", "name": "input.xlsx", "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
             ])])],

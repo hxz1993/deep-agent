@@ -1,11 +1,11 @@
 import asyncio
 from unittest.mock import patch
 
-from tests.integration.test_channel_accounts_api import ChannelAccountsApiTests
+from tests.integration import test_channel_accounts_api as channel_accounts
 from deep_agent.services.feishu_registration import FeishuRegistrationService
 
 
-class FeishuRegistrationApiTests(ChannelAccountsApiTests):
+class FeishuRegistrationApiTests(channel_accounts.ChannelAccountsApiTests):
     async def asyncSetUp(self):
         await super().asyncSetUp()
         async def register(**kwargs):

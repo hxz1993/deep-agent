@@ -5,29 +5,34 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sse_starlette.sse import EventSourceResponse
 from starlette.concurrency import run_in_threadpool
 
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.api.v1.diagnostic_routes import NoStoreRoute
 from deep_agent.api.v1.request_identity import RequestUserDep
-from deep_agent.api.v1.sessions import SessionEventsResponse, SessionEventResponse, _build_context_data, context_status_from_data
+from deep_agent.api.v1.sessions import (
+    SessionEventResponse, SessionEventsResponse, _build_context_data, context_status_from_data, session_run_response,
+)
 from deep_agent.api.v1.local_files import local_attachment_response
 from deep_agent.agent.attachments import index_attachment_refs
 from deep_agent.agent.tool_output_limits import session_file_metadata_from_history
 from deep_agent.files.storage import LOCAL_FILE_PREFIX, LocalFileStore
 from deep_agent.capabilities.display_names import resolve_tool_display_name_map
 from deep_agent.conversation.display_names import decorate_history_display_names
+from deep_agent.conversation.file_links import ReplyFiles
 from deep_agent.conversation.models import ConversationHistoryResponse
 from deep_agent.conversation.projector import ConversationProjectionError
 from deep_agent.schemas.session_source import SessionSourceType
 from deep_agent.schemas.diagnostic_query import (
-    DiagnosticSessionQuery, DiagnosticUsersQuery, DiagnosticUserProfileQuery,
+    DiagnosticSessionQuery, DiagnosticSessionOverviewQuery, DiagnosticUsersQuery, DiagnosticUserProfileQuery,
     DiagnosticSessionDetailQuery, DiagnosticSessionEventsQuery,
 )
 from deep_agent.core.context import AppContextDep
 from deep_agent.diagnostics.sessions import DiagnosticQueryError, DiagnosticSessionQueries, SessionFilters, detail_event_metadata, project_diagnostic_history, query_budget
 from deep_agent.services.channel_profiles import ChannelProfileService
 from deep_agent.time import UtcDatetime, utc_rfc3339
+from deep_agent.services.trajectory_export import EXPORT_OPENAPI
 
 
 class DiagnosticSessionRoute(NoStoreRoute):
@@ -43,6 +48,20 @@ class DiagnosticSessionRoute(NoStoreRoute):
 
 
 router = APIRouter(prefix="/diagnostics/sessions", dependencies=CONSOLE_ADMIN_DEPENDENCIES, route_class=DiagnosticSessionRoute)
+
+
+@router.get("/{session_id}/trajectory-export/preview")
+async def preview_trajectory_export(request: Request, ctx: AppContextDep, user_id: RequestUserDep,
+                                    session_id: str):
+    from deep_agent.services.trajectory_export import preview
+    return await preview(ctx, request, session_id, user_id, admin=True)
+
+
+@router.post("/{session_id}/trajectory-export", openapi_extra=EXPORT_OPENAPI)
+async def export_session_trajectory(request: Request, ctx: AppContextDep, user_id: RequestUserDep,
+                                    session_id: str, include_files: bool = Query(default=False)):
+    from deep_agent.services.trajectory_export import export_response
+    return await export_response(ctx, request, session_id, user_id, admin=True, include_files=include_files)
 
 
 def filters(
@@ -82,11 +101,12 @@ async def with_users(request, caller_user_id, result, user_ids):
 
 
 @router.get("/overview")
-async def get_diagnostic_overview(request: Request, ctx: AppContextDep, caller_user_id: RequestUserDep, selected: FiltersDep):
+async def get_diagnostic_overview(request: Request, ctx: AppContextDep, caller_user_id: RequestUserDep, selected: FiltersDep,
+                                  section: Literal["all", "metrics", "trend", "agents", "activity"] = "all"):
     async with query_budget():
-        result = await service(ctx).overview(selected)
-    ids = {row["user_id"] for key in ("active_users", "recent_questions", "recent_errors") for row in result[key]}
-    return await with_users(request, caller_user_id, result, ids)
+        result = await service(ctx).overview(selected, section=section)
+    ids = {row["user_id"] for key in ("active_users", "recent_questions", "recent_errors") for row in result.get(key, [])}
+    return await with_users(request, caller_user_id, result, ids) if ids or section == "all" else result
 
 
 @router.get("")
@@ -164,8 +184,18 @@ async def get_diagnostic_session(request: Request, ctx: AppContextDep, caller_us
     return await with_users(request, caller_user_id, result, [result["user_id"]])
 
 
+@router.get("/{session_id}/live")
+async def observe_diagnostic_run(request: Request, ctx: AppContextDep, session_id: str,
+                                 run_id: str = Query(min_length=1, max_length=128)) -> EventSourceResponse:
+    async with query_budget():
+        session = await service(ctx).identity(session_id)
+    return session_run_response(
+        request, ctx, session["agent_id"], session["session_id"], session["user_id"], run_id, diagnostic=True,
+    )
+
+
 @router.get("/{session_id}/history", response_model=ConversationHistoryResponse)
-async def get_diagnostic_history(ctx: AppContextDep, session_id: str):
+async def get_diagnostic_history(request: Request, ctx: AppContextDep, session_id: str):
     async with query_budget():
         detail = await service(ctx).identity(session_id)
         events = await ctx.store.list_all_events(session_id)
@@ -176,7 +206,9 @@ async def get_diagnostic_history(ctx: AppContextDep, session_id: str):
         row = await ctx.stores.agent.get_by_id(detail["agent_id"]) if detail["agent_id"] else None
         names = await resolve_tool_display_name_map(ctx.registry, ctx.stores,
             capabilities=list(row.capabilities or []) if row else None)
-        return await run_in_threadpool(decorate_history_display_names, projected, names)
+        history = await run_in_threadpool(decorate_history_display_names, projected, names)
+        files = ReplyFiles(request, ctx.file_store, session_id, {"user": detail["user_id"]}, diagnostic=True)
+        return await files.history(history)
 
 
 @router.get("/{session_id}/files/{file_id}/download", include_in_schema=False)
@@ -222,8 +254,8 @@ def body_filters(body: DiagnosticSessionQuery):
 
 @router.post("/overview")
 async def query_diagnostic_overview(request: Request, ctx: AppContextDep, caller_user_id: RequestUserDep,
-                                    body: DiagnosticSessionQuery):
-    return await get_diagnostic_overview(request, ctx, caller_user_id, body_filters(body))
+                                    body: DiagnosticSessionOverviewQuery):
+    return await get_diagnostic_overview(request, ctx, caller_user_id, body_filters(body), body.section)
 
 
 @router.post("")

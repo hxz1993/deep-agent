@@ -1,7 +1,7 @@
 import asyncio
 import socket
 
-from loguru import logger
+from ..log import safe_logger as logger
 import py_eureka_client.eureka_client as eurekacli
 
 from ..client.system import SystemAPI
@@ -58,12 +58,12 @@ async def _install_module(module: ModuleDescriptor):
     try:
         await api.module.install_module(config)
     except Exception:
-        logger.error("注册失败")
+        logger.opt(exception=True).error("项目模块注册失败")
         raise
     finally:
         await ServiceDiscovery.stop()
 
-    logger.info(f"项目注册完成: {config}")
+    logger.info("项目模块注册完成")
 
 
 async def register_module(module: ModuleDescriptor):

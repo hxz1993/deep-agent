@@ -10,6 +10,10 @@ from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.files.upload_settings import DefaultUploadSettingsStore
 
 if TYPE_CHECKING:
+    from deep_agent.agent_service.output import PublicationProtocol
+    from deep_agent.agent.file_delivery import RunFileDelivery
+    from deep_agent.agent.tool_names import ToolName
+    from deep_agent.sandbox.context import ExecutionContextState
     from deep_agent.agent.request_budget import TurnRequestBudget
     from deep_agent.agent.context.runtime import ContextRunState
     from deep_agent.agent.tool_discovery import ToolDiscoveryTelemetry
@@ -18,6 +22,7 @@ if TYPE_CHECKING:
     from deep_agent.files.storage import FileStore
     from deep_agent.documents.cache import DocumentRunCache
     from deep_agent.files.image_view.runtime import ImageViewState
+    from deep_agent.services.integration_app_access import PlatformAppAccessClient
 
 
 @dataclass
@@ -43,10 +48,21 @@ class AgentDeps:
     app_id: str | None = None
     space_id: str | None = None
     request_headers: Mapping[str, str] = field(default_factory=dict)
+    # Trusted execution-only inputs, independent of the configurable MCP allowlist.
+    execution_request_headers: Mapping[str, str] | None = field(default=None, repr=False)
+    bound_mcp_access: "PlatformAppAccessClient | None" = field(default=None, repr=False)
+    bound_mcp_login: dict[str, str] = field(default_factory=dict, repr=False)
+    bound_mcp_connectors: dict[str, Any] = field(default_factory=dict, repr=False)
+    # Local development identity is populated from trusted server scope only.
+    local_username: str | None = field(default=None, repr=False)
+    execution_context_state: "ExecutionContextState | None" = field(default=None, repr=False)
     file_store: "FileStore | None" = field(default=None, repr=False)
+    file_delivery: "RunFileDelivery | None" = field(default=None, repr=False)
     upload_settings_store: Any = field(default_factory=DefaultUploadSettingsStore, repr=False)
     context_state: "ContextRunState | None" = None
     request_budget: "TurnRequestBudget | None" = None
+    tool_names: dict[str, "ToolName"] = field(default_factory=dict, repr=False)
+    publication_protocol: PublicationProtocol | None = None
     output_state: Any = field(default=None, repr=False)
     output_store: Any = field(default=None, repr=False)
     tool_discovery: "ToolDiscoveryTelemetry | None" = None
@@ -63,6 +79,9 @@ class AgentDeps:
     cancellation_token: CancellationToken | None = field(default=None, repr=False)
     has_context_references: bool = False
     attachment_by_id: dict[str, AttachmentRef] = field(default_factory=dict)
+    remote_user_message: str | None = None
+    remote_task_id: str | None = None
+    remote_question_id: str | None = None
     # All FileStore-backed artifacts authorized by the raw current-session history.
     # Overflow artifacts are also kept in ``tool_output_artifacts`` because only
     # those handles may be consumed by Harness ``read_tool_result``.

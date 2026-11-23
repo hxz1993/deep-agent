@@ -23,7 +23,7 @@ const consoleStyles = await readFile(new URL("../../../console/console.css", imp
 const sharedPrimitives = await readFile(new URL("../../../console/ui-primitives.css", import.meta.url), "utf8");
 
 test("配置中心提供企微渠道页和完整运行状态", () => {
-  assert.match(indexHtml, /data-tab="channels"[\s\S]*?<span>渠道<\/span>/);
+  assert.match(indexHtml, /data-tab="channels"[^>]*><i[^>]*><\/i><span>消息渠道<\/span>/);
   assert.match(templateHtml, /id="panel-channels"/);
   assert.match(templateHtml, /id="channelRuntimeBanner"/);
   assert.match(templateHtml, /channel-title-row[\s\S]*id="channelRuntimeBanner"[\s\S]*id="refreshChannelsBtn"/);
@@ -147,7 +147,7 @@ test("渠道表单绑定Agent且Secret只展示脱敏值并支持留空保留", 
   assert.doesNotMatch(templateHtml, /id="channelWelcomeMessage"|id="channelEnabled"/);
   assert.doesNotMatch(templateHtml, /owner_user_id|platform_token|cookie/i);
   assert.doesNotMatch(templateHtml, /channelAppId|channelSpaceId|channelLanguage|欢迎语/);
-  assert.doesNotMatch(source, /space_id|language|welcome/i);
+  assert.doesNotMatch(source, /language|welcome/i);
   assert.match(source, /setChannelSecretEditor\(\{ maskedValue: account\.secret_masked, secretSet: account\.secret_set \}\)/);
   assert.match(source, /channelAccountModalTitle"\)\.textContent = account\.name/);
   assert.doesNotMatch(source, /编辑企微渠道 ·/);
@@ -159,10 +159,11 @@ test("渠道表单绑定Agent且Secret只展示脱敏值并支持留空保留", 
   assert.match(source, /\/test-connection/);
 });
 
-function secretEditorHarness() {
+function secretEditorHarness(apps = []) {
   const elements = new Map();
   const ready = [];
   const requests = [];
+  const picker = { open(options) { this.options = options; }, close() {}, async getApps() { return apps; } };
   const getElement = (id) => {
     if (!elements.has(id)) elements.set(id, {
       value: "", dataset: {}, listeners: {}, attributes: {}, open: false, selected: false,
@@ -173,12 +174,18 @@ function secretEditorHarness() {
       getAttribute(key) { return this.attributes[key]; },
       addEventListener(type, listener) { this.listeners[type] = listener; },
       showModal() { this.open = true; }, close() { this.open = false; },
-      select() { this.selected = true; }, reportValidity() { return true; },
+      select() { this.selected = true; }, focus() { this.focused = true; }, reportValidity() { return true; },
     });
     return elements.get(id);
   };
   const context = vm.createContext({
-    window: { serviceUrl: path => new URL(path, "http://127.0.0.1:8000/").href, location: {origin:"http://127.0.0.1:8000"}, createChannelRegistration: () => ({ reset() {}, start() {} }) },
+    window: {
+      serviceUrl: path => new URL(path, "http://127.0.0.1:8000/").href,
+      location: { origin: "http://127.0.0.1:8000" },
+      createChannelRegistration: () => ({ reset() {}, start() {} }),
+      DeepAgentAppPicker: picker,
+      DeepAgentConsoleAPI: { deriveSpaceFromApp: id => id.slice(0, -3) },
+    },
     document: {
       addEventListener(type, listener) { if (type === "DOMContentLoaded") ready.push(listener); },
       getElementById: getElement,
@@ -199,7 +206,7 @@ function secretEditorHarness() {
   ready.forEach((listener) => listener());
   const admin = context.window.channelsAdmin;
   admin.refresh = async () => {};
-  return { admin, getElement, requests, context };
+  return { admin, getElement, requests, context, picker };
 }
 
 test("渠道Secret回显安全掩码，聚焦全选并由公共控件管理显示", () => {
@@ -269,7 +276,8 @@ test("渠道布局包含窄屏适配且不引入第二个页面结构", () => {
 });
 
 test("帮助两页共用固定尺寸，长说明仅面板滚动", () => {
-  assert.match(styles, /dialog\.console-detail-dialog\.modal\.channel-help-modal\s*\{[^}]*height: min\(800px, calc\(100dvh - 32px\)\);[^}]*min-height: 0;/);
+  assert.match(styles, /dialog\.console-detail-dialog\.modal\.channel-help-modal\s*\{[^}]*height: min\(720px, calc\(100dvh - 32px\)\);[^}]*min-height: 0;/);
+  assert.match(styles, /\.channel-help-modal\[open\]\s*\{\s*display: flex; flex-direction: column;/);
   assert.match(styles, /\.channel-help-panel\s*\{[^}]*min-height: 0;[^}]*overflow-y: auto;/);
 });
 
@@ -331,26 +339,30 @@ test("渠道Key草稿保留输入供公共眼睛查看，保存发送原值，�
   assert.equal(requests.at(-1).payload.settings.deepfos.api_key, undefined);
 });
 
-test("应用关联默认关闭，开启显示必填配置，关闭保留内容且隐藏并禁用", async () => {
-  const { admin, getElement, requests } = secretEditorHarness();
+test("应用关联使用共享单选弹框，关闭保留选择，保存只提交应用 ID", async () => {
+  const { admin, getElement, requests, picker } = secretEditorHarness();
   admin.openEdit("channel-1");
   const toggle = getElement("channelDeepfosEnabled");
-  const input = getElement("channelDeepfosAppId");
+  const trigger = getElement("channelDeepfosApp");
+  const value = getElement("channelDeepfosAppValue");
   const field = getElement("channelDeepfosAppField");
   const switchToggle = () => toggle.listeners.click({ currentTarget: toggle });
   assert.equal(toggle.getAttribute("aria-checked"), "false");
   assert.equal(field.hidden, true);
-  assert.equal(input.disabled, true);
+  assert.equal(trigger.disabled, true);
   switchToggle();
   assert.equal(field.hidden, false);
-  assert.equal(input.required, true);
-  assert.equal(input.disabled, false);
-  input.value = "fixture005";
+  assert.equal(trigger.disabled, false);
+  trigger.listeners.click();
+  assert.equal(picker.options.owner, "channel");
+  assert.equal(picker.options.path, "/api/v1/mcp/bound-apps");
+  picker.options.onSelect({ app_id: "fixture005", app_name: "预算", space_id: "fixture", space_name: "财务" });
+  assert.equal(value.textContent, "预算 · fixture005");
+  assert.equal(getElement("channelDeepfosAppSpace").textContent, "财务");
   switchToggle();
   assert.equal(field.hidden, true);
-  assert.equal(input.required, false);
-  assert.equal(input.disabled, true);
-  assert.equal(input.value, "fixture005");
+  assert.equal(trigger.disabled, true);
+  assert.equal(value.textContent, "预算 · fixture005");
   const submit = () => admin.save({ preventDefault() {}, currentTarget: getElement("channelAccountForm") });
   await submit();
   assert.deepEqual(requests.at(-1).payload.settings.deepfos, { enabled: false, app_id: "fixture005" });
@@ -360,7 +372,24 @@ test("应用关联默认关闭，开启显示必填配置，关闭保留内容�
   assert.equal(getElement("channelUserDetailsEnabled").getAttribute("aria-checked"), "false");
   admin.openCreate();
   assert.equal(toggle.getAttribute("aria-checked"), "false");
-  assert.equal(input.value, "");
+  assert.equal(value.textContent, "选择应用");
+});
+
+test("编辑渠道回显已保存应用，目录迟到时保留用户刚选的应用", async () => {
+  const saved = { app_id: "fixture005", app_name: "预算", space_id: "fixture", space_name: "财务" };
+  const { admin, getElement, context, picker } = secretEditorHarness([saved]);
+  vm.runInContext('channelAdminState.accounts[0].settings = {deepfos: {enabled: true, app_id: "fixture005"}}', context);
+  const value = getElement("channelDeepfosAppValue");
+  admin.openEdit("channel-1");
+  assert.equal(value.textContent, "fixture005");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(value.textContent, "预算 · fixture005");
+  admin.openEdit("channel-1");
+  getElement("channelDeepfosApp").listeners.click();
+  assert.equal(picker.options.selectedAppId, "fixture005");
+  picker.options.onSelect({ app_id: "fixture006", app_name: "经营", space_id: "fixture" });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(value.textContent, "经营 · fixture006");
 });
 
 function userQueryHarness(fetchProfile) {

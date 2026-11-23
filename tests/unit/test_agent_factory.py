@@ -5,7 +5,7 @@ import unittest
 from unittest import mock
 
 from pydantic_ai.models.google import GoogleModel
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -218,10 +218,10 @@ class ResolveModelTests(unittest.TestCase):
             any(module.startswith("deep_agent.models") for module in capability_modules)
         )
 
-    def test_web_toolset_preserves_main_chat_protocol_for_all_chat_providers(self) -> None:
+    def test_web_toolset_preserves_configured_provider_protocol(self) -> None:
         for provider_type in (
             "deepseek", "moonshotai", "openai", "openrouter", "alibaba", "zai",
-            "openai_compatible",
+            "openai_compatible", "xai",
         ):
             with self.subTest(provider_type=provider_type):
                 web_toolset = FunctionToolset()
@@ -240,7 +240,8 @@ class ResolveModelTests(unittest.TestCase):
                 ) as resolve:
                     agent = build_agent(spec, build_registry(), web_toolset=web_toolset)
                 resolve.assert_called_once_with(spec)
-                self.assertIsInstance(agent.model, OpenAIChatModel)
+                expected = OpenAIResponsesModel if provider_type in {"openai", "xai"} else OpenAIChatModel
+                self.assertIsInstance(agent.model, expected)
                 self.assertEqual(agent.model.model_name, model_name)
                 self.assertIn(web_toolset, agent.toolsets)
                 self.assertFalse(any(
@@ -285,10 +286,10 @@ class ToolsetAssemblyTests(unittest.TestCase):
 
     def test_selected_packages_preserve_all_runtime_toolset_layers(self) -> None:
         registry = ToolPackageRegistry()
-        general = object()
+        fixture = object()
         sandbox = object()
         for code, toolset in (
-            ("builtin:general", general),
+            ("builtin:fixture", fixture),
             ("builtin:sandbox", sandbox),
         ):
             registry.register(
@@ -304,7 +305,7 @@ class ToolsetAssemblyTests(unittest.TestCase):
         ui = object()
         spec = _spec(
             capabilities=[
-                "builtin:general",
+                "builtin:fixture",
                 "builtin:sandbox",
                 "mcp:deepcube",
                 "ui:deepcube",
@@ -326,8 +327,10 @@ class ToolsetAssemblyTests(unittest.TestCase):
             ],
         )
 
-        self.assertEqual(len(assembled), 7)
-        self.assertIs(assembled[0], general)
+        self.assertEqual(len(assembled), 9)
+        self.assertEqual([set(toolset.tools) for toolset in assembled[:2]], [{"get_current_time"}, {"present"}])
+        assembled = assembled[2:]
+        self.assertIs(assembled[0], fixture)
         self.assertIs(assembled[1], sandbox)
         self.assertIsInstance(assembled[2], McpDiscoveryToolset)
         self.assertIs(assembled[3], resources)
@@ -335,28 +338,19 @@ class ToolsetAssemblyTests(unittest.TestCase):
         self.assertEqual(assembled[5], "file-export-toolset")
         self.assertIs(assembled[6], ui)
 
-    def test_empty_selection_has_no_implicit_packages(self) -> None:
+    def test_empty_and_retired_selections_only_have_runtime_toolsets(self) -> None:
         registry = ToolPackageRegistry()
-        general = object()
-        registry.register(
-            ToolPackage(
-                code="builtin:general",
-                category="builtin",
-                toolset=general,
-            )
-        )
-        self.assertEqual(_toolsets_for_spec(registry, _spec(capabilities=[])), [])
-        self.assertEqual(
-            _toolsets_for_spec(registry, _spec(capabilities=["builtin:general"])),
-            [general],
-        )
+        for capabilities in ([], ["builtin:general"]):
+            with self.subTest(capabilities=capabilities):
+                toolsets = _toolsets_for_spec(registry, _spec(capabilities=capabilities))
+                self.assertEqual([set(toolset.tools) for toolset in toolsets], [{"get_current_time"}, {"present"}])
 
     def test_web_toolset_is_only_injected_for_explicit_runtime_selection(self) -> None:
         registry = build_registry()
         web_toolset = object()
 
         self.assertEqual(
-            _toolsets_for_spec(registry, _spec(capabilities=[])),
+            _toolsets_for_spec(registry, _spec(capabilities=[]))[2:],
             [],
         )
         self.assertEqual(
@@ -364,7 +358,7 @@ class ToolsetAssemblyTests(unittest.TestCase):
                 registry,
                 _spec(capabilities=["builtin:web"]),
                 web_toolset=web_toolset,
-            ),
+            )[2:],
             [web_toolset],
         )
 

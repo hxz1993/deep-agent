@@ -50,6 +50,7 @@ test("控制台合并为图文一级导航且保留三个真实页面", () => {
   assert.match(index, /<aside class="console-rail"[\s\S]*?<nav class="console-nav">/);
   assert.match(index, /data-page="workspace"[\s\S]*?class="resource-nav"[\s\S]*?class="console-nav-footer"[\s\S]*?>系统<\/div>[\s\S]*?data-tab="global-settings"/);
   const navigation = index.match(/<template id="configurationNavigation">([\s\S]*?)<\/template>/)[1];
+  assert.match(navigation, />设置<\/div>[\s\S]*?data-tab="skills"[\s\S]*?>服务发布<\/div>[\s\S]*?data-tab="integrations"[^>]*>[^\n]*>组件场景<\/span>[\s\S]*?data-tab="channels"[^>]*>[^\n]*>消息渠道<\/span>[\s\S]*?data-tab="agent-service"[^>]*>[^\n]*>发布 Agent<\/span>[\s\S]*?>诊断<\/div>/);
   assert.match(navigation, /data-tab="channels"[\s\S]*?>诊断<\/div>[\s\S]*?data-diagnostics-nav="sessions"[\s\S]*?data-diagnostics-nav="usage"[\s\S]*?data-diagnostics-nav="logs"/);
   assert.doesNotMatch(navigation, /data-tab="global-settings"|data-tab="catalog"|接口文档/);
   assert.doesNotMatch(index, /data-page="configuration"|<aside class="resource-nav"/);
@@ -187,7 +188,7 @@ test("配置中心采用 Deepfos 轻风格的统一尺寸和表头", () => {
   assert.match(styles, /--config-radius: var\(--ui-radius\)/);
   assert.match(styles, /--config-control-height: var\(--ui-control-height\)/);
   assert.match(styles, /--config-header-height: 56px/);
-  assert.match(styles, /#configurationHost \.panel-toolbar,[\s\S]*min-height: var\(--config-header-height\)/);
+  assert.match(styles, /#configurationHost \.panel-toolbar,[\s\S]*min-height: var\(--config-header-height, 56px\)/);
   assert.match(styles, /\.btn, \.diagnostics-button\s*\{[^}]*height:var\(--ui-control-height\)/);
   assert.match(styles, /#configurationHost \.data-table thead th,[\s\S]*height: 36px;[\s\S]*font-size: var\(--ui-font-helper\)/);
   assert.match(template, /<h2>MCP 服务列表<\/h2>[\s\S]*管理 Agent 可授权使用的 MCP 服务、工具快照与连接状态/);

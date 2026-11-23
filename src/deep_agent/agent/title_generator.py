@@ -214,8 +214,7 @@ async def generate_title(
             record("title_generation_cancelled", phase="image_download")
             raise
         except Exception as exc:  # noqa: BLE001 - title failure must not fail chat
-            record("title_generation_failed", phase="image_download", error_type=type(exc).__name__)
-            logger.warning("Title image download failed: %s", type(exc).__name__)
+            record("title_generation_failed", phase="image_download", exception=exc)
             return None
         prompt.append(
             BinaryContent(data=data, media_type=image.mime or "application/octet-stream")
@@ -238,12 +237,9 @@ async def generate_title(
                 ),
                 timeout=TITLE_GENERATION_TIMEOUT_SECONDS,
             )
-    except TimeoutError:
+    except TimeoutError as exc:
         collect_usage()
-        record("title_generation_failed", phase="model", reason="timeout", error_type="TimeoutError")
-        logger.warning(
-            "Title generation timed out after %.1fs", TITLE_GENERATION_TIMEOUT_SECONDS
-        )
+        record("title_generation_failed", phase="model", reason="timeout", exception=exc)
         return None
     except asyncio.CancelledError:
         collect_usage()
@@ -253,9 +249,7 @@ async def generate_title(
         collect_usage()
         reason = "output_token_limit" if str(exc).startswith("Model token limit (") else "model_error"
         record("title_generation_failed", phase="model", reason=reason,
-               error_type=type(exc).__name__, http_status=getattr(exc, "status_code", None))
-        logger.warning("Title generation failed: %s", type(exc).__name__)
-        logger.debug("Title generation traceback", exc_info=True)
+               exception=exc, http_status=getattr(exc, "status_code", None))
         return None
 
     collect_usage()

@@ -48,7 +48,7 @@ class StructuredOutputPublicProtocolTests(unittest.IsolatedAsyncioTestCase):
             calls.append(info)
             value = values[min(len(calls) - 1, len(values) - 1)]
             args = value if schema.get("type") == "object" else {"response": value}
-            return ModelResponse(parts=[ToolCallPart("public_result", args, f"output-{len(calls)}")],
+            return ModelResponse(parts=[ToolCallPart("output__public_result", args, f"output-{len(calls)}")],
                                  usage=RequestUsage(input_tokens=11, output_tokens=7))
         async def stream(messages, info):
             result = response(messages, info)
@@ -186,7 +186,7 @@ class StructuredOutputPublicProtocolTests(unittest.IsolatedAsyncioTestCase):
             calls.append(info)
             ready.set()
             await release.wait()
-            yield {0: DeltaToolCall(name="public_result", json_args=json.dumps(value), tool_call_id="live-output")}
+            yield {0: DeltaToolCall(name="output__public_result", json_args=json.dumps(value), tool_call_id="live-output")}
         original = AgentRunner.run_stream
         async def gated(runner, *args, **kwargs):
             async for event in original(runner, *args, **kwargs):

@@ -18,10 +18,13 @@
 | [`ui-tools-external.md`](ui-tools-external.md) | 集成方使用和配置 UI 工具的说明 |
 | [`mcp-resources.md`](mcp-resources.md) | MCP Resource 探测、代理工具和安全边界 |
 | [`agent-packages.md`](agent-packages.md) | Agent 安装包格式、导出、上传/自带安装与空模型边界 |
+| [`integrations.md`](integrations.md) | 场景配置、关联 Agent、应用专用提示词和 Skill |
 | [`skills.md`](skills.md) | Skill 安装、Agent 授权、渐进披露、迁移与发布复测 |
 | [`configuration-import.md`](configuration-import.md) | 无会话新环境的同Revision配置预检与初始化接口 |
 | [`code-mode.md`](code-mode.md) | Hybrid Code Mode 启用、工具选择、文件变量、边界与排障 |
+| [`trajectory-export.md`](trajectory-export.md) | Console JSON／ZIP 轨迹导出、可信文件范围、权限与完整性清单 |
 | [`console-admin-access.md`](console-admin-access.md) | Console 企业管理员判定、管理API门禁和业务接口边界 |
+| [`developer-assistant.md`](developer-assistant.md) | 开发助手页面、鉴权资料下载、单 Skill 包及可重复构建 |
 | [`web-tools.md`](web-tools.md) | 网络搜索、DeepSeek/Kimi网页抓取、历史配置兼容与图片读取边界 |
 | [`image-viewing.md`](image-viewing.md) | 图片/PDF原页、三种授权来源、主模型视觉与轻量历史 |
 | [`console-ui-guidelines.md`](console-ui-guidelines.md) | Console 页面、弹窗、表单、容器、控件和视觉验收规范 |
@@ -35,6 +38,8 @@
 | [`project-structure.md`](project-structure.md) | 当前项目目录、运行链路和职责边界 |
 
 ## 实现经验
+
+运行环境时间工具、时区与旧 Agent 包兼容见[运行环境工具](runtime-environment.md)。
 
 | 文档 | 用途 |
 | --- | --- |

@@ -9,6 +9,7 @@ used to guess a provider.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -16,18 +17,21 @@ import httpx2
 from pydantic_ai.models import DEFAULT_HTTP_TIMEOUT, Model, get_user_agent
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.google import GoogleModel
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.providers.alibaba import AlibabaProvider
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.moonshotai import MoonshotAIProvider
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.providers.openai_compatible import OpenAICompatibleProvider
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.providers.zai import ZaiProvider
 
 from deep_agent.models import OpenAICompatibleVideoChatModel
-from deep_agent.models.compatible_providers import MiniMaxProvider, StepFunProvider
+from deep_agent.models.compatible_providers import (
+    MiniMaxProvider, StepFunProvider, StepFunChatModel, StepFunVideoChatModel,
+)
 from deep_agent.models.http_transport import model_http_settings
 from deep_agent.models.qwen import qwen38_chat_profile
 from deep_agent.models.tool_schema_refs import (
@@ -91,7 +95,7 @@ PROVIDER_TYPES: tuple[ProviderTypeDefinition, ...] = (
         "openai_chat",
     ),
     ProviderTypeDefinition(
-        "openai", "OpenAI", 6, "https://api.openai.com/v1/", True, True, "openai_chat"
+        "openai", "OpenAI", 6, "https://api.openai.com/v1/", True, True, "openai_responses"
     ),
     ProviderTypeDefinition(
         "anthropic", "Anthropic", 7, "https://api.anthropic.com", True, True, "anthropic"
@@ -127,8 +131,12 @@ PROVIDER_TYPES: tuple[ProviderTypeDefinition, ...] = (
     ProviderTypeDefinition(
         "anthropic_compatible", "Anthropic Compatible", 13, None, False, True, "anthropic"
     ),
+    ProviderTypeDefinition(
+        "xai", "xAI (Grok)", 14, "https://api.x.ai/v1", True, True, "openai_responses"
+    ),
 )
 _PROVIDER_TYPES_BY_CODE = {item.code: item for item in PROVIDER_TYPES}
+OPENAI_RESPONSES_TAG = "openai_responses"
 
 
 def provider_type_definition(code: str) -> ProviderTypeDefinition:
@@ -137,6 +145,12 @@ def provider_type_definition(code: str) -> ProviderTypeDefinition:
         return _PROVIDER_TYPES_BY_CODE[code]
     except KeyError as exc:
         raise UnknownProviderTypeError(code) from exc
+
+
+def model_protocol(definition: ProviderTypeDefinition, tags: list[str] | None) -> str:
+    if definition.code == "openai_compatible" and OPENAI_RESPONSES_TAG in (tags or []):
+        return "openai_responses"
+    return definition.model_protocol
 
 
 class ProviderRuntimeError(DeepAgentError):
@@ -347,10 +361,11 @@ def _openai_style_provider(config: ProviderRuntimeConfig):
             **({} if use_default else {"base_url": effective_base_url(config)}),
         )
     if config.provider_type == "openai_compatible":
-        return OpenAIProvider(
-            api_key=config.api_key,
-            base_url=effective_base_url(config),
-        )
+        endpoint = effective_base_url(config)
+        # Opaque upstream state belongs to this connection, including after an endpoint change.
+        identity = f"{config.id or ''}\n{httpx2.URL(endpoint)}"
+        system = f"openai-compatible:{sha256(identity.encode()).hexdigest()}"
+        return OpenAICompatibleProvider(system, api_key=config.api_key, base_url=endpoint)
     raise UnknownProviderTypeError(config.provider_type)
 
 
@@ -383,7 +398,17 @@ def resolve_provider_model(
     if not model_name:
         raise ProviderConfigurationError("LLM model name is required")
 
-    if definition.model_protocol == "openai_chat":
+    protocol = model_protocol(definition, tags)
+    if protocol == "openai_responses" and provider.provider_type in {"openai", "openai_compatible"}:
+        model = OpenAIResponsesModel(
+            model_name, provider=_openai_style_provider(provider),
+            settings=model_http_settings(
+                {"openai_reasoning_summary": "auto"} if "reasoning" in (tags or []) else None,
+            ),
+        )
+        model.deepagent_provider_type = provider.provider_type
+        return model
+    if protocol == "openai_chat":
         runtime_provider = _openai_style_provider(provider)
         supports_compatibility_overrides = provider.provider_type == "openai_compatible"
         profile = None
@@ -407,19 +432,35 @@ def resolve_provider_model(
                 "openai_chat_supports_multiple_system_messages": False,
             }
         supports_video = "video" in (input_modalities or []) or "video_url" in (tags or [])
-        if supports_compatibility_overrides and INLINE_TOOL_SCHEMA_REFS_TAG in (tags or []):
+        if provider.provider_type == "stepfun":
+            model_class = StepFunVideoChatModel if supports_video else StepFunChatModel
+        elif supports_compatibility_overrides and INLINE_TOOL_SCHEMA_REFS_TAG in (tags or []):
             model_class = InlineToolRefsVideoChatModel if supports_video else InlineToolRefsChatModel
         else:
             model_class = OpenAICompatibleVideoChatModel if supports_video else OpenAIChatModel
         model = model_class(
             model_name,
             provider=runtime_provider,
-            settings=model_http_settings(),
+            settings=model_http_settings(
+                {"openai_continuous_usage_stats": True} if provider.provider_type == "stepfun" else None,
+            ),
             **({"profile": profile} if profile is not None else {}),
         )
-        # Custom endpoints use OpenAIProvider and report system="openai".
-        # Preserve the configured identity for auxiliary request adapters without
-        # guessing from a URL/model name or changing the main request settings.
+        # Auxiliary request adapters use the configured type, independently of the SDK system.
+        model.deepagent_provider_type = provider.provider_type
+        return model
+    if definition.model_protocol == "openai_responses":
+        # xAI's recommended HTTP API accepts the OpenAI Responses request shape.
+        endpoint = effective_base_url(provider)
+        # A custom host must not receive opaque reasoning from xAI or another host.
+        system = "xai" if provider.use_default_base_url else f"xai:{sha256(endpoint.encode()).hexdigest()[:16]}"
+        runtime_provider = OpenAICompatibleProvider(
+            system, api_key=provider.api_key, base_url=endpoint,
+        )
+        model = OpenAIResponsesModel(
+            model_name, provider=runtime_provider,
+            settings=model_http_settings({"openai_store": False}),
+        )
         model.deepagent_provider_type = provider.provider_type
         return model
     if definition.model_protocol == "openai_codex":

@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>Console 同数据渲染回放</title>
+<style>
+body{margin:0;font:14px system-ui;color:#1d2635;background:#f7f8fb}header{padding:14px 20px;background:white;border-bottom:1px solid #ddd;display:flex;gap:14px;align-items:center}button,select{padding:6px 12px}#summary{white-space:pre-wrap;padding:12px;background:white}main.chat{height:68vh;display:flex;min-height:0}#messages{overflow:auto;flex:1;padding:12px 28px}#trajectoryView{display:flex;flex:1;min-height:0}#trajectoryList{width:45%;overflow:auto}#inspectorContent{flex:1;overflow:auto;padding:12px}.hidden{display:none!important}.trajectory-row{display:block;width:100%;text-align:left}.trajectory-row-summary{display:block}.preview-note{padding:0 20px;color:#687181}
+</style></head><body>
+<header><strong>Console 同数据渲染回放</strong><span id="variant"></span><button id="start">开始回放</button><button id="stop" disabled>停止</button><button id="conversationViewTab">对话</button><button id="trajectoryViewTab">轨迹</button><input id="trajectorySearch" placeholder="搜索轨迹"><button id="trajectoryClockToggle">时间</button><button id="exportTrajectoryBtn">导出轨迹</button><span id="trajectoryCallCount"></span></header>
+<p class="preview-note">固定脱敏负载：2 轮、17 次响应、31 次工具、61,850 字符思考、136,111 字符工具正文。当前页只调用产品渲染模块，不调用模型，不写入会话。</p>
+<section id="summary" role="status">正在准备…</section>
+<div id="workspaceGrid"><main class="chat"><div id="messages"></div><div id="trajectoryView" class="hidden"><div id="trajectoryList"></div><section id="inspectorContent"></section></div></main></div>
+<script type="module" src="./performance-replay-browser.mjs"></script>
+</body></html>

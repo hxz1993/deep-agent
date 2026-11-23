@@ -16,13 +16,12 @@ from pydantic_ai.messages import (
     ThinkingPart,
     ToolCallPart,
     ToolReturnPart,
-    UserPromptPart,
 )
 from pydantic_ai.usage import RequestUsage
 
 from deep_agent.agent.planning import PLAN_METADATA_KEY
 from deep_agent.conversation.projector import project_session_events
-from deep_agent.db.serialization import serialize_message
+from deep_agent.db.serialization import StoredUserPromptPart, serialize_message
 
 
 NOW = datetime(2026, 8, 27, tzinfo=timezone.utc)
@@ -34,8 +33,8 @@ def event(
     *,
     message: object | None = None,
     status: str | None = None,
-    run_id: str = "run-1",
-    turn_id: str = "run-1",
+    run_id: str | None = "run-1",
+    turn_id: str | None = "run-1",
 ) -> dict[str, object]:
     payload = {"message": serialize_message(message)} if message is not None else {}
     return {
@@ -54,6 +53,48 @@ def event(
 
 
 class ConversationProjectorTests(unittest.TestCase):
+    def test_delivery_waits_for_completed_assistant_even_without_prose(self):
+        declared = event(1, "tool/results", message=ModelRequest(parts=[
+            ToolReturnPart("present", {"file_ids": ["file-a"]}, "delivery", metadata={
+                "deepagent_presented_files": [{"id": "file-a", "name": "result.csv"}],
+            }),
+        ]))
+        for status in (None, "interrupted", "failed", "pending", "completed"):
+            with self.subTest(status=status):
+                last = event(2, "assistant/message", status=status, message=ModelResponse(parts=[TextPart("")]))
+                files = [item for item in project_session_events([declared, last]).items
+                         if getattr(item, "output_files", None)]
+                if status == "completed":
+                    self.assertEqual(len(files), 1)
+                    self.assertEqual(files[0].source_event_ids, ["event-2"])
+                    self.assertEqual(files[0].output_files[0].id, "file-a")
+                    self.assertIsNone(files[0].text)
+                else:
+                    self.assertEqual(files, [])
+
+    def test_remote_lookup_before_original_result_keeps_each_tool_output(self) -> None:
+        file = {"file_id": "saved-report", "file_name": "report.txt"}
+        metadata = {"remote_agent": {"id": "task"}, "generated_files": [file]}
+        events = [
+            event(1, "assistant/message", message=ModelResponse(parts=[
+                ToolCallPart("delegate_task", {}, "original"),
+                ToolCallPart("remote_task_result", {"task_id": "task"}, "lookup"),
+            ])),
+            event(2, "tool/results", message=ModelRequest(parts=[
+                ToolReturnPart("remote_task_result", {"files": [file]}, "lookup", metadata=metadata),
+            ])),
+        ]
+        lookup = project_session_events(events).items[1]
+        self.assertEqual([artifact.file_id for artifact in lookup.artifacts], ["saved-report"])
+
+        events.append(event(3, "tool/results", message=ModelRequest(parts=[
+            ToolReturnPart("delegate_task", {"files": [file]}, "original", metadata=metadata),
+        ])))
+        original, lookup = project_session_events(events).items
+        self.assertEqual([artifact.file_id for artifact in original.artifacts], ["saved-report"])
+        self.assertEqual(lookup.artifacts, [])
+        self.assertEqual(original.output["files"], lookup.output["files"])
+
     def test_interleaved_native_search_keeps_final_text_after_tools(self) -> None:
         native = event(1, "assistant/message", status="completed", message=ModelResponse(parts=[
             ThinkingPart(content="准备查询"), TextPart(content="先搜索"),
@@ -114,7 +155,7 @@ class ConversationProjectorTests(unittest.TestCase):
             event(
                 1,
                 "user/message",
-                message=ModelRequest(parts=[UserPromptPart(content=[
+                message=ModelRequest(parts=[StoredUserPromptPart(content=[
                     {"kind": "text-content", "content": "分析预算"},
                     {"kind": "attachment-ref", "id": "file-1", "name": "预算.xlsx", "mime": "application/vnd.ms-excel"},
                     {"kind": "context-ref", "key": "range", "type": "deeptable.range", "label": "预算!B2:C4", "metadata": {"token": "secret"}},
@@ -194,6 +235,24 @@ class ConversationProjectorTests(unittest.TestCase):
         self.assertEqual(tool.kind, "tool")
         self.assertEqual(tool.mode, "deferred")
         self.assertEqual(tool.status, "interrupted")
+
+    def test_new_input_closes_legacy_pending_tool_without_turn_or_run_id(self) -> None:
+        pending = event(
+            1, "assistant/message", status="pending", run_id=None, turn_id=None,
+            message=ModelResponse(parts=[
+                ToolCallPart(tool_name="builtin__confirm", args={"message": "继续？"}, tool_call_id="old-call"),
+            ]),
+        )
+        next_input = event(
+            2, "user/message", run_id=None, turn_id=None,
+            message=ModelRequest(parts=[StoredUserPromptPart(content="换个问题")]),
+        )
+
+        tool = next(item for item in project_session_events([pending, next_input]).items if item.kind == "tool")
+
+        self.assertEqual(tool.status, "interrupted")
+        self.assertEqual(tool.outcome, "skipped")
+        self.assertIsNone(tool.widget)
 
     def test_interrupted_assistant_closes_unfinished_tool_in_same_run(self) -> None:
         interrupted = event(

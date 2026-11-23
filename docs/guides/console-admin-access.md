@@ -36,7 +36,7 @@ GET /api/v1/admin/access
 
 需要企业管理员权限：
 
-- Agent列表、Prompt估算和增删改。
+- Agent 更新人信息（`GET /api/v1/agents?include_updater=true`）、Prompt 估算和增删改。
 - Provider 配置、授权和维护；模型新增、修改、删除与连接测试；模型目录查询、导入、导出和刷新。
 - 完整模型管理列表：`GET /api/v1/llm-models?selectable_only=false`。
 - MCP、Skill、UI Tool、UI Tool Package。
@@ -45,6 +45,7 @@ GET /api/v1/admin/access
 
 继续按业务使用语义开放：
 
+- Agent 列表 `GET /api/v1/agents` 要求可信平台用户身份，返回 ID、名称、默认模型与思考档位、Skill／工具包编码和更新时间。可用 `q` 按名称或 ID 搜索，默认列表和搜索都不查询企业管理员权限。
 - 按固定ID读取Agent：`GET /api/v1/agents/{agent_id}`。
 - 可选模型列表：`GET /api/v1/llm-models`（默认 `selectable_only=true`），以及
   `GET /api/v1/llm-models/{model_id}`。两者要求可信平台用户身份，不查询企业管理员权限。

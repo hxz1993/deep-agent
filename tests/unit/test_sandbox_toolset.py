@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import unittest
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -23,7 +23,7 @@ from deep_agent.sandbox.types import (
     SandboxPublishedFile,
     TruncationMetadata,
 )
-from deep_agent.files.storage import StoredFile
+from deep_agent.files.storage import FileStoreSizeLimitError, StoredFile
 from deep_agent.schemas.attachment import AttachmentRef
 from tests.helpers.sandbox import sandbox_test_python
 from deepfos_platform.errors.classes import APIStatusNotTrue
@@ -188,6 +188,7 @@ class SandboxBootstrapHardGateTests(unittest.IsolatedAsyncioTestCase):
         fake_bundle = MagicMock()
         fake_bundle.dialect.value = "sqlite"
         fake_bundle.stores = MagicMock()
+        fake_bundle.stores.integration_app.require_app_skill_conversion = AsyncMock()
         fake_bundle.stores.coordinator.interrupt_running = AsyncMock(return_value=0)
         fake_bundle.engine = MagicMock()
         fake_bundle.session_factory = MagicMock()
@@ -226,6 +227,7 @@ class SandboxBootstrapHardGateTests(unittest.IsolatedAsyncioTestCase):
         fake_bundle = MagicMock()
         fake_bundle.dialect.value = "sqlite"
         fake_bundle.stores = MagicMock()
+        fake_bundle.stores.integration_app.require_app_skill_conversion = AsyncMock()
         fake_bundle.stores.coordinator.interrupt_running = AsyncMock(return_value=0)
         fake_bundle.stores.mcp.list_all = AsyncMock(return_value=[])
         fake_bundle.engine = MagicMock()
@@ -265,20 +267,10 @@ class SandboxBootstrapHardGateTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SandboxRegistryTests(unittest.TestCase):
-    def test_registry_excludes_capability_when_backend_missing(self) -> None:
-        registry = build_registry()
-        self.assertEqual(
-            {item.name for item in registry.get("builtin:general").tools},
-            {"get_current_time"},
-        )
-        self.assertNotIn("builtin:sandbox", registry.codes())
 
     def test_registry_includes_capability_when_backend_present(self) -> None:
         registry = build_registry(sandbox_backend=FakeSandboxBackend())
-        self.assertEqual(
-            {item.name for item in registry.get("builtin:general").tools},
-            {"get_current_time"},
-        )
+        self.assertNotIn("builtin:general", registry.codes())
         self.assertEqual(
             {item.name for item in registry.get("builtin:sandbox").tools},
             {"execute_python"},
@@ -286,6 +278,65 @@ class SandboxRegistryTests(unittest.TestCase):
 
 
 class SandboxCapabilityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_real_worker_reads_large_attachment_and_uses_configured_output_limit(self) -> None:
+        payload = b"x" * (20 * 1024**2 + 1)
+
+        class BoundedFileStore(FakeFileStore):
+            async def download_bounded(self, file_id, request_headers, *, max_bytes):
+                if len(payload) > max_bytes:
+                    raise FileStoreSizeLimitError("over limit")
+                return payload
+
+        backend = SubprocessBackend(python_executable=sandbox_test_python())
+        self.addAsyncCleanup(backend.aclose)
+        store = BoundedFileStore()
+        ctx = _context(attachment_bytes={"source": b""}, file_store=store)
+        ctx.deps.file_bytes.clear()
+        read_setting = AsyncMock(return_value=None)
+        ctx.deps.upload_settings_store = SimpleNamespace(get=read_setting)
+        package = build_python_sandbox_tool_package(backend, timeout_sec=30)
+        tool = (await package.toolset.get_tools(ctx))["execute_python"]
+        request = {"code": (
+            "from shutil import copyfile\n"
+            "from deepagent_files import input_path, publish_path\n"
+            "copyfile(input_path('source'), publish_path('copy.bin'))\n"
+            "True"
+        ), "files": [{"file_id": "source"}]}
+
+        with self.assertRaisesRegex(ModelRetry, "20971520 字节附件上限"):
+            await tool.call_func(request, ctx)
+        self.assertEqual(store.uploaded, [])
+        read_setting.return_value = SimpleNamespace(version=1, value={"max_size_mb": 50})
+        result = await tool.call_func(request, ctx)
+        self.assertEqual(result.return_value["status"], "ok")
+        self.assertEqual(store.uploaded[0]["data"], payload)
+
+        read_setting.return_value = SimpleNamespace(version=1, value={"max_size_mb": 1})
+        for cached in (True, False):
+            with self.subTest(cached=cached):
+                if not cached:
+                    ctx.deps.file_bytes.clear()
+                read_only = await tool.call_func({"code": (
+                    "from pathlib import Path\n"
+                    "from deepagent_files import input_path\n"
+                    "Path(input_path('source')).stat().st_size"
+                ), "files": [{"file_id": "source"}]}, ctx)
+                self.assertEqual(read_only.return_value["result"], len(payload))
+        with self.assertRaisesRegex(ModelRetry, "1048576 字节附件上限"):
+            await tool.call_func(request, ctx)
+        self.assertEqual(len(store.uploaded), 1)
+
+    async def test_sandbox_rejects_batch_over_limit_even_when_each_file_fits(self) -> None:
+        backend = FakeSandboxBackend()
+        tool, _ = await self._tool(backend)
+        ctx = _context(attachment_bytes={"first": b"123", "second": b"456"})
+        with patch("deep_agent.sandbox.file_bridge.MAX_SANDBOX_FILE_BATCH_BYTES", 5):
+            with self.assertRaisesRegex(ModelRetry, "输入文件合计超过"):
+                await tool.call_func(
+                    {"code": "True", "files": [{"file_id": "first"}, {"file_id": "second"}]}, ctx,
+                )
+        backend.execute.assert_not_awaited()
+
     async def test_real_worker_publishes_full_large_result_alongside_explicit_preview(self) -> None:
         backend = SubprocessBackend(python_executable=sandbox_test_python())
         store = FakeFileStore()
@@ -359,7 +410,7 @@ class SandboxCapabilityTests(unittest.IsolatedAsyncioTestCase):
         schema = tool.tool_def.parameters_json_schema
         self.assertEqual(
             set(schema.get("properties", {}).keys()),
-            {"code", "inputs", "files"},
+            {"code", "inputs", "files", "include_context"},
         )
         description = tool.tool_def.description or ""
         self.assertIn("确实需要解析、转码或生成新文件", description)

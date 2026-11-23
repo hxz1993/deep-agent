@@ -28,7 +28,7 @@ export async function boundedStreamRequest(operation, { signal, timeoutMs = 5000
   }
 }
 
-export async function verifyStreamStop({ request, isCurrent, signal, onAccepted,
+export async function verifyStreamStop({ request, isCurrent, signal, onAccepted, runId,
   requestTimeoutMs = 5000, verificationTimeoutMs = 15000, pollIntervalMs = 750 }) {
   const current = () => !signal?.aborted && isCurrent();
   const deadline = Date.now() + verificationTimeoutMs;
@@ -49,7 +49,7 @@ export async function verifyStreamStop({ request, isCurrent, signal, onAccepted,
     while (current() && Date.now() < deadline) {
       const result = await read('status');
       if (!current()) return { status: 'stale' };
-      if (result.status === 'idle') return { status: 'idle' };
+      if (result.status === 'idle' || (runId && result.run_id && result.run_id !== runId)) return { status: 'idle' };
       if (!['running', 'cancel_requested'].includes(result.status)) {
         return { status: 'retry', message: '运行状态无法确认' };
       }

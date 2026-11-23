@@ -17,6 +17,7 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [domain.code for domain in domains],
             [
+                "runtime:environment",
                 "runtime:channel",
                 "runtime:planning",
                 "runtime:conversation-history",
@@ -25,23 +26,25 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
                 "runtime:tool-result",
                 "runtime:mcp-tool-search",
                 "runtime:mcp-resource",
+                "runtime:remote-agent",
             ],
         )
         self.assertEqual(
             [[tool.name for tool in domain.tools] for domain in domains],
             [
-                ["channel_message"],
+                ["get_current_time"],
+                ["channel_message", "channel_doc"],
                 ["write_plan"],
                 ["search_conversation_history", "read_conversation_event"],
                 ["load_capability", "list_skill_resources", "execute_skill_script"],
-                ["read_file", "view_image", "export_file_to_download_center"],
+                ["read_file", "view_image", "present", "export_file_to_download_center"],
                 ["read_tool_result"],
                 ["search_tools"],
                 [
                     "list_mcp_resources",
-                    "list_mcp_resource_templates",
                     "read_mcp_resource",
                 ],
+                ["delegate_task", "list_tasks", "message_task", "answer_task", "cancel_task", "remote_task_result"],
             ],
         )
 
@@ -72,6 +75,7 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
         packages = await list_tool_packages(ctx)
 
         self.assertFalse(any(item.code.startswith("runtime:") for item in packages))
+        self.assertNotIn("builtin:general", [item.code for item in packages])
 
     async def test_tool_package_api_exposes_only_current_product_builtin_mcp(self) -> None:
         ctx = SimpleNamespace(

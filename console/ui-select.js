@@ -2,6 +2,12 @@
 let nextId = 0;
 const instances = new WeakMap();
 
+export function selectOptionMatchesSearch(option, query = "") {
+  const keyword = query.trim().toLocaleLowerCase();
+  return !option.hidden && (!keyword || option.dataset?.searchFixed === "true"
+    || option.label.toLocaleLowerCase().includes(keyword));
+}
+
 export function nextSelectIndex(options, current, key) {
   const enabled = options.map((option, index) => ({ option, index }))
     .filter(({ option }) => !option.disabled && !option.hidden && !option.parentElement?.disabled)
@@ -14,15 +20,54 @@ export function nextSelectIndex(options, current, key) {
   return enabled[Math.max(0, Math.min(enabled.length - 1, position + (key === "ArrowUp" ? -1 : 1)))];
 }
 
-export function selectMenuPosition(rect, viewport, height = 280) {
+export function selectMenuPosition(rect, viewport, height = 280, modelPicker = false) {
   const margin = 8, gap = 5;
-  const width = Math.min(Math.max(rect.width, 160), viewport.width - margin * 2);
+  const preferredWidth = modelPicker ? 360 : Math.max(rect.width, 160);
+  const width = Math.min(preferredWidth, viewport.width - margin * 2);
+  const anchorLeft = modelPicker ? rect.left + rect.width - width : rect.left;
   const below = viewport.height - rect.bottom - gap - margin;
   const above = rect.top - gap - margin;
-  const up = below < Math.min(height, 160) && above > below;
+  const up = below < (modelPicker ? height : Math.min(height, 160)) && above > below;
   const maxHeight = Math.max(0, Math.min(height, up ? above : below));
-  return { left: Math.max(margin, Math.min(rect.left, viewport.width - width - margin)),
+  return { left: Math.max(margin, Math.min(anchorLeft, viewport.width - width - margin)),
     top: up ? rect.top - gap - maxHeight : rect.bottom + gap, width, maxHeight };
+}
+
+export function positionModelPicker(menu, trigger, list) {
+  const rect = trigger.getBoundingClientRect();
+  const view = menu.ownerDocument.defaultView;
+  const viewport = { width: view.innerWidth, height: view.innerHeight };
+  menu.style.width = `${selectMenuPosition(rect, viewport, 280, true).width}px`;
+  // Include the part of the model list clipped by the current height, without
+  // lifting the height limit and collapsing its scroll position.
+  const listOverflow = list ? list.scrollHeight - list.clientHeight : 0;
+  const height = menu.scrollHeight + listOverflow + (menu.offsetHeight - menu.clientHeight);
+  const { left, top, maxHeight } = selectMenuPosition(rect, viewport, Math.min(280, height || 280), true);
+  Object.assign(menu.style, { left: `${left}px`, top: `${top}px`, maxHeight: `${maxHeight}px` });
+}
+
+export function revealModelPickerOption(list, option, { center = false } = {}) {
+  if (!list?.clientHeight || !option) return;
+  const top = list.getBoundingClientRect().top + list.clientTop;
+  const row = option.getBoundingClientRect();
+  if (row.top >= top && row.bottom <= top + list.clientHeight) return;
+  if (center) list.scrollTop += row.top - top - (list.clientHeight - row.height) / 2;
+  else list.scrollTop += row.top < top ? row.top - top : row.bottom - top - list.clientHeight;
+}
+
+export function renderModelPickerValue(container, name, effort) {
+  const doc = container.ownerDocument;
+  const nameNode = doc.createElement("span");
+  nameNode.className = "reasoning-model-value-name";
+  nameNode.textContent = name;
+  container.classList.add("reasoning-model-value");
+  container.replaceChildren(nameNode);
+  if (effort) {
+    const effortNode = doc.createElement("span");
+    effortNode.className = "reasoning-model-value-effort";
+    effortNode.textContent = ` · ${effort}`;
+    container.append(effortNode);
+  }
 }
 
 export function observeSelectProperty(target, name, changed) {
@@ -68,21 +113,63 @@ export function enhanceSelect(select) {
   menu.setAttribute("role", "listbox");
   menu.setAttribute("popover", "manual");
   menu.hidden = true;
-  trigger.setAttribute("aria-controls", menu.id);
+  const searchable = select.dataset.searchable === "true";
+  const modelPicker = select.dataset.modelPicker === "true";
+  let searchInput, searchHeader;
+  const optionList = searchable || modelPicker ? document.createElement("div") : menu;
+  if (optionList !== menu) {
+    menu.removeAttribute("role");
+    optionList.id = `${menu.id}-options`;
+    optionList.setAttribute("role", "listbox");
+  }
+  if (modelPicker) {
+    menu.classList.add("reasoning-model-menu");
+    optionList.classList.add("reasoning-model-list");
+  }
+  if (searchable) {
+    searchHeader = document.createElement("div");
+    searchHeader.className = "da-select-search";
+    const field = document.createElement("label");
+    field.className = "console-search";
+    const icon = document.createElement("i");
+    icon.setAttribute("data-lucide", "search");
+    icon.setAttribute("aria-hidden", "true");
+    searchInput = document.createElement("input");
+    searchInput.type = "search";
+    searchInput.placeholder = select.dataset.searchPlaceholder || "搜索选项";
+    searchInput.setAttribute("aria-label", searchInput.placeholder);
+    searchInput.setAttribute("role", "combobox");
+    searchInput.setAttribute("aria-autocomplete", "list");
+    searchInput.setAttribute("aria-controls", optionList.id);
+    searchInput.setAttribute("aria-expanded", "false");
+    searchInput.autocomplete = "off";
+    searchInput.spellcheck = false;
+    searchInput.maxLength = 200;
+    field.append(icon, searchInput);
+    searchHeader.append(field);
+    menu.append(searchHeader);
+  }
+  if (optionList !== menu) menu.append(optionList);
+  trigger.setAttribute("aria-controls", optionList.id);
   const originalTabIndex = select.getAttribute("tabindex");
   select.before(host);
   host.append(select, trigger, menu);
   select.classList.add("da-select-native");
   select.tabIndex = -1;
   select.setAttribute("aria-hidden", "true");
-  let opened = false, active = -1, disposed = false, search = "", searchAt = 0;
+  let opened = false, active = -1, disposed = false, search = "", searchAt = 0, searchQuery = "";
   const optionRestores = new Map();
   const restores = [];
   let resizeObserver;
   const options = () => Array.from(select.options);
+  const navigationOptions = () => searchable ? options().map(option => ({
+    disabled: option.disabled, parentElement: option.parentElement,
+    hidden: !selectOptionMatchesSearch(option, searchQuery),
+  })) : options();
   const position = () => {
     if (!opened) return;
     if (!trigger.getClientRects().length || !select.isConnected || select.closest("dialog:not([open])")) { close(); return; }
+    if (modelPicker) { positionModelPicker(menu, trigger, optionList); return; }
     const rect = trigger.getBoundingClientRect();
     const viewport = { width: view.innerWidth, height: view.innerHeight };
     // Measure at the final width. scrollHeight includes padding, but excludes borders.
@@ -98,83 +185,150 @@ export function enhanceSelect(select) {
     if (!opened) return;
     opened = false;
     if (menu.hidePopover && menu.matches(":popover-open")) menu.hidePopover();
+    menu.querySelector('.reasoning-picker-options:not([hidden])')?.closeReasoningMenu?.();
     menu.hidden = true;
     trigger.setAttribute("aria-expanded", "false");
     trigger.removeAttribute("aria-activedescendant");
+    if (searchInput) {
+      searchQuery = "";
+      searchInput.value = "";
+      searchInput.setAttribute("aria-expanded", "false");
+      searchInput.removeAttribute("aria-activedescendant");
+    }
     if (focus && select.isConnected) trigger.focus();
   }
-  function markActive() {
+  function markActive({ reveal = true, center = false } = {}) {
     menu.querySelectorAll("[role=option]").forEach(node => node.classList.toggle("active", Number(node.dataset.index) === active));
     const node = menu.querySelector(`[data-index="${active}"]`);
-    if (node) { trigger.setAttribute("aria-activedescendant", node.id); node.scrollIntoView?.({ block: "nearest" }); }
-    else trigger.removeAttribute("aria-activedescendant");
+    if (node) {
+      trigger.setAttribute("aria-activedescendant", node.id);
+      searchInput?.setAttribute("aria-activedescendant", node.id);
+      if (reveal && modelPicker) revealModelPickerOption(optionList, node, { center });
+      else if (reveal) node.scrollIntoView?.({ block: "nearest" });
+    } else {
+      trigger.removeAttribute("aria-activedescendant");
+      searchInput?.removeAttribute("aria-activedescendant");
+    }
   }
   function renderMenu() {
-    menu.replaceChildren();
-    let previousGroup = null;
+    const scrollTop = modelPicker ? optionList.scrollTop : 0;
+    optionList.replaceChildren();
+    menu.dataset.badgeAlign = select.dataset.badgeAlign || "";
+    let previousGroup = null, previousWasFixed = false;
     options().forEach((option, index) => {
-      if (option.hidden) return;
+      if (!selectOptionMatchesSearch(option, searchQuery)) return;
       const group = option.parentElement?.tagName === "OPTGROUP" ? option.parentElement : null;
       if (group && group !== previousGroup) {
         const heading = document.createElement("div"); heading.className = "da-select-group";
         if (group.dataset.iconSrc) {
           const icon = document.createElement("img"); icon.src = group.dataset.iconSrc; icon.alt = ""; heading.append(icon);
         }
-        heading.append(document.createTextNode(group.label)); menu.append(heading);
+        heading.append(document.createTextNode(group.label)); optionList.append(heading);
       }
       previousGroup = group;
-      if (option.dataset.separatorBefore === "true" && menu.children.length) {
+      if ((option.dataset.separatorBefore === "true"
+          || (searchable && previousWasFixed && option.dataset.searchFixed !== "true")) && optionList.children.length) {
         const separator = document.createElement("div");
         separator.className = "da-select-separator";
         separator.setAttribute("role", "separator");
-        menu.append(separator);
+        optionList.append(separator);
       }
       const row = document.createElement("div");
       row.className = "da-select-option";
       row.classList.toggle("is-grouped", Boolean(group));
       row.id = `${menu.id}-${index}`;
       row.dataset.index = String(index);
+      if (option.dataset.state) row.dataset.state = option.dataset.state;
       row.setAttribute("role", "option");
       row.setAttribute("aria-selected", String(option.selected));
       row.setAttribute("aria-disabled", String(option.disabled || !!group?.disabled));
-      row.textContent = option.label;
-      if (option.dataset.badge) {
-        row.textContent = "";
+      if (modelPicker) {
+        const name = document.createElement("span");
+        name.className = "reasoning-model-option-name";
+        name.textContent = option.label;
+        row.append(name);
+        if (option.dataset.modelBadges) {
+          const badges = document.createElement("span");
+          badges.className = "reasoning-model-option-badges";
+          for (const label of option.dataset.modelBadges.split(",")) {
+            const badge = document.createElement("span");
+            badge.className = "model-modality-badge";
+            badge.textContent = label;
+            badges.append(badge);
+          }
+          row.append(badges);
+        }
+      } else if (option.dataset.badge) {
         const name = document.createElement("span"); name.textContent = option.label;
         const badge = document.createElement("span"); badge.className = "da-select-badge"; badge.textContent = option.dataset.badge;
         row.append(name, badge);
         row.classList.add("has-badge");
+      } else {
+        row.textContent = option.label;
       }
-      if (/^[a-z][a-z0-9-]*$/.test(option.dataset.icon || "")) {
-        const icon = document.createElement("i");
-        icon.setAttribute("data-lucide", option.dataset.icon);
+      const iconSource = option.dataset.iconSrc;
+      if (iconSource || /^[a-z][a-z0-9-]*$/.test(option.dataset.icon || "")) {
+        const icon = document.createElement(iconSource ? "img" : "i");
+        if (iconSource) { icon.src = iconSource; icon.alt = ""; }
+        else icon.setAttribute("data-lucide", option.dataset.icon);
         icon.setAttribute("aria-hidden", "true");
         row.prepend(icon);
         row.classList.add("has-icon");
       }
+      if (modelPicker && option.selected) {
+        const check = document.createElement("i");
+        check.className = "reasoning-model-check";
+        check.setAttribute("data-lucide", "check");
+        check.setAttribute("aria-hidden", "true");
+        row.prepend(check);
+      }
       row.title = option.title || option.label;
-      menu.append(row);
+      optionList.append(row);
+      previousWasFixed = option.dataset.searchFixed === "true";
     });
-    if (!menu.children.length) { const empty = document.createElement("div"); empty.className = "da-select-empty"; empty.textContent = "暂无选项"; menu.append(empty); }
+    const noMatches = searchable && searchQuery.trim() && !options().some(option =>
+      option.dataset.searchFixed !== "true" && selectOptionMatchesSearch(option, searchQuery));
+    if (!optionList.children.length || noMatches) {
+      if (noMatches && optionList.children.length) {
+        const separator = document.createElement("div");
+        separator.className = "da-select-separator";
+        separator.setAttribute("role", "separator");
+        optionList.append(separator);
+      }
+      const empty = document.createElement("div"); empty.className = "da-select-empty";
+      empty.setAttribute("role", "status");
+      empty.textContent = noMatches ? (select.dataset.searchEmpty || "未找到匹配选项") : "暂无选项";
+      optionList.append(empty);
+    }
+    if (modelPicker) menu.querySelector(".reasoning-picker-row")?.remove();
+    select.consoleMenuFooter?.(menu, () => close({ focus: true }));
     view.lucide?.createIcons({ root: menu });
-    markActive();
+    markActive({ reveal: !modelPicker });
+    if (modelPicker) optionList.scrollTop = scrollTop;
   }
-  let selectedIconName = "";
+  let selectedIconKey = "";
   function refresh() {
     if (disposed) return;
     const current = options();
     for (const [option, restore] of optionRestores) if (!current.includes(option)) { restore(); optionRestores.delete(option); }
     current.forEach(option => { if (!optionRestores.has(option)) optionRestores.set(option, observeSelectProperty(option, "selected", refresh)); });
-    text.textContent = current.filter(option => option.selected).map(option => option.label).join("、") || (select.dataset.placeholder ?? "—");
     const selectedOption = current.find(option => option.selected);
+    const selectedLabel = selectedOption?.label || (select.dataset.placeholder ?? "—");
+    if (modelPicker) renderModelPickerValue(text, selectedLabel, selectedOption && select.consoleSelectedEffort?.(selectedOption));
+    else text.textContent = selectedLabel;
+    if (selectedOption?.dataset.state) text.dataset.state = selectedOption.dataset.state;
+    else delete text.dataset.state;
     const iconName = /^[a-z][a-z0-9-]*$/.test(selectedOption?.dataset.icon || "") ? selectedOption.dataset.icon : "";
-    if (selectedIconName !== iconName) {
+    const iconSource = selectedOption?.dataset.iconSrc || (modelPicker ? selectedOption?.parentElement?.dataset.iconSrc : "");
+    const iconKey = iconSource || iconName;
+    if (selectedIconKey !== iconKey) {
       trigger.querySelector(".da-select-value-icon")?.remove();
-      selectedIconName = iconName;
-      if (iconName) {
-        const icon = document.createElement("i");
+      selectedIconKey = iconKey;
+      if (iconKey) {
+        const icon = document.createElement(iconSource ? "img" : "i");
         icon.className = "da-select-value-icon";
-        icon.setAttribute("data-lucide", iconName);
+        if (iconSource) { icon.src = iconSource; icon.alt = ""; }
+        else icon.setAttribute("data-lucide", iconName);
         icon.setAttribute("aria-hidden", "true");
         trigger.insertBefore(icon, text);
         view.lucide?.createIcons({ root: trigger });
@@ -200,22 +354,29 @@ export function enhanceSelect(select) {
     if (trigger.disabled) return;
     // Close every other enhanced control without sharing controller state across documents.
     document.dispatchEvent(new view.CustomEvent("console-select-open", { detail: select }));
+    searchQuery = "";
+    if (searchInput) searchInput.value = "";
     active = select.selectedIndex;
-    if (key === "Home" || key === "End" || active < 0) active = nextSelectIndex(options(), active, key || "Home");
+    if (key === "Home" || key === "End" || active < 0) active = nextSelectIndex(navigationOptions(), active, key || "Home");
     renderMenu();
     menu.hidden = false;
     opened = true;
     try { menu.showPopover?.(); } catch { /* Fixed-position fallback for older embedded browsers. */ }
     trigger.setAttribute("aria-expanded", "true");
     position();
-    markActive();
+    markActive({ center: !key });
+    if (searchInput) {
+      searchInput.setAttribute("aria-expanded", "true");
+      searchInput.focus({ preventScroll: true });
+    }
   }
   function choose(index) {
     const option = options()[index];
-    if (!option || option.hidden || option.disabled || option.parentElement?.disabled) return;
+    if (!option || !selectOptionMatchesSearch(option, searchQuery) || option.disabled || option.parentElement?.disabled) return;
     const changed = select.selectedIndex !== index;
+    active = index;
     select.selectedIndex = index;
-    close({ focus: true });
+    if (!modelPicker) close({ focus: true });
     if (changed) { select.dispatchEvent(new view.Event("input", { bubbles: true })); select.dispatchEvent(new view.Event("change", { bubbles: true })); }
   }
   on(trigger, "click", () => opened ? close() : open());
@@ -223,19 +384,53 @@ export function enhanceSelect(select) {
     if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
       event.preventDefault();
       if (!opened) open(event.key);
-      else { active = nextSelectIndex(options(), active, event.key); markActive(); }
+      else { active = nextSelectIndex(navigationOptions(), active, event.key); markActive(); }
     } else if (event.key === "Enter" || event.key === " ") {
       event.preventDefault(); opened ? choose(active) : open();
     } else if (event.key === "Escape" && opened) { event.preventDefault(); event.stopPropagation(); close({ focus: true }); }
+    else if (event.key === "ArrowRight" && opened && menu.querySelector("button.reasoning-picker-trigger")) {
+      event.preventDefault(); menu.querySelector("button.reasoning-picker-trigger").focus();
+    }
     else if (event.key === "Tab") close();
     else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (searchInput) {
+        event.preventDefault();
+        if (!opened) open();
+        searchInput.value += event.key;
+        updateSearch();
+        return;
+      }
       const now = Date.now(); search = now - searchAt > 700 ? event.key : search + event.key; searchAt = now;
       if (!opened) open();
       const index = options().findIndex(option => !option.disabled && !option.hidden && !option.parentElement?.disabled && option.label.toLocaleLowerCase().startsWith(search.toLocaleLowerCase()));
       if (index >= 0) { active = index; markActive(); }
     }
   });
-  on(menu, "pointerdown", event => event.preventDefault());
+  function updateSearch() {
+    searchQuery = searchInput.value;
+    active = searchQuery.trim() ? options().findIndex(option => option.dataset.searchFixed !== "true"
+      && selectOptionMatchesSearch(option, searchQuery) && !option.disabled && !option.parentElement?.disabled)
+      : select.selectedIndex;
+    renderMenu(); position();
+  }
+  if (searchInput) {
+    on(searchInput, "input", updateSearch);
+    on(searchInput, "keydown", event => {
+      if (event.isComposing) return;
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault(); active = nextSelectIndex(navigationOptions(), active, event.key); markActive();
+      } else if (event.key === "Enter") {
+        event.preventDefault(); choose(active);
+      } else if (event.key === "Escape") {
+        event.preventDefault(); event.stopPropagation(); close({ focus: true });
+      } else if (event.key === "Tab") close({ focus: true });
+    });
+  }
+  on(menu, "pointerdown", event => {
+    if (modelPicker && event.target === optionList) return;
+    if (!searchHeader?.contains(event.target) && !event.target.closest(".reasoning-picker-row")) event.preventDefault();
+  });
+  on(menu, "keydown", event => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); close({ focus: true }); } });
   on(menu, "click", event => { const row = event.target.closest("[data-index]"); if (row) { event.preventDefault(); choose(Number(row.dataset.index)); } });
   on(document, "pointerdown", event => { if (!host.contains(event.target)) close(); }, { capture: true });
   on(document, "console-select-open", event => { if (event.detail !== select) close(); });

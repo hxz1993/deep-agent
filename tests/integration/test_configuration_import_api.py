@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
+from deep_agent.agent_service.publications import PublicationStore
 from deep_agent.api.v1 import api_router
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from deep_agent.files.storage import StoredFile
@@ -56,7 +57,7 @@ class ConfigurationImportApiTests(unittest.IsolatedAsyncioTestCase):
         self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         root = Path(self._tmp.name)
         source = root / "source.db"
-        await config_backup_tests.ConfigBackupTests()._create_source(source, revision="013")
+        await config_backup_tests.ConfigBackupTests()._create_source(source, revision="016")
         with sqlite3.connect(source) as connection:
             connection.execute("UPDATE agents SET skills='[]'")
             connection.execute("DELETE FROM skill_packages")
@@ -78,7 +79,7 @@ class ConfigurationImportApiTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             await connection.execute(
-                text("INSERT INTO alembic_version (version_num) VALUES ('013')")
+                text("INSERT INTO alembic_version (version_num) VALUES ('016')")
             )
         self.app = FastAPI()
         self.app.include_router(api_router)
@@ -104,6 +105,7 @@ class ConfigurationImportApiTests(unittest.IsolatedAsyncioTestCase):
         *,
         apply: bool,
         confirm: bool,
+        headers: Mapping[str, str] | None = None,
     ):
         async with AsyncClient(
             transport=self.transport,
@@ -111,6 +113,7 @@ class ConfigurationImportApiTests(unittest.IsolatedAsyncioTestCase):
         ) as client:
             return await client.post(
                 "/api/v1/configuration/import",
+                headers=headers,
                 data={
                     "apply": str(apply).lower(),
                     "confirm": str(confirm).lower(),
@@ -139,6 +142,39 @@ class ConfigurationImportApiTests(unittest.IsolatedAsyncioTestCase):
             [row.id for row in await self.stores.agent.list_all()],
             ["agent-1"],
         )
+
+    async def test_publication_backup_roundtrip_keeps_saved_app_scope(self) -> None:
+        root = Path(self._tmp.name)
+        source = root / "source.db"
+        with sqlite3.connect(source) as connection:
+            connection.execute(
+                "INSERT INTO agent_publications (id, code, name, description, agent_id, scope) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                ("publication-id", "fixture", "Fixture", "", "agent-1",
+                 '{"apps":{"mode":"selected","items":[{"app_id":"budget001","space_id":"budget"}]}}'),
+            )
+        backup = await export_backup(
+            f"sqlite+aiosqlite:///{source.as_posix()}",
+            environment="test", output_root=root / "publication-backup",
+        )
+        self.backup_path = backup.path
+        imported = await self._post(apply=True, confirm=True)
+        self.assertEqual(imported.status_code, 200, imported.text)
+        row = await PublicationStore(get_context().db_session_factory).get("fixture")
+        self.assertEqual((row.id, row.agent_id), ("publication-id", "agent-1"))
+        self.assertEqual(row.scope, {"apps": {"mode": "selected", "items": [
+            {"app_id": "budget001", "space_id": "budget"},
+        ]}})
+
+    async def test_old_backup_with_retired_time_reference_previews_and_restores(self) -> None:
+        with sqlite3.connect(self.backup_path) as connection:
+            connection.execute("UPDATE agents SET capabilities='[\"builtin:general\",\"builtin:ptc\"]' WHERE id='agent-1'")
+        validated = await self._post(apply=False, confirm=False)
+        self.assertEqual(validated.status_code, 200, validated.text)
+        imported = await self._post(apply=True, confirm=True)
+        self.assertEqual(imported.status_code, 200, imported.text)
+        row = await self.stores.agent.get_by_id("agent-1")
+        self.assertEqual(row.capabilities, ["builtin:ptc"])
 
     async def test_apply_requires_explicit_confirmation(self) -> None:
         response = await self._post(apply=True, confirm=False)

@@ -26,6 +26,8 @@ class EchoAPI(BaseAPI):
 
 class DNSHTTPIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_dns_post_query_body_and_live_address_change(self):
+        await ServiceDiscovery.stop()
+
         async def echo(request):
             return web.json_response({'message': (await request.json())['message'],
                                       'trace': request.query.get('trace')})

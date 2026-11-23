@@ -67,13 +67,13 @@ class AgentOutputConfigurationApiTests(unittest.IsolatedAsyncioTestCase):
         profiles = AsyncMock(return_value={"package-admin": {
             "id": "package-admin", "username": "operator-name", "nickname": "not-the-username", "resolution": "resolved"}})
         with patch("deep_agent.api.v1.agents.resolve_diagnostic_users", profiles):
-            listing = await self.client.get("/api/v1/agents", headers=self.headers)
+            listing = await self.client.get("/api/v1/agents?include_updater=true", headers=self.headers)
         self.assertEqual(listing.status_code, 200, listing.text)
         self.assertEqual(listing.json()[0]["updated_by_user"], {
             "id": "package-admin", "username": "operator-name", "resolution": "resolved"})
         self.assertEqual(profiles.await_count, 1)
         with patch("deep_agent.api.v1.agents.resolve_diagnostic_users", side_effect=DiagnosticUserAuthenticationError(403)):
-            denied = await self.client.get("/api/v1/agents", headers=self.headers)
+            denied = await self.client.get("/api/v1/agents?include_updater=true", headers=self.headers)
         self.assertEqual(denied.status_code, 403, denied.text)
 
     async def test_install_records_target_operator_and_ignores_zip_source_actor(self):
@@ -91,18 +91,21 @@ class AgentOutputConfigurationApiTests(unittest.IsolatedAsyncioTestCase):
         config = await self.client.get(f'/api/v1/agents/{installed.json()["agent"]["id"]}/output-config', headers=self.headers)
         self.assertEqual(config.json()["output_config"], OUTPUT_CONFIG)
 
-    async def test_known_output_tool_name_collision_is_rejected_before_save(self):
+    async def test_output_business_name_can_equal_a_runtime_tool(self):
         from deep_agent.capabilities import build_registry
         self.ctx.registry = build_registry()
-        package = self.ctx.registry.get("builtin:general")
+        package = self.ctx.registry.get("builtin:ptc")
         known_tool_name = package.tools[0].name
         collision = {**OUTPUT_CONFIG, "name": known_tool_name}
         response = await self.client.post("/api/v1/agents", headers=self.headers, json={
-            "name": "collision fixture", "prompt": "test", "capabilities": ["builtin:general"],
+            "name": "collision fixture", "prompt": "test", "capabilities": ["builtin:ptc"],
             "structured_output_enabled": True, "output_config": collision,
         })
-        self.assertEqual(response.status_code, 422, response.text)
-        self.assertEqual(await self.stores.agent.list_all(), [])
+        self.assertEqual(response.status_code, 201, response.text)
+        config = await self.client.get(
+            f'/api/v1/agents/{response.json()["id"]}/output-config', headers=self.headers,
+        )
+        self.assertEqual(config.json()["output_config"], collision)
 
     async def test_duplicate_name_and_unavailable_model_do_not_partially_update_output(self):
         from deep_agent.db.models import LlmModel

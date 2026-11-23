@@ -91,7 +91,11 @@ class AllowTextOutputDatabaseTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(definition.json_schema, changed["json_schema"] if edit == "schema" else CONFIG["json_schema"])
                     self.assertEqual(fresh.prompt, "updated prompt" if edit == "prompt" else "original prompt")
                 finally:
-                    await stores.agent.delete(row.id)
+                    # This fixture is still on 013. Current Agent deletion also
+                    # checks publication references, introduced in 016.
+                    async with source.begin() as db:
+                        await db.execute(sa.delete(AgentOutputConfig).where(AgentOutputConfig.agent_id == row.id))
+                        await db.execute(sa.delete(Agent).where(Agent.id == row.id))
 
     async def migrate(self, url, target, *, downgrade=False):
         def run():
@@ -152,6 +156,7 @@ class AllowTextOutputDatabaseTests(unittest.IsolatedAsyncioTestCase):
                     "VALUES('raw-default','raw_result',:schema)"), {"schema": json.dumps(CONFIG["json_schema"])})
                 self.assertEqual(await db.scalar(sa.text("SELECT allow_text_output FROM agent_output_configs WHERE agent_id='raw-default'")), False)
                 await db.run_sync(assert_logical_references)
+            await self.migrate(source_url, "014")
             factory = async_sessionmaker(source, expire_on_commit=False)
             stores = create_data_stores(resolve_dialect(source_url), factory)
             legacy = await stores.agent.get_by_id("legacy")
@@ -229,12 +234,12 @@ class AllowTextOutputDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 # two independently committed writers or MySQL RR snapshots.
                 await self.concurrent_policy_merge(source, stores)
 
-            with tempfile.TemporaryDirectory(prefix="TMP_to_delete_allow_text_013_backup_") as directory:
+            with tempfile.TemporaryDirectory(prefix="TMP_to_delete_allow_text_014_backup_") as directory:
                 backup = await export_backup(source_url, environment="fixture", output_root=Path(directory), git_commit="fixture")
-                self.assertEqual(backup.revision, "013")
+                self.assertEqual(backup.revision, "014")
                 self.assertEqual(backup.row_counts["chat_sessions"], 0)
                 self.assertEqual(backup.row_counts["chat_session_events"], 0)
-                await self.migrate(restored_url, "013")
+                await self.migrate(restored_url, "014")
                 plan = await build_configuration_import_plan(backup.path, target_engine=restored)
                 self.assertTrue(all("allow_text_output" not in row for row in plan.rows["agents"]))
                 self.assertIs(next(row for row in plan.rows["agent_output_configs"] if row["agent_id"] == draft.id)["allow_text_output"], True)
@@ -246,6 +251,7 @@ class AllowTextOutputDatabaseTests(unittest.IsolatedAsyncioTestCase):
                                      (before.structured_output_enabled, await self.policy(stores, before.id), before.updated_by))
                     self.assertEqual((await restored_stores.agent.get_output_config(before.id)).json_schema, CONFIG["json_schema"])
 
+            await self.migrate(source_url, "013", downgrade=True)
             with self.assertRaisesRegex(RuntimeError, "configured_.*="):
                 await self.migrate(source_url, "012", downgrade=True)
             async with source.begin() as db:

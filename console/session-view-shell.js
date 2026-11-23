@@ -48,8 +48,8 @@ export function createReadonlySessionShell() {
   chat.querySelector(".trajectory-list").replaceChildren();
   const back = chat.querySelector('[data-session-role="toggleSidebar"]');
   back.dataset.detailBack = "";
-  back.title = "返回会话";
-  back.setAttribute("aria-label", "返回会话");
+  back.title = "返回上一页";
+  back.setAttribute("aria-label", "返回上一页");
   back.innerHTML = '<i data-lucide="arrow-left" aria-hidden="true"></i>';
   const refresh = chat.querySelector("[data-open-context]");
   refresh.removeAttribute("data-open-context");

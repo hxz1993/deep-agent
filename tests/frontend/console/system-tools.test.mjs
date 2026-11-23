@@ -100,6 +100,22 @@ test("任务规划只暴露完整快照写入工具", () => {
   assert.doesNotMatch(html, /checkbox|switch/);
 });
 
+test("运行环境作为只读运行时领域展示时间工具与时区说明", () => {
+  const ui = loadSystemToolsUi();
+  const html = ui.systemToolDomain({
+    code: "runtime:environment",
+    label: "运行环境",
+    description: "所有业务 Agent 默认可用，时间默认 UTC。",
+    tools: [{ name: "get_current_time", display_name: "获取当前时间", source: "DeepAgent", injection_condition: "所有业务 Agent Run 自动注入", description: "支持可选 timezone 参数，例如 Asia/Shanghai。" }],
+  });
+  assert.match(html, /runtime:environment/);
+  assert.match(html, /运行环境/);
+  assert.match(html, /get_current_time/);
+  assert.match(html, /timezone/);
+  assert.match(html, /Asia\/Shanghai/);
+  assert.doesNotMatch(html, /checkbox|switch|builtin:general/);
+});
+
 test("Skill 三个工具归 Skill，文件工具独立归文件领域", () => {
   const ui = loadSystemToolsUi();
   const skillHtml = ui.systemToolDomain({
@@ -127,7 +143,7 @@ test("Skill 三个工具归 Skill，文件工具独立归文件领域", () => {
   assert.match(fileHtml, /export_file_to_download_center/);
 });
 
-test("大工具结果读取作为独立系统工具只读展示", () => {
+test("大工具结果读取详情保留真实来源和只读行为", () => {
   const ui = loadSystemToolsUi();
   const html = ui.systemToolDomain({
     code: "runtime:tool-result",
@@ -146,7 +162,7 @@ test("MCP 工具发现与 Resource 只在前端合并为一个展示分组", () 
     { code: "runtime:mcp-tool-search", label: "MCP 工具发现", description: "搜索工具。", tools: [{ name: "search_tools" }] },
     { code: "runtime:mcp-resource", label: "MCP Resource", description: "读取资源。", tools: [{ name: "read_mcp_resource" }] },
   ]);
-  assert.equal(Array.from(merged, (domain) => domain.code).join(","), "runtime:planning,runtime:mcp");
+  assert.equal(Array.from(merged, (domain) => domain.code).join(","), "runtime:basic,runtime:mcp");
   assert.equal(Array.from(merged[1].tools, (tool) => tool.name).join(","), "search_tools,read_mcp_resource");
   assert.match(merged[1].description, /MCP 工具发现：搜索工具/);
   assert.match(merged[1].description, /MCP Resource：读取资源/);
@@ -167,4 +183,62 @@ test("运行时分组切换只读现有目录，不增加执行或配置接口",
   assert.doesNotMatch(source, /method:|POST|PATCH|DELETE/);
   assert.match(source, /updateToolCatalogGroup\(true, mergeSystemToolDomains\(domains\)\)/);
   assert.match(source, /renderSystemTools\(domains\)/);
+});
+
+
+test("运行时目录收拢为五组，所有工具及各自注入条件保留", () => {
+  const ui = loadSystemToolsUi();
+  const definitions = [
+    ["runtime:environment", ["get_current_time"]],
+    ["runtime:channel", ["channel_message"]],
+    ["runtime:planning", ["write_plan"]],
+    ["runtime:conversation-history", ["search_conversation_history", "read_conversation_event"]],
+    ["runtime:skill", ["load_capability", "list_skill_resources", "execute_skill_script"]],
+    ["runtime:file", ["read_file", "view_image", "export_file_to_download_center"]],
+    ["runtime:tool-result", ["read_tool_result"]],
+    ["runtime:mcp-tool-search", ["search_tools"]],
+    ["runtime:mcp-resource", ["list_mcp_resources", "read_mcp_resource"]],
+  ];
+  const domains = definitions.map(([code, names]) => Object.freeze({
+    code,
+    label: code === "runtime:skill" ? "Skill" : code === "runtime:channel" ? "渠道消息" : code,
+    tools: Object.freeze(names.map(name => Object.freeze({
+      name, display_name: `名称 ${name}`, source: `来源 ${code}`,
+      injection_condition: `条件 ${name}`, description: `说明 ${name}`,
+    }))),
+  }));
+  Object.freeze(domains);
+  const merged = Array.from(ui.mergeSystemToolDomains(domains));
+  assert.deepEqual(merged.map(d => d.label), ["基础运行", "文件与结果", "Skill", "MCP", "渠道消息"]);
+  assert.deepEqual(merged.map(d => d.code), ["runtime:basic", "runtime:file", "runtime:skill", "runtime:mcp", "runtime:channel"]);
+  assert.deepEqual(merged.map(d => d.tools.length), [4, 4, 3, 3, 1]);
+  assert.deepEqual(Array.from(merged[0].tools, t => t.name), ["get_current_time", "write_plan", "search_conversation_history", "read_conversation_event"]);
+  assert.deepEqual(Array.from(merged[1].tools, t => t.name), ["read_file", "view_image", "export_file_to_download_center", "read_tool_result"]);
+  const originalTools = domains.flatMap(d => d.tools);
+  const displayedTools = merged.flatMap(d => Array.from(d.tools));
+  assert.equal(new Set(displayedTools.map(t => t.name)).size, originalTools.length);
+  assert.equal(displayedTools.length, originalTools.length);
+  for (const tool of originalTools) assert.equal(displayedTools.find(t => t.name === tool.name), tool);
+  const html = ui.systemToolDomain(merged[0]);
+  for (const tool of originalTools.slice(0, 1).concat(domains[2].tools, domains[3].tools)) {
+    assert.ok(html.includes(tool.source));
+    assert.ok(html.includes(tool.injection_condition));
+    assert.ok(html.includes(tool.description));
+  }
+});
+
+test("运行时展示分组允许部分目录与未知领域，且不改写输入", () => {
+  const ui = loadSystemToolsUi();
+  assert.equal(ui.mergeSystemToolDomains(null).length, 0);
+  assert.equal(ui.mergeSystemToolDomains([]).length, 0);
+  const unknown = Object.freeze({ code: "runtime:future", label: "后续领域", tools: [{ name: "future_tool" }] });
+  const history = Object.freeze({ code: "runtime:conversation-history", label: "会话历史", tools: Object.freeze([{ name: "read_conversation_event" }]) });
+  const source = Object.freeze([unknown, history]);
+  const merged = Array.from(ui.mergeSystemToolDomains(source));
+  assert.deepEqual(merged.map(d => d.code), ["runtime:basic", "runtime:future"]);
+  assert.equal(merged[1], unknown);
+  assert.equal(merged[0].tools[0], history.tools[0]);
+  assert.equal(history.code, "runtime:conversation-history");
+  assert.equal(source.length, 2);
+  assert.deepEqual(Array.from(ui.mergeSystemToolDomains([unknown])), [unknown]);
 });

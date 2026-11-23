@@ -194,8 +194,181 @@ class AsyncCodeModeRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parts[1].content, 42)
         self.assertEqual(parts[2].outcome, "failed")
         self.assertEqual(parts[3].content, 7)
+        restarted = parts[3].metadata['ptc_diagnostics']['steps'][0]['source_location']
+        self.assertEqual(restarted['call_id'], 'outer-3')
+        self.assertEqual(restarted['filename'], '<python-input-0>')
         second = await agent.run("independent run", deps=deps)
         self.assertEqual(_parts(second)[0].content, 41)
+
+    async def test_standard_formatting_and_json_fallback_work_without_extra_tools(self):
+        import json
+
+        async def data(value: int = 7) -> int:
+            self.fail('Pure Monty processing must not dispatch an external tool')
+
+        agent, deps, _ = self._agent(data, [
+            '"BU{%s}" % ";".join(["A", "B"])',
+            '"{:02d}".format(7)',
+            'format(7, "02d")',
+            'import json\njson.dumps({"value": {1}}, default=str)',
+            'json.loads(\'{"value": 1.25}\', parse_float=str)',
+            'import csv\nlist(csv.reader(["a,b", "1,2"]))',
+            'from decimal import Decimal\nstr(Decimal("0.1") + Decimal("0.2"))',
+        ])
+        result = await agent.run('Synthetic supported Python forms', deps=deps)
+        parts = _parts(result)
+        self.assertTrue(all(part.outcome == 'success' for part in parts))
+        self.assertEqual([p.content for p in parts[:3]], ['BU{A;B}', '07', '07'])
+        self.assertEqual(json.loads(parts[3].content), {'value': '{1}'})
+        self.assertEqual(parts[4].content, {'value': '1.25'})
+        self.assertEqual(parts[5].content, [['a', 'b'], ['1', '2']])
+        self.assertEqual(parts[6].content, '0.3')
+        self.assertTrue(all(p.metadata['ptc_diagnostics']['summary']['call_count'] == 0 for p in parts))
+
+    async def test_numeric_summary_example_handles_untyped_tool_results(self):
+        from deep_agent.ptc.toolset import _USAGE_RULES
+
+        example = _USAGE_RULES.split("Generic numeric summary shape", 1)[1]
+        code = example.split("```python\n", 1)[1].split("\n```", 1)[0]
+        code = code.replace("await fetch_rows()", "await data()")
+        cases = [
+            ({"rows": [{"value": 5}, {"value": 2.5}, {"value": None},
+                       {"value": True}, {"value": "3"}, "invalid", {}]},
+             {"row_count": 7, "numeric_count": 2, "total": 7.5}),
+            ({"rows": [{"value": None}]}, {"row_count": 1, "numeric_count": 0, "total": None}),
+            ({"rows": None}, None),
+        ]
+        for payload, expected in cases:
+            with self.subTest(payload=payload):
+                async def data():
+                    return payload
+
+                agent, deps, _ = self._agent(data, [code])
+                part, = _parts(await agent.run("Synthetic numeric summary", deps=deps))
+                self.assertEqual(part.metadata["ptc_diagnostics"]["summary"]["call_count"], 1)
+                if expected is None:
+                    self.assertEqual(part.outcome, "failed")
+                    self.assertIn("Expected a rows list", part.content["error"])
+                else:
+                    self.assertEqual(part.outcome, "success")
+                    self.assertEqual(part.content, expected)
+
+    async def test_new_stdlib_support_does_not_expose_host_files_environment_or_packages(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        async def data(value: int = 7) -> int:
+            self.fail('Denied host access must not invoke a tool')
+
+        canary = 'synthetic-host-only-canary'
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            'os.environ', {'PTC_TEST_HOST_CANARY': canary},
+        ):
+            path = Path(directory) / 'host-only.txt'
+            path.write_text(canary)
+            for name, code in [
+                ('open', f'open({str(path)!r}).read()'),
+                ('pathlib', f'from pathlib import Path\nPath({str(path)!r}).read_text()'),
+                ('environment', 'import os\nos.getenv("PTC_TEST_HOST_CANARY")'),
+                ('third_party', 'import requests\n1'),
+            ]:
+                with self.subTest(boundary=name):
+                    agent, deps, _ = self._agent(data, [code])
+                    result = await agent.run('Synthetic denied host access', deps=deps)
+                    part = _parts(result)[0]
+                    self.assertEqual(part.outcome, 'failed')
+                    self.assertNotIn(canary, str(part.content))
+                    self.assertEqual(part.metadata['ptc_diagnostics']['summary']['call_count'], 0)
+
+    async def test_subset_errors_explain_corrections_and_preserve_state_without_replaying_calls(self):
+        import json
+
+        cases = [
+            (
+                'json_cls',
+                'import json\ndraft = {"rows": [seed]}\njson.dumps(draft, cls=str)',
+                '{"value": json.dumps(draft), "check": await data(value=2)}',
+                "unexpected keyword argument 'cls'", 'does not accept cls', {"rows": [7]},
+            ),
+            (
+                'decoder_hook',
+                'import json\njson.loads(\'{"rows": [7]}\', object_hook=lambda x: x)',
+                '{"value": json.dumps(json.loads(\'{"rows": [7]}\')), "check": await data(value=2)}',
+                "unexpected keyword argument 'object_hook'", 'decoder hook is unsupported', {"rows": [7]},
+            ),
+            (
+                'gather_kwargs',
+                'import asyncio\nasync def item():\n    return 1\n'
+                'await asyncio.gather(item(), return_exceptions=True)',
+                '{"value": await asyncio.gather(item()), "check": await data(value=2)}',
+                'gather() does not yet support keyword arguments', 'without keyword arguments', [1],
+            ),
+            (
+                'yield', 'def values():\n    yield 1',
+                '{"value": [i for i in range(2)], "check": await data(value=2)}',
+                'does not yet support yield expressions', 'no yield generators', [0, 1],
+            ),
+            (
+                'unrelated_error', '1 / 0',
+                '{"value": seed, "check": await data(value=2)}',
+                'ZeroDivisionError', None, 7,
+            ),
+        ]
+        for label, failing, corrected, error, hint, expected in cases:
+            with self.subTest(case=label):
+                called = []
+
+                async def data(value: int = 7) -> int:
+                    called.append(value)
+                    return value
+
+                agent, deps, _ = self._agent(data, [
+                    'seed = await data()\nseed', failing, corrected,
+                ])
+                result = await agent.run('Synthetic Python-subset correction', deps=deps)
+                parts = _parts(result)
+                self.assertEqual([part.outcome for part in parts], ['success', 'failed', 'success'])
+                self.assertIn(error, parts[1].content['error'])
+                if hint is not None:
+                    self.assertIn(hint, parts[1].content['guidance'])
+                else:
+                    self.assertNotIn('JSON encoder', parts[1].content['guidance'])
+                    self.assertNotIn('decoder hook', parts[1].content['guidance'])
+                self.assertIn("Check the error and each call's outcome", parts[1].content['guidance'])
+                diagnostic = parts[1].metadata['ptc_diagnostics']
+                self.assertEqual(diagnostic['summary']['call_count'], 0)
+                self.assertEqual(called, [7, 2])
+                actual = parts[2].content['value']
+                if label in {'json_cls', 'decoder_hook'}:
+                    actual = json.loads(actual)
+                self.assertEqual(actual, expected)
+                self.assertEqual(parts[2].content['check'], 2)
+                self.assertEqual(result.output, 'done')
+
+    async def test_resource_trips_reset_the_repl_before_later_code(self):
+        for label, code, limits in [
+            ('execution', 'while True:\n    pass', {'max_duration_secs': 0.03}),
+            ('memory', '[0] * 10000000', {'max_memory': 16 * 1024 * 1024}),
+        ]:
+            with self.subTest(limit=label):
+                called = []
+
+                async def data(value: int = 7) -> int:
+                    called.append(value)
+                    return value
+
+                agent, deps, capability = self._agent(data, [
+                    'seed = await data()\nseed', code, 'seed', 'await data(value=2)',
+                ])
+                capability.resource_limits = limits
+                result = await agent.run('Synthetic resource reset', deps=deps)
+                parts = _parts(result)
+                self.assertEqual([p.outcome for p in parts], ['success', 'failed', 'failed', 'success'])
+                self.assertIn('REPL state was reset', parts[1].content['error'])
+                self.assertIn('seed', parts[2].content['error'])
+                self.assertEqual(parts[3].content, 2)
+                self.assertEqual(called, [7, 2])
 
     async def test_100_calls_succeed_101st_is_refused_and_completed_facts_survive(self):
         called = []
@@ -258,6 +431,9 @@ class AsyncCodeModeRuntimeTests(unittest.IsolatedAsyncioTestCase):
         agent, deps, _ = self._agent(data, ["data(value=7) + 1"], sequential=True)
         result = await agent.run("sync stub", deps=deps)
         self.assertEqual(_parts(result)[0].content, 8)
+        self.assertEqual(_parts(result)[0].metadata['ptc_diagnostics']['steps'][0]['source_location'], {
+            'call_id': 'outer-0', 'filename': '<python-input-0>', 'start': 0, 'end': 13,
+        })
 
     async def test_gather_failure_joins_the_other_started_host_callback(self):
         slow_started = asyncio.Event()

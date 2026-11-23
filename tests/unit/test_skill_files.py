@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from pydantic_ai import ModelRetry, ToolFailed, ToolReturn
 
@@ -38,12 +38,16 @@ class SkillFilesTests(unittest.IsolatedAsyncioTestCase):
         self.tool = (await toolset.get_tools(self.ctx))['execute_skill_script']
 
     async def test_skill_authorized_inputs_and_published_files_share_python_contract(self):
+        self.ctx.deps.upload_settings_store = SimpleNamespace(get=AsyncMock(
+            return_value=SimpleNamespace(version=1, value={"max_size_mb": 50}),
+        ))
         returned = await self.tool.call_func({'skill_code': 'demo', 'script_path': 'scripts/check.py',
                                              'files': [{'file_id': 'source'}]}, self.ctx)
         self.assertIsInstance(returned, ToolReturn)
         request = self.backend.requests[0]
         self.assertEqual(request.files[0].file_id, 'source')
         self.assertEqual(request.files[0].decoded(), b'input')
+        self.assertEqual(request.output_file_max_bytes, 50 * 1024**2)
         self.assertEqual(request.script_entry, 'scripts/check.py')
         self.assertEqual(returned.return_value['status'], 'ok')
         refs = returned.return_value['files']

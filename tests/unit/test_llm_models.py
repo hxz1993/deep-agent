@@ -183,6 +183,7 @@ class LlmModelMigrationShapeTests(unittest.TestCase):
                 "context_window_tokens",
                 "max_output_tokens",
                 "tags",
+                "reasoning_options",
                 "enabled",
                 "created_at",
                 "updated_at",

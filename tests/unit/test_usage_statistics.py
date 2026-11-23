@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 from datetime import UTC, datetime, timedelta
 
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 from pydantic_ai.usage import RequestUsage
-from sqlalchemy import delete, update
+from sqlalchemy import delete, update, event as sql_event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from deep_agent.db.conversation import SqlConversationCoordinator
@@ -60,6 +61,40 @@ class UsageLedgerTests(unittest.IsolatedAsyncioTestCase):
     def filters(self):
         now = datetime.now(UTC)
         return SessionFilters(start=now - timedelta(days=1), end=now + timedelta(minutes=1), timezone="Asia/Shanghai")
+
+    async def test_detail_projection_matches_full_report_without_unused_trend_work(self):
+        await self.store.append_message_parts("projection-session", messages=[ModelResponse(
+            parts=[TextPart("answer")], usage=RequestUsage(input_tokens=100, output_tokens=20), run_id="projection")],
+            agent_id=self.agent_id, user_id="owner", turn_id="projection", run_id="projection",
+            usage_model_id=self.model_id, usage_provider_id=self.provider_id)
+        query = UsageQueries(self.factory)
+        filters = self.filters()
+        full = await query.report(filters)
+        from deep_agent.diagnostics.usage import _project
+        for dimension in ("agent", "model", "user"):
+            with self.subTest(dimension=dimension), patch("deep_agent.diagnostics.usage._project", wraps=_project) as project:
+                detail = await query.detail_report(filters, dimension=dimension)
+                self.assertEqual(detail["summary"], full["summary"])
+                self.assertEqual(detail["groups"], {dimension:full["groups"][dimension]})
+                self.assertEqual(detail["models"], full["models"])
+                self.assertNotIn("trend", detail)
+                self.assertEqual(project.call_count, 1)
+        statements = []
+        def track(_conn, _cursor, statement, _params, _context, _many):
+            if statement.lstrip().upper().startswith("SELECT"):
+                statements.append(statement)
+        sql_event.listen(self.engine.sync_engine, "before_cursor_execute", track)
+        try:
+            await query.collect(filters)
+            full_collect_count = len(statements)
+            statements.clear()
+            rows, total = await query.sessions(filters, dimension="agent", key=self.agent_id)
+            self.assertEqual(total, 1)
+            self.assertEqual(rows[0]["total_tokens"], 120)
+            self.assertEqual(full_collect_count, 3)
+            self.assertEqual(len(statements), 2)  # usage rows plus selected session titles only
+        finally:
+            sql_event.remove(self.engine.sync_engine, "before_cursor_execute", track)
 
     async def test_source_filters_keep_console_continuation_usage_in_channel(self):
         for sid, kind, source_id in (("internal", None, None), ("channel", "channel:dingtalk", "deleted-account")):

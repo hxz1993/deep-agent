@@ -18,10 +18,11 @@ def transport_cancel_reason() -> str:
 class DiagnosticEventSourceResponse(EventSourceResponse):
     """Public ASGI boundary wrapper, compatible with the existing SSE versions."""
 
-    def __init__(self, content, *, fields: dict, active_run, **kwargs):
+    def __init__(self, content, *, fields: dict, active_run=None, on_close=None, **kwargs):
         super().__init__(content, **kwargs)
         self._diagnostic_fields = fields
         self._diagnostic_active_run = active_run
+        self._on_close = on_close
 
     async def __call__(self, scope, receive, send):
         started = time.monotonic()
@@ -32,7 +33,7 @@ class DiagnosticEventSourceResponse(EventSourceResponse):
             nonlocal reason
             reason = value
             try:
-                entry = self._diagnostic_active_run()
+                entry = self._diagnostic_active_run() if self._diagnostic_active_run else None
                 if entry is not None:
                     entry.observe_cancellation(value)
             except Exception:
@@ -65,6 +66,8 @@ class DiagnosticEventSourceResponse(EventSourceResponse):
                 reason = "stream_error"
             raise
         finally:
+            if self._on_close is not None:
+                self._on_close()
             if not body_finished and reason == "stream_completed":
                 reason = transport_cancel_reason()
             try:

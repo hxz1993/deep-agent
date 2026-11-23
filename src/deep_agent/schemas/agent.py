@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Self, TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationInfo, field_validator, model_validator
 
 from deep_agent.capabilities.codes import canonical_tool_package_codes
 from deep_agent.schemas.llm_model import LlmModelSummary
+from deep_agent.models.reasoning import saved_effort
+from deep_agent.skills.catalog import active_skill_codes
 from deep_agent.time import UtcDatetime
 
 if TYPE_CHECKING:
@@ -70,6 +72,7 @@ class AgentChatRequest(BaseModel):
 class AgentCreate(_RejectRemovedAgentFields):
     name: str = Field(..., max_length=191, description="Unique agent display name.")
     model_id: str | None = Field(default=None, description="Optional LLM model preset id.")
+    reasoning_effort: str | None = Field(default=None, min_length=1, max_length=64)
     prompt: str = Field(..., description="System prompt / instructions.")
     capabilities: list[str] = Field(
         default_factory=list,
@@ -112,13 +115,14 @@ class AgentCreate(_RejectRemovedAgentFields):
         return (
             canonical_tool_package_codes(normalized)
             if info.field_name == "capabilities"
-            else normalized
+            else active_skill_codes(normalized)
         )
 
 
 class AgentUpdate(_RejectRemovedAgentFields):
     name: str | None = Field(default=None, max_length=191)
     model_id: str | None = None
+    reasoning_effort: str | None = Field(default=None, min_length=1, max_length=64)
     prompt: str | None = None
     capabilities: list[str] | None = None
     skills: list[str] | None = None
@@ -169,7 +173,7 @@ class AgentUpdate(_RejectRemovedAgentFields):
         return (
             canonical_tool_package_codes(normalized)
             if info.field_name == "capabilities"
-            else normalized
+            else active_skill_codes(normalized)
         )
 
 
@@ -184,34 +188,54 @@ class AgentPromptEstimateResponse(BaseModel):
     estimator_source: str
 
 
-class AgentResponse(BaseModel):
+class AgentSummary(BaseModel):
     id: str
     name: str
     model_id: str | None
+    reasoning_effort: str | None = None
+    reasoning_effort_bound: bool | None = None
     model: LlmModelSummary | None
-    prompt: str
     capabilities: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
-    structured_output_enabled: bool = False
-    allow_text_output: bool = False
     updated_by: str | None = None
     updated_by_user: AgentUpdater | None = None
-    created_at: UtcDatetime
     updated_at: UtcDatetime
 
+    @staticmethod
+    def _row_fields(row: Agent, llm_model: LlmModel | None) -> dict:
+        return {
+            "id": row.id,
+            "name": row.name,
+            "model_id": row.model_id,
+            "reasoning_effort": saved_effort(getattr(row, "reasoning_effort", None)),
+            "reasoning_effort_bound": (
+                row.reasoning_effort.get("binding") == (getattr(llm_model, "reasoning_options", None) or {}).get("binding")
+                if isinstance(getattr(row, "reasoning_effort", None), dict) else None
+            ),
+            "model": LlmModelSummary.from_row(llm_model) if llm_model is not None else None,
+            "capabilities": canonical_tool_package_codes(row.capabilities),
+            "skills": active_skill_codes(row.skills),
+            "updated_at": row.updated_at,
+        }
+
     @classmethod
-    def from_row(cls, row: Agent, llm_model: LlmModel | None) -> AgentResponse:
+    def from_row(cls, row: Agent, llm_model: LlmModel | None) -> Self:
+        return cls(**cls._row_fields(row, llm_model))
+
+
+class AgentResponse(AgentSummary):
+    prompt: str
+    structured_output_enabled: bool = False
+    allow_text_output: bool = False
+    created_at: UtcDatetime
+
+    @classmethod
+    def from_row(cls, row: Agent, llm_model: LlmModel | None) -> Self:
         return cls(
-            id=row.id,
-            name=row.name,
-            model_id=row.model_id,
-            model=LlmModelSummary.from_row(llm_model) if llm_model is not None else None,
+            **cls._row_fields(row, llm_model),
             prompt=row.prompt,
-            capabilities=canonical_tool_package_codes(row.capabilities),
-            skills=row.skills or [],
+            updated_by=row.updated_by,
             structured_output_enabled=bool(row.structured_output_enabled),
             allow_text_output=bool(row.allow_text_output),
-            updated_by=row.updated_by,
             created_at=row.created_at,
-            updated_at=row.updated_at,
         )

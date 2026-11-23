@@ -24,7 +24,7 @@ from deep_agent.security import ConsoleAdminAuthorizer
 from tests.helpers.request_identity import TEST_USER_ID
 from tests.integration import test_session_live_api as _live_fixture
 from tests.integration import test_structured_output_public_protocol as _public_fixture
-from tests.unit import test_channel_gateway as _channel_fixture
+from tests.helpers import channel_gateway as _channel_fixture
 
 
 OBJECT_SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}},
@@ -34,13 +34,13 @@ OBJECT_SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}},
 def _cases():
     return [
         ("text", OBJECT_SCHEMA, [[TextPart("请先上传合同🧾。")]], "请先上传合同🧾。", False, [], 0),
-        ("json", OBJECT_SCHEMA, [[ToolCallPart("public_result", {"ok": True}, "json")]], {"ok": True}, True, [], 0),
-        ("string", {"type": "string"}, [[ToolCallPart("public_result", {"response": "same string"}, "string")]], "same string", True, [], 0),
+        ("json", OBJECT_SCHEMA, [[ToolCallPart("output__public_result", {"ok": True}, "json")]], {"ok": True}, True, [], 0),
+        ("string", {"type": "string"}, [[ToolCallPart("output__public_result", {"response": "same string"}, "string")]], "same string", True, [], 0),
         ("text-string", {"type": "string"}, [[TextPart("same string")]], "same string", False, [], 0),
         ("failed-json-then-text", OBJECT_SCHEMA,
-         [[ToolCallPart("public_result", {}, "bad")], [TextPart("还需确认信息。")]], "还需确认信息。", False, [], 1),
+         [[ToolCallPart("output__public_result", {}, "bad")], [TextPart("还需确认信息。")]], "还需确认信息。", False, [], 1),
         ("text-and-json", OBJECT_SCHEMA,
-         [[TextPart("结果如下。"), ToolCallPart("public_result", {"ok": True}, "combined")]],
+         [[TextPart("结果如下。"), ToolCallPart("output__public_result", {"ok": True}, "combined")]],
          {"ok": True}, True, ["结果如下。"], 0),
     ]
 
@@ -78,7 +78,7 @@ class AllowTextOutputPublicProtocolTests(unittest.IsolatedAsyncioTestCase):
         def response(messages, info):
             requests.append(info)
             self.assertTrue(info.allow_text_output)
-            self.assertEqual([tool.name for tool in info.output_tools], ["public_result"])
+            self.assertEqual([tool.name for tool in info.output_tools], ["output__public_result"])
             self.assertLessEqual(len(requests), len(replies), "unexpected additional model request")
             return ModelResponse(parts=deepcopy(replies[len(requests) - 1]),
                                  usage=RequestUsage(input_tokens=13, output_tokens=9))
@@ -187,7 +187,7 @@ class AllowTextOutputPublicProtocolTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(structured=structured):
                 await self.configure({"type": "string"})
                 value = "synthetic-owner-only"
-                parts = [ToolCallPart("public_result", {"response": value}, "private")] if structured else [TextPart(value)]
+                parts = [ToolCallPart("output__public_result", {"response": value}, "private")] if structured else [TextPart(value)]
                 model, _ = self.model([parts])
                 final = await self.post(model)
                 async with AsyncClient(transport=self._transport, base_url="http://test", headers={"user": "different-owner"}) as http:
@@ -272,9 +272,9 @@ class AllowTextOutputPublicProtocolTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AllowTextOutputChannelRoutingTests(unittest.IsolatedAsyncioTestCase):
-    asyncSetUp = _channel_fixture.ChannelGatewayTests.asyncSetUp
-    asyncTearDown = _channel_fixture.ChannelGatewayTests.asyncTearDown
-    _run_presentation = _channel_fixture.ChannelGatewayTests._run_presentation
+    asyncSetUp = _channel_fixture.ChannelGatewayFixture.asyncSetUp
+    asyncTearDown = _channel_fixture.ChannelGatewayFixture.asyncTearDown
+    _run_presentation = _channel_fixture.ChannelGatewayFixture._run_presentation
 
     async def test_same_string_channel_delivery_uses_output_info_not_python_value_type(self):
         for structured in (False, True):

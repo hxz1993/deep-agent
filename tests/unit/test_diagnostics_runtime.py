@@ -105,6 +105,22 @@ class DiagnosticRuntimeTests(unittest.TestCase):
         self.assertNotIn("prompt", safe)
         self.assertIsNone(sanitize_record({"event": []}))
 
+    def test_remote_operation_stack_is_written_and_read_with_task_correlation(self):
+        writer = self.writer()
+        with patch.object(module, "_runtime", writer):
+            try:
+                raise TimeoutError("NEVER_LOG_UPSTREAM")
+            except TimeoutError as error:
+                module.emit("remote_agent_operation", level="WARNING", exception=error,
+                            request_id="request-1", task_id="task-1", protocol="a2a", status="unknown",
+                            error_stack="DO_NOT_ACCEPT_CALLER_SUPPLIED_STACK")
+        self.drain(writer)
+        record, = self.records()
+        self.assertEqual((record["request_id"], record["task_id"]), ("request-1", "task-1"))
+        self.assertEqual(record["error_type"], "TimeoutError")
+        self.assertIn("TimeoutError@test_diagnostics_runtime.py:", record["error_stack"])
+        self.assertNotIn("NEVER_LOG", str(record))
+
     def test_large_readable_messages_do_not_drop_lifecycle_records(self):
         from deep_agent.diagnostics.schema import IDENTIFIER_FIELDS, NUMBER_FIELDS, MAX_RECORD_BYTES
         fields = {key: "x" * 180 for key in IDENTIFIER_FIELDS}

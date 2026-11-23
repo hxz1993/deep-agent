@@ -76,6 +76,63 @@ class PtcDiagnosticsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_history_fingerprint(result.new_messages()), _history_fingerprint(without_diagnostics))
         self.assertGreaterEqual(len(requests), 4)
 
+    async def test_source_ranges_distinguish_repeated_calls_unicode_parallel_and_loops(self):
+        snippets = [
+            '# 中文😀\nfirst = await demo_query(value=1); second = await demo_query(value=2)\nsecond',
+            'import asyncio\nawait asyncio.gather(demo_query(value=3), demo_query(value=4))',
+            'for i in range(5, 8):\n    await demo_query(\n        value=i\n    )',
+        ]
+        _, returns, _ = await self._run(snippets)
+        for index, returned in enumerate(returns):
+            with self.subTest(feed=index):
+                steps = returned.metadata['ptc_diagnostics']['steps']
+                locations = [step['source_location'] for step in steps]
+                self.assertTrue(all(location['call_id'] == f'ptc-{index + 1}' for location in locations))
+                self.assertTrue(all(location['filename'] == f'<python-input-{index}>' for location in locations))
+                expressions = [snippets[index].encode()[p['start']:p['end']].decode() for p in locations]
+                if index < 2:
+                    self.assertEqual(expressions, [f'demo_query(value={value})' for value in range(index * 2 + 1, index * 2 + 3)])
+                    self.assertNotEqual(locations[0]['start'], locations[1]['start'])
+                else:
+                    self.assertEqual(expressions, ['demo_query(\n        value=i\n    )'] * 3)
+                self.assertTrue(all(step['duration_ms'] >= 0 for step in steps))
+
+    async def test_source_range_points_to_original_feed_and_survives_history_serialization(self):
+        snippets = [
+            'async def helper():\n    return await demo_query(value=9)\n0',
+            'await helper()',
+            '1 / 0',
+            'await helper()',
+        ]
+        result, returns, _ = await self._run(snippets)
+        for index in (1, 3):
+            location = returns[index].metadata['ptc_diagnostics']['steps'][0]['source_location']
+            self.assertEqual(location['call_id'], 'ptc-1')
+            self.assertEqual(location['filename'], '<python-input-0>')
+            self.assertEqual(snippets[0].encode()[location['start']:location['end']].decode(), 'demo_query(value=9)')
+        restored = ModelMessagesTypeAdapter.validate_json(ModelMessagesTypeAdapter.dump_json(result.new_messages()))
+        persisted = [part for message in restored for part in message.parts
+                     if isinstance(part, ToolReturnPart) and part.tool_name == 'run_code']
+        self.assertEqual(persisted[1].metadata, returns[1].metadata)
+        self.assertNotIn('source_location', _formatted_history(restored))
+
+    async def test_failed_tool_keeps_its_call_site_and_later_feed_is_not_shifted(self):
+        from pydantic_ai import ToolFailed
+
+        async def query(value: int) -> int:
+            if value == 1:
+                raise ToolFailed('synthetic failed lookup')
+            return value
+
+        snippets = ['await demo_query(value=1)', 'await demo_query(value=2)']
+        _, returns, _ = await self._run(snippets, tool=query)
+        self.assertEqual([p.outcome for p in returns], ['failed', 'success'])
+        for index, returned in enumerate(returns):
+            location = returned.metadata['ptc_diagnostics']['steps'][0]['source_location']
+            self.assertEqual(location['filename'], f'<python-input-{index}>')
+            self.assertEqual(location['call_id'], f'ptc-{index + 1}')
+            self.assertEqual(snippets[index].encode()[location['start']:location['end']].decode(), snippets[index][6:])
+
     def test_bounded_sanitizer_redacts_without_stringifying_unknown_objects(self):
         class Explosive:
             def __str__(self):
@@ -97,12 +154,16 @@ class PtcDiagnosticsTests(unittest.IsolatedAsyncioTestCase):
         collector = Collector("outer", "run", "session", frozenset())
         for index in range(100):
             call_id = f"outer__{index + 1}"
+            collector.locate(call_id, "synthetic_tool", {
+                "call_id": "outer", "filename": "<python-input-0>", "start": index, "end": index + 1,
+            })
             collector.begin(call_id, "synthetic_tool", {"value": "x" * 20_000, "index": index})
             collector.end(call_id, "completed", {"body": "y" * 20_000})
         collector.finish("completed")
         document = collector.document()
         self.assertEqual(len(document["steps"]), 100)
         self.assertEqual(document["summary"]["call_count"], 100)
+        self.assertTrue(all(step['source_location']['call_id'] == 'outer' for step in document['steps']))
         self.assertLessEqual(len(json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode()), MAX_DIAGNOSTICS_BYTES)
 
     def test_multibyte_identifiers_still_fit_total_budget(self):

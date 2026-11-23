@@ -2,6 +2,7 @@ import { readPresentationSource } from "./shared-presentation-source.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { renderReplyFileCards } from "../../../console/reply-files.js";
 
 import {
   applyAssistantPresentationActions,
@@ -10,9 +11,11 @@ import {
   assistantActionsFromSse,
   formatProcessElapsed,
   isPlanningToolEvent,
+  isRemoteAgentToolEvent,
   normalizePlanSnapshot,
   planPanelState,
   processDisclosureLabel,
+  toolResultPresentation,
 } from "../../../console/assistant-presentation.js";
 
 function recordingPresenter() {
@@ -31,12 +34,46 @@ function recordingPresenter() {
     "removeToolCall",
     "attachHitlWidget",
     "complete",
+    "setOutputFiles",
     "markInterrupted",
   ]) {
     presenter[method] = (...args) => calls.push([method, ...args]);
   }
   return { presenter, calls };
 }
+
+test("交付文件在成功的正文或结构化输出之后呈现，等待 UI 时不显示", () => {
+  const files = [{ id: "csv", name: "result.csv" }];
+  const { presenter, calls } = recordingPresenter();
+  applyAssistantPresentationActions(presenter, assistantActionsFromSse("final", {
+    status: "completed", output: "**正文**", output_files: files,
+  }));
+  assert.deepEqual(calls, [["complete", "**正文**"], ["setOutputFiles", files]]);
+  assert.equal(assistantActionsFromSse("final", { status: "pending", output_files: files }).length, 1);
+  const history = assistantActionsFromHistoryItems([{
+    kind: "structured_output", status: "completed", name: "Report", output: { value: 4 }, output_files: files,
+  }]);
+  assert.equal(history[0].type, "structured_output");
+  assert.deepEqual(history.at(-1), { type: "output_files", files });
+});
+
+test("交付卡片对文件名转义，去重并使用既有授权下载地址", () => {
+  const base = "https://test.example/console/";
+  const file = { id: "local_123", name: "<报告>.csv", byte_size: 1024, preview_url: "/element-preview/?id=abc" };
+  const html = renderReplyFileCards([file, file, {
+    id: "second", name: "report.html", preview_url: "https://external.example/report",
+  }], { base });
+  assert.equal((html.match(/class="reply-file-card"/g) || []).length, 2);
+  assert.equal((html.match(/target="_blank"/g) || []).length, 1);
+  assert.match(html, /&lt;报告&gt;\.csv/);
+  assert.match(html, /data-file-type="csv"/);
+  assert.match(html, /data-file-type="html"/);
+  assert.match(html, /1\.0 KiB/);
+  assert.match(html, /\/api\/v1\/local-files\/local_123\/download/);
+  assert.doesNotMatch(html, /external\.example|<报告>|交付文件/);
+  assert.match(renderReplyFileCards([{ id: "other", name: "no-extension" }], { base }), /data-file-type="file"/);
+  assert.equal(renderReplyFileCards([]), "");
+});
 
 const chatSource = await readPresentationSource("chat.js");
 const workspaceCss = await readFile(
@@ -69,7 +106,7 @@ test("实时处理过程展开计时并在最终结果后折叠", () => {
   assert.equal(formatProcessElapsed(72), "1分12秒");
   assert.equal(processDisclosureLabel({ running: true, elapsedSeconds: 72 }), "处理中 · 1分12秒");
   assert.equal(processDisclosureLabel({ elapsedSeconds: 72 }), "已处理 · 用时 1分12秒");
-  assert.match(chatSource, /let isLive = !readOnly && !timestamp/);
+  assert.match(chatSource, /let isLive = observesLive \|\| \(!readOnly && !timestamp\)/);
   assert.match(chatSource, /processElapsedSecondsBetween\([\s\S]*processTiming\.startedAt[\s\S]*processTiming\.completedAt/);
   assert.match(chatSource, /processDisclosureLabel\(\{[\s\S]*elapsedSeconds: processElapsedSeconds/);
   assert.match(chatSource, /window\.setInterval\(updateProcessTimer, 1000\)/);
@@ -304,6 +341,18 @@ test("原生搜索实时文本和工具交错后仍由 final 输出完成正文"
   assert.deepEqual(recorder.calls.at(-1), ["complete", "最后的完整回答。"]);
 });
 
+test("跳过的交互显示终态，且不停止整条助手消息或重建表单", () => {
+  const { presenter, calls } = recordingPresenter();
+  applyAssistantPresentationActions(presenter, assistantActionsFromHistoryItems([{
+    kind: "tool", call_id: "skipped-form", tool_name: "builtin__confirm",
+    mode: "deferred", status: "interrupted", outcome: "skipped", output: null,
+  }]));
+  const result = calls.find(([method]) => method === "addToolResult")?.[1];
+  assert.equal(toolResultPresentation(result).label, "已跳过");
+  assert.equal(result.tool_call_id, "skipped-form");
+  assert.ok(!calls.some(([method]) => ["attachHitlWidget", "markInterrupted"].includes(method)));
+});
+
 test("展示动作覆盖多工具、撤回、失败、中断与 Deferred", () => {
   const historyActions = assistantActionsFromHistoryItems([
     {
@@ -372,16 +421,16 @@ test("共享动作入口恢复 Deferred 时仍补齐 UI 工具元数据", () => 
   );
 });
 
-test("大工具结果显示外置提示并保留预览", () => {
-  assert.match(chatSource, /renderToolResultArtifacts\(data\.artifacts\)/);
-  assert.match(chatSource, /完整结果已外置/);
-  assert.match(chatSource, /Agent 可按需读取/);
-  assert.match(workspaceCss, /\.tool-result-artifact/);
+test("工具状态与远程任务状态独立，普通 MCP 的同名工具保持原样", () => {
+  assert.equal(isRemoteAgentToolEvent({ tool: "delegate_task" }), true);
+  assert.equal(isRemoteAgentToolEvent({ tool: "delegate_task", source: "mcp" }), false);
+  assert.equal(toolResultPresentation({ metadata: { remote_agent: { status: "input_required" } } }).label, "完成");
+  assert.equal(toolResultPresentation({ outcome: "failed", metadata: { remote_agent: { status: "unknown" } } }).label, "失败");
 });
 
 test("无参数工具显示空对象且参数和结果 JSON 不重复绘制边框", () => {
   assert.match(chatSource, /const renderedArgs = hasArgs \? merged\.args : \{\};/);
-  assert.match(chatSource, /renderBlock\(renderedArgs, \{ className: "args", ariaLabel: "工具参数 JSON" \}\)/);
+  assert.match(chatSource, /renderBlock\(state\.args, \{ className: "args", ariaLabel: "工具参数 JSON" \}\)/);
   assert.doesNotMatch(chatSource, /参数接收中…|args-pending/);
   assert.match(
     workspaceCss,
@@ -389,18 +438,10 @@ test("无参数工具显示空对象且参数和结果 JSON 不重复绘制边�
   );
 });
 
-test("Python 生成文件显示文件信息、下载与可复制 File ID", () => {
-  assert.match(chatSource, /item\?\.kind === "sandbox_output"/);
-  assert.match(chatSource, /renderGeneratedFileArtifact/);
-  assert.match(chatSource, /data-copy-file-id/);
-  assert.match(chatSource, /api\/v1\/local-files/);
-  assert.match(workspaceCss, /\.generated-file-item/);
-  assert.match(workspaceCss, /\.generated-file-actions/);
-});
-
 test("任务计划在消息区底部浮层展示最新快照", () => {
   assert.equal(isPlanningToolEvent({ source: "planning", tool: "anything" }), false);
   assert.equal(isPlanningToolEvent({ tool: "write_plan" }), true);
+  assert.equal(isPlanningToolEvent({ source: "ui", tool: "write_plan" }), false);
   assert.equal(isPlanningToolEvent({ source: "planning", tool: "update_task_statuses" }), false);
   assert.equal(isPlanningToolEvent({ tool: "execute_python" }), false);
 

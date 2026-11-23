@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from pydantic_ai.models.test import TestModel
 
+from deep_agent.agent.tool_names import wire_name
 from deep_agent.api.v1 import api_router
 from deep_agent.schemas.ui_tools import UiToolCreate, UiToolPackageCreate
 from tests.integration.helpers.chat import (
@@ -69,7 +70,7 @@ async def ui_tool_stream_app(
         db_session_factory=session_factory,
     )
 
-    test_model = TestModel(call_tools=[tool_name], custom_output_text="done")
+    test_model = TestModel(call_tools=[wire_name("ui", "myapp", tool_name)], custom_output_text="done")
     transport = ASGITransport(app=app)
     try:
         yield transport, test_model, app.state.test_agent_id

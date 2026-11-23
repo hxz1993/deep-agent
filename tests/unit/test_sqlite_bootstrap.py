@@ -19,6 +19,8 @@ from deep_agent.db.stores.bundle import create_data_stores
 
 
 EXPECTED_TABLES = {
+    "agent_publications",
+    "remote_agent_connections",
     "agent_output_configs",
     "agents",
     "chat_session_events",
@@ -28,6 +30,7 @@ EXPECTED_TABLES = {
     "channel_session_bindings",
     "global_settings",
     "integration_settings",
+    "integration_scoped_settings",
     "llm_models",
     "llm_providers",
     "mcp_servers",
@@ -97,7 +100,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     self._assert_current_baseline(db_path)
 
     def _assert_current_baseline(self, db_path: Path) -> None:
-        self.assertEqual(self._revision(db_path), "013")
+        self.assertEqual(self._revision(db_path), "016")
         self.assertEqual(self._business_tables(db_path), EXPECTED_TABLES)
         self.assertEqual(self._primary_key(db_path, "chat_sessions"), ["session_id"])
         self.assertEqual(self._primary_key(db_path, "chat_session_events"), ["event_id"])

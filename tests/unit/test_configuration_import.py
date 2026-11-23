@@ -99,13 +99,16 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
     async def _target_engine(
         self,
         *,
-        revision: str = "013",
+        revision: str = "015",
         baseline: bool = False,
     ) -> AsyncEngine:
         target = self.root / f"target-{revision}-{baseline}.db"
         engine = create_async_engine(self._url(target))
         async with engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
+            await connection.run_sync(lambda conn: Base.metadata.create_all(
+                conn, tables=[table for table in Base.metadata.sorted_tables
+                              if revision == "016" or table.name not in {"agent_publications", "remote_agent_connections"}],
+            ))
             await connection.execute(
                 text(
                     "CREATE TABLE alembic_version "
@@ -131,7 +134,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
         self,
         *,
         include_skill: bool = False,
-        revision: str = "013",
+        revision: str = "015",
     ) -> tuple[Path, Path | None, bytes | None]:
         source = self.root / f"source-{include_skill}-{revision}.db"
         await config_backup_tests.ConfigBackupTests()._create_source(source, revision=revision)
@@ -166,6 +169,13 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
             with sqlite3.connect(source) as connection:
                 connection.execute("UPDATE agents SET skills='[]'")
                 connection.execute("DELETE FROM skill_packages")
+
+        if revision in {"014", "015"}:
+            with sqlite3.connect(source) as connection:
+                connection.execute("UPDATE agents SET reasoning_effort=?", (json.dumps({"value": "high", "binding": "fixture"}),))
+                connection.execute("UPDATE llm_models SET reasoning_options=?", (json.dumps({
+                    "options": [{"type": "effort", "values": ["high"]}], "binding": "fixture", "source": "manual",
+                }),))
 
         result = await export_backup(
             self._url(source),
@@ -252,8 +262,8 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
             await engine.dispose()
 
     async def test_same_dynamic_revision_import_preserves_ids_and_revision(self) -> None:
-        backup_path, _, _ = await self._backup(revision="013")
-        engine = await self._target_engine(revision="013", baseline=True)
+        backup_path, _, _ = await self._backup()
+        engine = await self._target_engine(baseline=True)
         try:
             plan = await build_configuration_import_plan(
                 backup_path,
@@ -283,6 +293,10 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
                     text("SELECT COUNT(*) FROM chat_sessions")
                 )
                 model_tags = await connection.scalar(text("SELECT tags FROM llm_models WHERE id='model-1'"))
+                effort = await connection.scalar(select(Agent.reasoning_effort).where(Agent.id == "agent-1"))
+                options = await connection.scalar(text("SELECT reasoning_options FROM llm_models WHERE id='model-1'"))
+                self.assertEqual(effort, {"value": "high", "binding": "fixture"})
+                self.assertEqual(json.loads(options)["options"], [{"type": "effort", "values": ["high"]}])
                 self.assertEqual(json.loads(model_tags), [
                     "reasoning", "tool_call", "single_system_message", "inline_tool_schema_refs",
                 ])
@@ -291,10 +305,33 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
                 tuple(provider),
                 ("0123456789abcdef0123456789abcdef", "plain-api-key"),
             )
-            self.assertEqual(revision, "013")
+            self.assertEqual(revision, "015")
             self.assertEqual(sessions, 0)
             self.assertEqual(integrations[0]["code"], "deeptable-assistant")
             self.assertEqual(integrations[0]["settings"], {"enabled": True, "options": [1, None, "中文"]})
+        finally:
+            await engine.dispose()
+
+    async def test_016_restores_remote_connection_and_its_agent_binding(self) -> None:
+        backup_path, _, _ = await self._backup(revision="016")
+        connection_id = "70000000-0000-0000-0000-000000000001"
+        config = {"version": 1, "protocol": "a2a", "card_url": "https://agent.example.test/agent-card.json", "headers": {}}
+        capabilities = [f"agent_connection:{connection_id}"]
+        with sqlite3.connect(backup_path) as connection:
+            connection.execute("INSERT INTO remote_agent_connections (id,name,config) VALUES (?,?,?)",
+                               (connection_id, "Budget", json.dumps(config)))
+            connection.execute("UPDATE agents SET capabilities=?", (json.dumps(capabilities),))
+        engine = await self._target_engine(revision="016")
+        try:
+            plan = await build_configuration_import_plan(backup_path, target_engine=engine)
+            await apply_configuration_import(plan, target_engine=engine, file_store=_MemoryFileStore(), request_headers={})
+            async with engine.connect() as connection:
+                self.assertEqual(json.loads(await connection.scalar(text("SELECT config FROM remote_agent_connections"))), config)
+                self.assertEqual(await connection.scalar(select(Agent.capabilities)), capabilities)
+            with sqlite3.connect(backup_path) as connection:
+                connection.execute("DELETE FROM remote_agent_connections")
+            with self.assertRaisesRegex(ConfigurationImportError, "capabilities.agent_connection"):
+                await build_configuration_import_plan(backup_path, target_engine=engine)
         finally:
             await engine.dispose()
 
@@ -311,6 +348,37 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(await connection.scalar(text("SELECT COUNT(*) FROM agents WHERE model_id IS NULL")), 1)
         finally:
             await engine.dispose()
+
+    async def test_agent_publication_backup_keeps_database_code(self) -> None:
+        source = self.root / "source-agent-publication.db"
+        await config_backup_tests.ConfigBackupTests()._create_source(source, revision="016")
+        with sqlite3.connect(source) as db:
+            db.execute("UPDATE agents SET skills='[]'")
+            db.execute("DELETE FROM skill_packages")
+            db.execute(
+                "INSERT INTO agent_publications (id, code, name, description, agent_id, scope) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                ("pub-1", "budget-report", "预算报告", "", "agent-1", json.dumps({"apps": {"mode": "all"}})),
+            )
+            db.execute(
+                "INSERT INTO remote_agent_connections (id, name, config) VALUES (?, ?, ?)",
+                ("retired-connection", "旧 MCP", json.dumps({
+                    "version": 1, "protocol": "mcp", "mcp_server_name": "old-server", "publication_code": "budget-report",
+                })),
+            )
+
+        backup = await export_backup(self._url(source), environment="test", output_root=self.root / "backup")
+        target = await self._target_engine(revision="016")
+        try:
+            plan = await build_configuration_import_plan(backup.path, target_engine=target)
+            await apply_configuration_import(plan, target_engine=target, file_store=_MemoryFileStore(), request_headers={})
+            async with target.connect() as connection:
+                row = (await connection.execute(text("SELECT code, agent_id FROM agent_publications"))).one()
+                retired = await connection.scalar(text("SELECT id FROM remote_agent_connections"))
+            self.assertEqual(tuple(row), ("budget-report", "agent-1"))
+            self.assertEqual(retired, "retired-connection")
+        finally:
+            await target.dispose()
 
     async def test_invalid_integration_rows_cannot_bypass_import_validation(self) -> None:
         backup_path, _, _ = await self._backup()
@@ -342,12 +410,12 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await engine.dispose()
 
-    async def test_import_plan_canonicalizes_legacy_ptc_capability(self) -> None:
+    async def test_import_plan_canonicalizes_ptc_and_drops_retired_time(self) -> None:
         backup_path, _, _ = await self._backup()
         with sqlite3.connect(backup_path) as connection:
             connection.execute(
                 "UPDATE agents SET capabilities = ? WHERE id = 'agent-1'",
-                ('["builtin:code-mode","mcp:remote"]',),
+                ('["builtin:general","builtin:code-mode","mcp:remote"]',),
             )
         engine = await self._target_engine()
         try:

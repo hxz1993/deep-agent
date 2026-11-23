@@ -9,11 +9,15 @@ from typing import Any
 from loguru import logger
 from pydantic_ai import ModelRetry, RunContext
 from pydantic_ai.exceptions import ToolFailedError
+from pydantic_ai.function_signature import FunctionSignature
 from pydantic_ai.messages import ToolReturn, ToolReturnPart
 from pydantic_ai.toolsets.abstract import ToolsetTool
 from pydantic_ai_harness.code_mode import CodeModeToolset
+from pydantic_ai_harness.code_mode._toolset import RunCodeExecution, _RETRY_SUMMARY_MAX_CHARS, _preview
+from pydantic_monty import MontyRuntimeError
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.tool_names import READ_ONLY_TOOL
 from deep_agent.ptc.diagnostics import Collector, current_collector
 from deep_agent.ptc.limits import PTC_WALL_TIMEOUT_SECONDS
 from deep_agent.ptc.file_payload import (
@@ -22,6 +26,7 @@ from deep_agent.ptc.file_payload import (
     CODE_MODE_METADATA_KEY,
     CODE_MODE_ORIGINAL_NAME_KEY,
     CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY,
+    CUBE_MEMBER_SEARCH_TOOL,
     FILE_DATA_TOKEN_PREFIX,
     payload_secrets,
     safe_audit_value,
@@ -31,6 +36,63 @@ from deep_agent.ptc.file_payload import (
 _RUN_CODE_NAME = "run_code"
 _INVALID_IDENTIFIER = re.compile(r"\W")
 _LONG_BASE64 = re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{256,}={0,2}(?![A-Za-z0-9+/])")
+
+
+def _cube_member_search_ptc_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    properties = schema.get("properties")
+    results = properties.get("results") if isinstance(properties, dict) else None
+    values = results.get("additionalProperties") if isinstance(results, dict) else None
+    if not isinstance(values, dict) or not isinstance(values.get("items"), dict):
+        return schema
+    if values.get("type") not in (["null", "array"], ["array", "null"]):
+        return schema
+    # Harness preserves the item type for anyOf, but loses it for a type array.
+    normalized = {"anyOf": [{**values, "type": "array"}, {"type": "null"}]}
+    return {
+        **schema,
+        "properties": {**properties, "results": {**results, "additionalProperties": normalized}},
+    }
+
+
+def _describe_nested_failure(
+    execution: RunCodeExecution, wrapped_tools: dict[str, ToolsetTool[AgentDeps]],
+) -> tuple[str, bool]:
+    """Summarize settled callbacks with the same size cap as the SDK."""
+    lines: list[str] = []
+    used = 0
+    possible_writes = False
+    count = len(execution.nested_calls)
+    for call_id, call in execution.nested_calls.items():
+        result = execution.nested_returns.get(call_id)
+        status = result.outcome if result else "unknown"
+        source = wrapped_tools.get(call.tool_name)
+        read_only = source is not None and (source.tool_def.metadata or {}).get(READ_ONLY_TOOL) is True
+        possible_writes |= not read_only and status != "denied"
+        if used >= _RETRY_SUMMARY_MAX_CHARS:
+            continue
+        if status == "success":
+            detail = f"completed and returned {_preview(result.content)}"
+        elif status == "failed":
+            detail = f"failed: {_preview(result.content)}"
+        elif status == "denied":
+            detail = "was denied and did not run"
+        elif status == "interrupted":
+            detail = "was interrupted before a result was received"
+        else:
+            detail = "has an unknown outcome; no result was received"
+        if not read_only and status not in {"success", "denied"}:
+            detail += "; it may have applied a partial change"
+        line = f"- {call.tool_name}({_preview(call.args)}) {detail}"
+        if used + len(line) > _RETRY_SUMMARY_MAX_CHARS:
+            used = _RETRY_SUMMARY_MAX_CHARS
+            continue
+        lines.append(line)
+        used += len(line)
+    if count > len(lines):
+        lines.append(f"- ... and {count - len(lines)} more not shown")
+    return "\n".join([f"{count} nested tool calls started before execution stopped:", *lines]), possible_writes
+
+
 _DISCOVERY_HINT = (
     "Discovered tools are directly callable with their native schemas; "
     "discovery does not require run_code. For dependent calls or bulk result "
@@ -39,9 +101,8 @@ _DISCOVERY_HINT = (
 
 _ROUTING_GUIDANCE = """Use `run_code` for bounded tool orchestration and data processing: keep tool results
 in program variables when they feed the next tool, or batch/filter/aggregate data.
-A query -> computation/Skill
--> file/export chain can run here without returning the intermediate rows or HTML
-to the model. Choose the steps from the actual task; no fixed recipe is required.
+Keep intermediate data in code until the model needs it for a decision. Choose
+the steps from the actual task; no fixed recipe is required.
 For one independent call with a small result used directly in the answer, use its
 native tool. For libraries or file creation, call execute_python/execute_skill_script,
 either natively or as a step here.
@@ -49,51 +110,69 @@ Python syntax alone does not require execute_python; strings, lists, loops and
 conditions can process JSON/text values here.
 """
 
+_EXECUTION_GUIDANCE = """Execute bounded Python code in Monty. REPL state persists within the same Run;
+restart: true clears it. The last expression is returned and print output is captured.
+"""
+
 _USAGE_RULES = """
 
 DeepAgent PTC rules:
-- Use ordinary native calls for an independent small lookup/action, tool discovery, or a stage
-  that needs fresh model interpretation or semantic judgment (such as choosing an
-  image after viewing it). Return compact candidates first when judgment is needed;
-  do not hide that judgment in a program or repeat completed calls. When a result
-  will be input to the next tool, pass it directly here and check success/integrity
-  in code; do not split the chain merely to inspect every intermediate value.
-- Tool discovery, schema inspection, connection/pairing, and canvas snapshots belong
-  in ordinary native calls. Never use `run_code` to discover or probe available tools.
+- Check each tool's success and completeness markers. For undocumented JSON,
+  inspect a small sample before assuming field names or types. Normalize nullable
+  or mixed-type fields before arithmetic. Use a loop with a numeric accumulator
+  for simple totals; avoid sum or += on raw fields. Treat missing values as zero
+  only when the task defines that rule.
+- Monty runs a Python subset, not full CPython. Custom JSON encoder classes (`cls`)
+  and json.loads object_hook/object_pairs_hook are unsupported; transform parsed
+  data explicitly or use an authorized execute_python/Skill for custom codecs.
+- For concurrent read-only calls, write `import asyncio` before first use, then
+  use `await asyncio.gather(a(), b())` without keyword arguments; `return_exceptions=True` is unsupported. For per-call error
+  handling, catch exceptions explicitly. Do not use create_task, wait_for,
+  or as_completed; they are unavailable in this environment.
+- Do not use `yield`/`yield from`. Generator expressions eagerly produce lists,
+  not lazy iterators; prefer ordinary loops or list comprehensions within budgets.
+  Standard-library APIs are partial; use an authorized execute_python/Skill for
+  unavailable APIs and third-party libraries rather than installing packages here.
+- Use a native call for an independent small lookup/action. If fresh model interpretation or semantic judgment
+  is needed, return compact candidates for the model to decide. When a tool result feeds
+  the next tool, pass it directly here and check success/integrity in code.
+- Tool discovery and schema inspection belong in ordinary native calls.
+  Never use `run_code` to discover or probe available tools.
   `search_tools` is native-only: call it outside `run_code`, then read the disclosed
   ordinary tool schemas. Do not use `dir`, `globals`, or guessed aliases to inspect
   the sandbox or recover a missing tool.
 - Catalog functions exist only inside `run_code`; never call a
   catalog alias as a direct outer tool. A function can be called directly only when the
   same protocol name is separately present in the ordinary tool list with its own schema.
-- Every function listed in the Code Mode catalog is async. Call it with top-level
-  `await function_name(...)`; never wrap it with `asyncio.run()`.
-- For file relay, discover the required schemas and select/verify the destination
-  through native calls first. Only then use PTC to relay the opaque bytes between
-  the known upload/send functions without exposing bytes to the model.
+- Follow the call form shown in the Code Mode catalog: use top-level `await` for
+  an async function and call a listed synchronous function directly;
+  never wrap it with `asyncio.run()`.
+- Before file relay, discover the schemas and verify the destination natively.
+  Pass the opaque payload between the known tools without exposing it to the model.
 - A failed PTC snippet is a completed failed tool call, not a request to keep probing
   the sandbox. Choose corrected code or a native call based on the actual error.
-  Correct read-only code only after identifying the cause; do not replay completed
-  calls or use another path to repeat an uncertain write. Check already-started writes
-  before any retry; a script error does not roll back earlier nested side effects.
+  After identifying the cause, reuse available REPL values and resume from the
+  failed step. Check already-started calls before retrying. A script error
+  does not roll back earlier nested side effects; never blindly replay an uncertain write.
 - Use `load_file_data` only inside `run_code` when an authorized session file or a
   public HTTP(S) file must be passed unchanged to an MCP string argument. Provide
   exactly one of `file_id` and `url`. Treat the returned value as a mapping,
   access fields with `payload['name']`, and pass `payload['content']` unchanged to the
   next tool. Never inspect, measure, print, or return the `content` value.
-- Return only the compact result needed for the task. Do not print file payloads,
-  Base64, or large intermediate values.
-- For HTML/text pages, web_fetch returns an object with url, title and content;
-  content is Markdown and may contain image links. Extract candidate links or
-  relevant lines here without starting Python or refetching the page with requests.
-  For visual inspection, finish this snippet and call outer view_image with the returned File ID or URL.
-  view_image is not a PTC function: only the primary model can interpret its images/PDF pages.
+- Return only what the task needs. For diagnostics prefer counts to serializing
+  intermediate data. Do not print file payloads, Base64, or large values.
+- For HTML/text pages, web_fetch returns Markdown in content.
+  Extract relevant lines or links here without refetching.
+  For visual inspection, return the File ID or URL and call outer view_image.
 - Authorized MCP, web_search, web_fetch, execute_python, execute_skill_script and
   export_file_to_download_center retain their ordinary native entry points. Only
   functions actually listed in this catalog can also be used here. Call Python
   with code and JSON inputs; call a Skill with its exact authorized script path.
   No save_file_data, read_file, parse_document, UI confirmation or Shell function
   is added to this catalog. Python executions still have separate temporary dirs.
+- When Python/Skill needs the current user's identity/app scope, pass
+  include_context=True for credential-free DEEP_AGENT_CONTEXT JSON; otherwise leave
+  False. Native and nested calls share the Run snapshot. Monty cannot read it.
 - In a trusted channel run, channel_message is also available natively and here.
   Forward a known public media URL directly with components=[{'type': 'image',
   'url': public_url}], or use an authorized file_id. No Python or platform upload
@@ -101,7 +180,7 @@ DeepAgent PTC rules:
   the PTC deadline may expire after gateway dispatch, without undoing delivery.
 - Internal returns go to the program without model-display pagination, up to
   32 MiB per return. Tool/source limits and incomplete-result markers still apply.
-  Python/Skill inputs allow 16 MiB JSON. Monty memory is 256 MiB, its shared session
+  Python/Skill inputs allow 16 MiB JSON. Monty memory is 256 MiB, each snippet's
   execution allowance is 120 seconds, and each run_code also has a 120-second total
   deadline including tool waits and at most 100 calls. Reduce/aggregate over-limit
   data; do not assume the platform automatically pages the source or saves it.
@@ -109,16 +188,30 @@ DeepAgent PTC rules:
   source.type='content'. A Python-generated authorized file may use 'platform_file'.
   Publish final deliverables only; return their genuine receipt, not the document.
 - Execute side-effecting tools sequentially. After an uncertain failure, inspect the
-  target state instead of blindly repeating the write. Never retry the same media send
-  with the same uploaded id and unchanged arguments. If an image upload succeeds but
-  the destination rejects a nonstandard format such as WebP, convert it with an
-  available execute_python tool before one new relay attempt; otherwise use its
-  ordinary native entry point. Do not repeat the rejected upload/send unchanged.
+  target state instead of blindly repeating the write. Follow each tool's native
+  schema and the selected Skill for service-specific prerequisites and workflows;
+  generic examples below are placeholders, not a fixed business recipe.
 - `run_code` cannot directly access host files, environment variables, network sockets,
-  Shell, pip, or third-party packages. It can call only catalog functions; public-file
-  relay uses `load_file_data(url=...)`, or the trusted channel_message URL input.
+  Shell, pip, or third-party packages. Only listed catalog functions are callable.
 
-Generic authorized-file relay shape:
+Generic numeric summary shape (example tool returns complete rows or raises an
+error; use the actual catalog alias, fields and status checks for your tool):
+```python
+result = await fetch_rows()
+rows = result.get("rows") if isinstance(result, dict) else None
+if not isinstance(rows, list):
+    raise ValueError("Expected a rows list")
+total = 0.0
+count = 0
+for row in rows:
+    value = row.get("value") if isinstance(row, dict) else None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        total = total + float(value)
+        count = count + 1
+{"row_count": len(rows), "numeric_count": count, "total": total if count else None}
+```
+
+Generic authorized-file relay shape (for a public file, pass `url` instead of `file_id`):
 ```python
 payload = await load_file_data(file_id="file_001", encoding="base64")
 uploaded = await upload_tool(
@@ -128,39 +221,6 @@ uploaded = await upload_tool(
 {"uploaded_id": uploaded["id"]}
 ```
 
-Generic public-file relay shape:
-```python
-payload = await load_file_data(url="https://example.com/report.png")
-uploaded = await upload_tool(
-    file_name=payload["name"],
-    payload_string=payload["content"],
-)
-{"uploaded_id": uploaded["id"]}
-```
-
-Common media-message relay shape:
-```python
-# target_chat_id was selected and verified through an earlier native call.
-payload = await load_file_data(url=public_url)
-uploaded = await upload_media(
-    file_name=payload["name"],
-    base64_content=payload["content"],
-    type="image",
-)
-sent = await send_bot_message(
-    chat_id=target_chat_id,
-    msg_type="image",
-    image={"media_id": uploaded["media_id"]},
-)
-{"success": sent.get("success")}
-```
-For WeCom AI-bot media relay, the corresponding protocol names are usually
-`wecom-doc_media_upload` and `wecom-chat_message_aibot_send`. Disclose their schemas
-through native search if needed, then use their sanitized Python aliases for the
-opaque relay only. Never pass a public URL or
-the opaque `payload["content"]` directly to the final message-send field. The WeCom
-session-list result must be read through a native call to select and verify the target;
-do not discover the destination or probe response shapes inside PTC.
 """.rstrip()
 
 
@@ -195,6 +255,42 @@ def _scrub_error_text(value: str, *, sensitive_values: frozenset[str]) -> str:
         flags=re.DOTALL,
     )
     return _LONG_BASE64.sub("[base64-redacted]", value)
+
+
+def _monty_compatibility_guidance(error: BaseException) -> str:
+    # Match the interpreter's exception, never a tool result or captured stdout.
+    # Suggestions do not rewrite code, retry tools, or reset the shared REPL.
+    if not isinstance(error, ModelRetry) or not isinstance(error.__cause__, MontyRuntimeError):
+        return ""
+    last_line = error.__cause__.display().strip().rsplit("\n", 1)[-1]
+    if last_line == "TypeError: JSONEncoder.__init__() got an unexpected keyword argument 'cls'":
+        return (
+            " Monty's JSON encoder does not accept cls. Use json.dumps(value, default=...) "
+            "for explicit fallback conversion, or an authorized Python/Skill tool "
+            "when a custom encoder class is required."
+        )
+    if re.fullmatch(
+        r"TypeError: JSONDecoder\.__init__\(\) got an unexpected keyword argument "
+        r"'(?:object_hook|object_pairs_hook|parse_constant|cls)'",
+        last_line,
+    ):
+        return (
+            " This JSON decoder hook is unsupported. Parse with json.loads(text) and "
+            "transform explicitly, or use an authorized Python/Skill tool "
+            "when custom decoding is required."
+        )
+    if last_line == "NotImplementedError: gather() does not yet support keyword arguments":
+        return (
+            " Use await asyncio.gather(a(), b()) without keyword arguments. "
+            "return_exceptions=True is unsupported; handle errors explicitly inside each "
+            "read-only coroutine if needed. Check completed calls before continuing."
+        )
+    if last_line == "NotImplementedError: The monty syntax parser does not yet support yield expressions":
+        return (
+            " Monty has no yield generators. Use bounded ordinary loops or list comprehensions; "
+            "generator expressions eagerly produce lists, not lazy iterators."
+        )
+    return ""
 
 
 class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
@@ -232,18 +328,19 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
         }
 
         aliases: dict[str, list[str]] = {}
-        for name in candidates:
-            aliases.setdefault(sanitize_python_name(name), []).append(name)
+        for name, candidate in candidates.items():
+            public_name = (candidate.tool_def.metadata or {}).get(CODE_MODE_ORIGINAL_NAME_KEY, name)
+            aliases.setdefault(sanitize_python_name(public_name), []).append(name)
         collisions = {
             name
-            for names in aliases.values()
-            if len(names) > 1
+            for alias, names in aliases.items()
+            if len(names) > 1 or alias == _RUN_CODE_NAME
             for name in names
         }
         for alias, names in aliases.items():
-            if len(names) > 1:
+            if len(names) > 1 or alias == _RUN_CODE_NAME:
                 logger.warning(
-                    "Code mode alias collision alias={} tools={}; keeping native only",
+                    "Code mode alias conflict alias={} tools={}; keeping native only",
                     alias,
                     sorted(names),
                 )
@@ -281,30 +378,41 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
 
         run_code = result.get(_RUN_CODE_NAME)
         if run_code is not None:
+            # Harness 0.32's prose embeds an old Monty module allowlist and says
+            # supported APIs such as asyncio.sleep are unavailable. Own the prose,
+            # while preserving the SDK's exact authorized callable definitions.
+            description = "\n".join((
+                _ROUTING_GUIDANCE, _EXECUTION_GUIDANCE,
+                self._render_catalog(run_code.callable_defs, include_return_types=True), _USAGE_RULES,
+            ))
             result[_RUN_CODE_NAME] = replace(
                 run_code,
                 tool_def=replace(
                     run_code.tool_def,
-                    description=_ROUTING_GUIDANCE + "\n" + (run_code.tool_def.description or "") + _USAGE_RULES,
+                    description=description,
                 ),
             )
         return result
 
     @staticmethod
-    def _render_catalog(callable_defs: dict[str, Any]) -> str:
+    def _render_catalog(callable_defs: dict[str, Any], *, include_return_types: bool = False) -> str:
+        from deep_agent.agent.tool_discovery import mcp_definition_identity
+
         if not callable_defs:
             return ""
         rows = [
-            "Functions available inside `run_code`. Every listed function is async: "
-            "call it with top-level `await`, never with `asyncio.run()`. Read each "
+            "Functions available inside `run_code`. Call forms show `await` only "
+            "for async functions; call synchronous functions directly. Read each "
             "ordinary tool schema for parameters and semantics:"
         ]
+        typed_functions = []
         for alias, tool_def in sorted(callable_defs.items()):
             metadata = tool_def.metadata or {}
             original = metadata.get(CODE_MODE_ORIGINAL_NAME_KEY)
+            call_prefix = "" if getattr(tool_def, "sequential", False) else "await "
             if alias == "load_file_data":
                 rows.append(
-                    "- `await load_file_data(file_id: str | None = None, url: str | None "
+                    f"- `{call_prefix}load_file_data(file_id: str | None = None, url: str | None "
                     "= None, encoding: Literal['base64', 'text'] = 'base64', "
                     "text_encoding: str = 'utf-8', max_chars: int = 65536) -> FileData` "
                     "(code-only authorized session/public-file primitive; provide exactly "
@@ -312,27 +420,60 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
                     "the returned mapping with `payload['name']` / `payload['content']`)"
                 )
             elif isinstance(original, str) and original != alias:
-                rows.append(f"- `{original}` -> Python `await {alias}(...)`")
+                rows.append(f"- `{original}` -> Python `{call_prefix}{alias}(...)`")
             else:
-                rows.append(f"- `await {alias}(...)`")
+                rows.append(f"- `{call_prefix}{alias}(...)`")
+            if (
+                include_return_types
+                and metadata.get(CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY)
+                and mcp_definition_identity(tool_def, ())[1] == CUBE_MEMBER_SEARCH_TOOL
+            ):
+                typed_functions.append(tool_def)
+        if typed_functions:
+            signatures = [definition.function_signature for definition in typed_functions]
+            conflicts = FunctionSignature.get_conflicting_type_names(signatures)
+            rows.extend(("", "Member-search return types:", "```python"))
+            rows.extend(FunctionSignature.render_type_definitions(signatures, conflicts))
+            for definition in typed_functions:
+                signature = definition.render_signature(
+                    "...", is_async=not definition.sequential, conflicting_type_names=conflicts,
+                )
+                rows.append(f"{signature.splitlines()[0]} ...")
+            rows.append("```")
         return "\n".join(rows)
 
     def _partition_callable_tools(
         self,
         wrapped_tools: dict[str, ToolsetTool[AgentDeps]],
     ) -> tuple[dict[str, Any], dict[str, str]]:
-        callable_defs, aliases = super()._partition_callable_tools(wrapped_tools)
-        # MCP output schemas are third-party input. Only the existing evidence-backed
+        public_to_wire = {
+            (tool.tool_def.metadata or {}).get(CODE_MODE_ORIGINAL_NAME_KEY, wire): wire
+            for wire, tool in wrapped_tools.items()
+        }
+        legacy_tools = {
+            name: replace(wrapped_tools[wire], tool_def=replace(wrapped_tools[wire].tool_def, name=name))
+            for name, wire in public_to_wire.items()
+        }
+        callable_defs, aliases = super()._partition_callable_tools(legacy_tools)
+        aliases = {
+            name: wire for name in callable_defs
+            if (wire := public_to_wire[aliases.get(name, name)]) != name
+        }
+        from deep_agent.agent.tool_discovery import mcp_definition_identity
+
+        # MCP output schemas are third-party input. Only the evidence-backed
         # allowlist may shape Monty's generated return types; everything else remains
         # canonical JSON/Any rather than inventing a structure from a tool name.
         for alias, tool_def in list(callable_defs.items()):
             metadata = tool_def.metadata or {}
-            if (
-                metadata.get(CODE_MODE_METADATA_KEY) == CODE_MODE_HYBRID
-                and not metadata.get(CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY)
-                and tool_def.return_schema is not None
-            ):
+            if metadata.get(CODE_MODE_METADATA_KEY) != CODE_MODE_HYBRID or tool_def.return_schema is None:
+                continue
+            if not metadata.get(CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY):
                 callable_defs[alias] = replace(tool_def, return_schema=None)
+            elif mcp_definition_identity(tool_def, ())[1] == CUBE_MEMBER_SEARCH_TOOL:
+                callable_defs[alias] = replace(
+                    tool_def, return_schema=_cube_member_search_ptc_schema(tool_def.return_schema),
+                )
         return callable_defs, aliases
 
     async def call_tool(
@@ -360,21 +501,34 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
         except (ModelRetry, TimeoutError) as exc:
             collector.finish("failed")
             metadata = self._return_metadata(ctx, collector)
-            safe_message = _scrub_error_text(
-                (f"PTC exceeded its {PTC_WALL_TIMEOUT_SECONDS}-second total time limit"
-                 if isinstance(exc, TimeoutError) else str(exc)),
-                sensitive_values=secrets,
-            )
+            message = (f"PTC exceeded its {PTC_WALL_TIMEOUT_SECONDS}-second total time limit"
+                       if isinstance(exc, TimeoutError) else str(exc))
+            content = {
+                "error": safe_audit_value(
+                    _scrub_error_text(message, sensitive_values=secrets), sensitive_values=secrets,
+                ),
+            }
+            execution = collector.execution
+            possible_writes = False
+            if execution is not None and execution.nested_calls:
+                run_code_tool = self._as_run_code_tool(tool)
+                detail, possible_writes = _describe_nested_failure(
+                    execution, run_code_tool.wrapped_tools if run_code_tool else {},
+                )
+                content["nested_calls"] = safe_audit_value(
+                    _scrub_error_text(detail, sensitive_values=secrets), sensitive_values=secrets,
+                )
             guidance = (
-                "PTC execution failed. Inspect the error and completed calls before continuing. "
-                "Correct read-only code only after identifying the cause; search_tools, "
-                "schema discovery, pairing and snapshots must stay native. "
-                "Earlier nested writes may have succeeded: inspect target state "
-                "before retrying; do not repeat the same failed snippet or switch "
-                "paths to repeat an uncertain write."
+                "PTC execution failed. Check the error and each call's outcome before retrying. "
+                "Reuse a result only when its call completed and the result is available. "
+                "search_tools and schema discovery must stay native. "
             )
-            if collector.execution is not None and any(
-                call.tool_name == "channel_message" for call in collector.execution.nested_calls.values()
+            if possible_writes:
+                guidance += ("Earlier nested writes may have succeeded. Inspect target state "
+                             "before retrying; do not repeat an uncertain write through either path.")
+            guidance += _monty_compatibility_guidance(exc)
+            if execution is not None and any(
+                call.tool_name == "channel_message" for call in execution.nested_calls.values()
             ):
                 guidance += (" If channel delivery reached the gateway, its outcome may be unknown. "
                              "Do not resend through either native tools or PTC without confirming delivery.")
@@ -385,10 +539,7 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
             raise ToolFailedError(ToolReturnPart(
                 tool_name=name,
                 tool_call_id=ctx.tool_call_id or "",
-                content={
-                    "error": safe_audit_value(safe_message, sensitive_values=secrets),
-                    "guidance": guidance,
-                },
+                content={**content, "guidance": guidance},
                 outcome="failed",
                 metadata=metadata,
             )) from exc

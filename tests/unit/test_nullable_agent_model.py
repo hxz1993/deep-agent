@@ -239,13 +239,13 @@ class NullableAgentChannelTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn('private', str(caught.exception))
 
 
-from tests.unit import test_channel_gateway as gateway_fixtures
+from tests.helpers import channel_gateway as gateway_fixtures
 from tests.unit import test_channel_commands as command_fixtures
 
 
 class NullableAgentChannelDeliveryTests(unittest.IsolatedAsyncioTestCase):
-    asyncSetUp = gateway_fixtures.ChannelGatewayTests.asyncSetUp
-    asyncTearDown = gateway_fixtures.ChannelGatewayTests.asyncTearDown
+    asyncSetUp = gateway_fixtures.ChannelGatewayFixture.asyncSetUp
+    asyncTearDown = gateway_fixtures.ChannelGatewayFixture.asyncTearDown
     message = command_fixtures.ChannelCommandTests.message
     wait_idle = command_fixtures.ChannelCommandTests.wait_idle
 

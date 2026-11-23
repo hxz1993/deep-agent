@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from loguru import logger
+from deepfos_platform.log import safe_logger as logger
 
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
@@ -39,7 +39,7 @@ async def resolve_console_admin_access(
             detail="平台身份凭据无效或已失效，请检查鉴权信息",
         ) from exc
     except ConsoleAdminUnavailableError as exc:
-        logger.warning('暂时无法验证企业管理员权限')
+        logger.opt(exception=True).warning("暂时无法验证企业管理员权限 upstream_status={}", exc.http_status)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="暂时无法验证企业管理员权限，请稍后重试",

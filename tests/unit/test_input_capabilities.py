@@ -88,6 +88,7 @@ class TestInputCapabilities(unittest.TestCase):
         merged = augment_instructions_with_capabilities(spec)
         self.assertTrue(merged.startswith("Base prompt."))
         self.assertIn("Session input capabilities", merged)
+        self.assertIn("which input types the session upload pipeline supports", merged)
 
     def test_augment_instructions_idempotent(self) -> None:
         spec = AgentSpec(

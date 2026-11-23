@@ -52,14 +52,19 @@ class RuntimeDiagnosticsTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(executions, [4])
                 self.assertEqual(requests, [["sample"], ["sample"]])
                 if sink == "collect":
-                    self.assertEqual([name for name, _ in rows], [
+                    model_and_tool_events = [(name, fields) for name, fields in rows if name != "agent_run_phase"]
+                    self.assertEqual([name for name, _ in model_and_tool_events], [
                         "model_request_started", "model_request_completed", "agent_tool_started",
                         "agent_tool_completed", "model_request_started", "model_request_completed",
                     ])
                     self.assertNotIn("private", repr(rows))
                     self.assertNotIn("result-not-logged", repr(rows))
                     self.assertTrue(all(item[1]["run_id"] == "diagnostic-run" for item in rows))
-                    self.assertGreaterEqual(rows[3][1]["duration_ms"], 0)
+                    self.assertGreaterEqual(model_and_tool_events[3][1]["duration_ms"], 0)
+                    phases = [fields["phase"] for name, fields in rows if name == "agent_run_phase"]
+                    self.assertIn("model_node_entered", phases)
+                    self.assertIn("tool_node_entered", phases)
+                    self.assertIn("tool_validate", phases)
         self.assertFalse([task for task in asyncio.all_tasks() if task.get_name() == "agent-diagnostic-wait"])
 
     async def test_sandbox_error_return_retains_event_level_and_only_safe_facts(self):
@@ -132,7 +137,7 @@ class RuntimeDiagnosticsTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ModelHTTPError) as raised:
                 await Agent(FunctionModel(model), deps_type=AgentDeps, capabilities=[RuntimeDiagnostics()]).run("x", deps=self.deps())
         self.assertIs(raised.exception, failure)
-        self.assertEqual(rows, ["model_request_started", "model_request_failed"])
+        self.assertEqual(rows, ["agent_run_phase", "model_request_started", "model_request_failed"])
 
     async def test_observation_metadata_and_watchdog_setup_errors_do_not_replace_result(self):
         class BrokenMetadata:

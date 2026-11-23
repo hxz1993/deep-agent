@@ -8,13 +8,13 @@ from unittest.mock import AsyncMock
 from deep_agent.api.v1.chat import _current_channel_context
 from deep_agent.channels.service import ChannelService
 from deep_agent.schemas.channel import ChannelAccountCreate
-from tests.unit import test_channel_gateway as fixtures
+from tests.helpers import channel_gateway as fixtures
 from tests.unit import test_channel_commands as commands
 
 
 class FeishuSourcePersistenceTests(unittest.IsolatedAsyncioTestCase):
-    asyncSetUp = fixtures.ChannelGatewayTests.asyncSetUp
-    asyncTearDown = fixtures.ChannelGatewayTests.asyncTearDown
+    asyncSetUp = fixtures.ChannelGatewayFixture.asyncSetUp
+    asyncTearDown = fixtures.ChannelGatewayFixture.asyncTearDown
     message = commands.ChannelCommandTests.message
     wait_idle = commands.ChannelCommandTests.wait_idle
 

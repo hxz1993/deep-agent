@@ -12,6 +12,7 @@ from pydantic_ai.messages import ModelResponse, TextPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from deep_agent.agent.deps import AgentDeps
+from deepfos_platform.lib.constants import INTERNAL_TOKEN_HEADER
 from deep_agent.schemas.skill import SkillPackageRecord
 from deep_agent.skills.package import parse_skill_zip
 from deep_agent.skills.runtime import (
@@ -145,28 +146,16 @@ class SkillRuntimeLibraryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_Files.downloads, 1)
         self.assertEqual(restarted.state(row.code).status, RUNTIME_READY)
 
-    async def test_run_space_is_removed_from_fallback_download(self) -> None:
+    async def test_run_recovers_cold_skill_with_service_identity(self) -> None:
         payload = skill_zip()
         row = await self._create(payload)
 
-        resolved = await self.runtime.resolve(
-            row,
-            request_headers={
-                "app": "run-app",
-                "space": "run-space",
-                "language": "zh_CN",
-                "x-deepfos-internal-key": "untrusted-value",
-            },
-        )
-        self.assertIsNotNone(resolved)
+        with patch("deep_agent.skills.runtime.PLATFORM_OPTION") as options:
+            options.general.internal_token = "service-fixture"
+            resolved = await resolve_skills_for_run(self.stores, [row.code], runtime=self.runtime)
+        self.assertEqual(resolved.available_codes, [row.code])
         self.assertEqual(_Files.downloads, 1)
-        self.assertFalse(
-            {"app", "space", "language"} & set(_PlatformAPI.headers[0])
-        )
-        self.assertNotEqual(
-            _PlatformAPI.headers[0].get("x-deepfos-internal-key"),
-            "untrusted-value",
-        )
+        self.assertEqual(_PlatformAPI.headers, [{INTERNAL_TOKEN_HEADER: "service-fixture"}])
 
     async def test_platform_json_error_is_reported_as_missing_file(self) -> None:
         payload = skill_zip()
@@ -205,13 +194,11 @@ class SkillRuntimeLibraryTests(unittest.IsolatedAsyncioTestCase):
             self.stores,
             [row.code],
             runtime=self.runtime,
-            request_headers={},
         )
         second = await resolve_skills_for_run(
             self.stores,
             [row.code],
             runtime=self.runtime,
-            request_headers={},
         )
 
         self.assertIsNone(first.capability)
@@ -226,12 +213,13 @@ class SkillRuntimeLibraryTests(unittest.IsolatedAsyncioTestCase):
             payload = skill_zip(name=code)
             rows.append(await self._create(payload, file_id=f"file-{index}"))
             await self.runtime.materialize(rows[-1], payload=payload)
-        resolved = await resolve_skills_for_run(
-            self.stores,
-            [row.code for row in rows],
-            runtime=self.runtime,
-            request_headers={},
-        )
+        with patch.object(self.stores.skill_package, "_write", wraps=self.stores.skill_package._write) as write:
+            resolved = await resolve_skills_for_run(
+                self.stores,
+                [row.code for row in rows],
+                runtime=self.runtime,
+            )
+        write.assert_called_once()
         self.assertEqual(
             {item.library_root for item in resolved.items},
             {self.root.resolve()},
@@ -256,6 +244,22 @@ class SkillRuntimeLibraryTests(unittest.IsolatedAsyncioTestCase):
             [tool.name for tool in observed[0].function_tools].count("load_capability"),
             1,
         )
+
+    async def test_batch_uses_single_package_fallback_for_cold_skill(self) -> None:
+        cold = await self._create(skill_zip(name="cold-skill"), file_id="cold")
+        payload = skill_zip(name="ready-skill", scripts=True)
+        ready = await self._create(payload, file_id="ready")
+        await self.runtime.materialize(ready, payload=payload)
+
+        resolved = await resolve_skills_for_run(
+            self.stores, [cold.code, "unknown", ready.code, cold.code],
+            runtime=self.runtime,
+        )
+        self.assertEqual([item.code for item in resolved.items], [cold.code, ready.code])
+        self.assertEqual([(item.code, item.reason) for item in resolved.unavailable],
+                         [("unknown", "unknown"), (cold.code, "duplicate")])
+        self.assertEqual(set(resolved.scripts), {ready.code})
+        self.assertEqual(_Files.downloads, 1)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,92 @@
+.reply-file-cards {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, max(248px, calc((100% - 8px) / 2))), 1fr));
+  margin-top: 8px;
+}
+
+.reply-file-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 45px;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.reply-file-icon {
+  display: block;
+  width: 22px;
+  height: 22px;
+  background-color: var(--file-icon-color, var(--text-muted));
+  mask: var(--file-icon-image, url("./assets/file-types/file-earmark.svg")) center / contain no-repeat;
+}
+
+.reply-file-icon[data-file-type="csv"] { --file-icon-image: url("./assets/file-types/filetype-csv.svg"); --file-icon-color: #177b51; }
+.reply-file-icon[data-file-type="xls"] { --file-icon-image: url("./assets/file-types/filetype-xls.svg"); --file-icon-color: #146240; }
+.reply-file-icon[data-file-type="xlsx"] { --file-icon-image: url("./assets/file-types/filetype-xlsx.svg"); --file-icon-color: #146240; }
+.reply-file-icon[data-file-type="html"] { --file-icon-image: url("./assets/file-types/filetype-html.svg"); --file-icon-color: #ba5524; }
+.reply-file-icon[data-file-type="json"] { --file-icon-image: url("./assets/file-types/filetype-json.svg"); --file-icon-color: #7752a6; }
+.reply-file-icon[data-file-type="doc"] { --file-icon-image: url("./assets/file-types/filetype-doc.svg"); --file-icon-color: #305fc3; }
+.reply-file-icon[data-file-type="docx"] { --file-icon-image: url("./assets/file-types/filetype-docx.svg"); --file-icon-color: #305fc3; }
+.reply-file-icon[data-file-type="jpg"] { --file-icon-image: url("./assets/file-types/filetype-jpg.svg"); --file-icon-color: #305fc3; }
+.reply-file-icon[data-file-type="png"] { --file-icon-image: url("./assets/file-types/filetype-png.svg"); --file-icon-color: #305fc3; }
+.reply-file-icon[data-file-type="pdf"] { --file-icon-image: url("./assets/file-types/filetype-pdf.svg"); --file-icon-color: #bf3e50; }
+
+[data-theme="dark"] .reply-file-icon {
+  background-color: color-mix(in srgb, var(--file-icon-color, var(--text-muted)) 70%, var(--text));
+}
+
+@media (forced-colors: active) {
+  .reply-file-icon {
+    forced-color-adjust: none;
+    background-color: CanvasText;
+  }
+}
+
+.reply-file-info {
+  display: grid;
+  min-width: 0;
+}
+
+.reply-file-info strong {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+.reply-file-info > span {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.reply-file-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.reply-file-actions a {
+  display: inline-block;
+  padding: 4px;
+  color: #2563eb;
+  font: inherit;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+[data-theme="dark"] .reply-file-actions a { color: #80b7ff; }
+[data-theme="contrast"] .reply-file-actions a { color: var(--accent); }
+
+.reply-file-actions a:hover,
+.reply-file-actions a:focus-visible {
+  text-decoration: underline;
+}

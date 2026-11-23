@@ -2,15 +2,16 @@ let initialized = false;
 import * as JsonInput from "./json-input.js?v=20261022-output-compact4";
 import * as OutputSchema from "./output-schema-fields.js?v=20261022-output-compact4";
 if (typeof window !== "undefined") { window.DeepAgentJsonInput = JsonInput; window.DeepAgentOutputSchema = OutputSchema; }
-import "./model-options.js?v=20260925-codex-1";
-import * as ProviderCatalog from "./provider-catalog.js?v=20261015-provider-protocol-groups";
+import "./model-options.js?v=0160-picker-shared";
+import "./reasoning-ui.js?v=0160-picker-labels";
+import * as ProviderCatalog from "./provider-catalog.js?v=0160";
 import * as SkillFrontmatter from "./skill-frontmatter.js?v=20260913-49";
 import * as SchemaText from "./schema-editor.js?v=20260913-49";
 if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCatalog;
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20261103-model-compatibility-scope";
+const CONFIGURATION_ASSET_VERSION = "20261118-a2a-test-merge";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",
@@ -19,6 +20,8 @@ const CONFIGURATION_TABS = new Set([
   "mcp",
   "channels",
   "integrations",
+  "agent-service",
+  "remote-agents",
   "global-settings",
 ]);
 let activeConfigurationTab = "agents";
@@ -35,12 +38,25 @@ export function currentConfigurationTab() {
 }
 
 export async function restoreConfigurationTab() {
+  const { debugContextResume: resume, configurationReturn, ...previousState } = window.history?.state || {};
+  if (resume || configurationReturn) window.history.replaceState(previousState, "");
+  if (resume) rememberConfigurationTab(resume.tab);
+  if (configurationReturn) {
+    rememberConfigurationTab(configurationReturn.tab);
+    if (configurationReturn.tab === "agent-service" && configurationReturn.state) {
+      window.agentServiceAdmin?.restoreNavigation(configurationReturn.state);
+    }
+  }
   const tab = document.querySelector(`[data-tab="${activeConfigurationTab}"]`);
   if (tab && !tab.classList.contains("active")) {
     tab.click();
     await window.configurationTabsAdmin?.pending;
   } else {
     await refreshCurrentConfiguration();
+  }
+  if (resume?.inspectMcp && resume.app === window.DeepAgentConsoleAPI.loadContext().app) {
+    const actions = document.querySelectorAll("#panel-mcp.active [data-inspect-mcp]");
+    [...actions].find(button => button.dataset.inspectMcp === resume.inspectMcp)?.click();
   }
 }
 
@@ -107,7 +123,7 @@ async function loadAdminScripts() {
     "./configuration/agent-packages.js",
     "./configuration/agent-package-export.js",
     "./configuration/builtin-tools.js",
-    "./configuration/system-tools.js",
+    "./configuration/system-tools.js?v=20261105-v01510",
     "./configuration/skills.js",
     "./configuration/mcp.js",
     "./ui-editable-select.js",
@@ -117,6 +133,8 @@ async function loadAdminScripts() {
     "./vendor/qrcode.js",
     "./configuration/channel-registration.js",
     "./configuration/channels.js",
+    "./configuration/app-picker.js",
+    "./configuration/agent-service.js",
     "./configuration/integrations.js",
   ];
   const scriptUrls = new Set(scripts.map((src) => versionedAsset(src).href));
@@ -131,12 +149,15 @@ async function loadAdminScripts() {
   };
   window.addEventListener?.("error", onScriptError);
   try {
-    const loaded = Promise.all(scripts.map(loadClassicScript)).then(async () => {
+    const loaded = Promise.all([
+      ...scripts.map(loadClassicScript),
+      import("./configuration/remote-agents.js?v=remote-agent-workdir"),
+    ]).then(async () => {
       if (hasExecutionError) return;
       // These scripts arrived after the browser's original DOMContentLoaded.
       // Replay once for their existing bindings; initialization makes no API calls.
       document.dispatchEvent(new Event("DOMContentLoaded"));
-      await import("./configuration/catalog.js?v=20261023-console-load1");
+      await import("./configuration/catalog.js?v=20261118-catalog-stop");
     });
     await Promise.race([loaded, failedExecution]);
   } finally {
@@ -145,6 +166,7 @@ async function loadAdminScripts() {
 }
 
 function decorateConfiguration() {
+  window.DeepAgentConsoleContext?.render();
   document.querySelectorAll(".resource-btn").forEach((button) => {
     const label = button.querySelector("span")?.textContent?.trim();
     if (label && !button.title) button.title = label;
@@ -159,6 +181,21 @@ function decorateConfiguration() {
     const link = event.target.closest("a[href]");
     if (!link) return;
     const url = new URL(link.href, location.href);
+    const callDetail = link.closest("#agentTaskDetail, #remoteCallDetail");
+    if (callDetail && url.origin === location.origin && url.pathname === location.pathname
+      && url.hash.startsWith("#/diagnostics/sessions/") && event.button === 0
+      && !event.defaultPrevented && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
+      const fromPublication = callDetail.id === "agentTaskDetail";
+      event.preventDefault();
+      await window.DeepAgentConsole?.showPage("diagnostics", {
+        diagnosticTarget: url.hash,
+        configurationReturn: {
+          tab: fromPublication ? "agent-service" : "remote-agents",
+          state: fromPublication ? window.agentServiceAdmin?.navigationState() : null,
+        },
+      });
+      return;
+    }
     const agentId = url.searchParams.get("agent_id");
     if (agentId && link.matches("[data-agent-chat]")) {
       event.preventDefault();
@@ -180,6 +217,8 @@ export function refreshCurrentConfiguration() {
   if (active === "tools") return window.toolsAdmin?.refresh();
   if (active === "skills") return window.skillsAdmin?.refresh();
   if (active === "mcp") return window.mcpAdmin?.refresh();
+  if (active === "agent-service") return window.agentServiceAdmin?.refresh();
+  if (active === "remote-agents") return window.remoteAgentAdmin?.refresh();
   if (active === "integrations") return window.integrationsAdmin?.refresh();
   if (active === "channels") return window.channelsAdmin?.refresh();
   return null;

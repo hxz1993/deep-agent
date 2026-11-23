@@ -19,6 +19,7 @@ def tool_package_from_row(row: McpServer) -> ToolPackage:
         row.transport,
         row.config,
         inspection=getattr(row, "inspection", None),
+        description=row.description,
     )
     inspection = McpInspection.from_value(
         getattr(row, "inspection", None),

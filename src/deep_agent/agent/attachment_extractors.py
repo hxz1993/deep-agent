@@ -149,7 +149,10 @@ def decode_text_document(
     mime: str | None = None,
 ) -> tuple[str, str]:
     """Decode common text encodings and pretty-print explicit JSON documents."""
-    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+    if data.startswith((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff")):
+        text = data.decode("utf-32")
+        encoding = "utf-32"
+    elif data.startswith((b"\xff\xfe", b"\xfe\xff")):
         text = data.decode("utf-16")
         encoding = "utf-16"
     elif data.startswith(b"\xef\xbb\xbf"):
@@ -179,6 +182,14 @@ def text_document(
     mime: str | None = None,
 ) -> tuple[tuple[str, ...], dict[str, Any]]:
     text, encoding = decode_text_document(data, name=name, mime=mime)
+    # A filename/MIME can be absent or wrong. Read textual code/configuration
+    # regardless of those hints, but do not feed compiled or compressed bytes
+    # to the model as corrupted text. Preserve control characters used by logs
+    # and record-delimited text; only NUL is a binary marker after decoding.
+    if "\x00" in text:
+        raise AttachmentParseError(
+            "文件包含无法作为文本读取的二进制内容；图片或PDF原页请用 view_image，其他二进制文件请下载后使用相应工具处理"
+        )
     lines = tuple(text.splitlines())
     metadata: dict[str, Any] = {
         "encoding": encoding,

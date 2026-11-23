@@ -11,12 +11,12 @@ from aiohttp import ClientResponse, ClientConnectorError
 from ..lib.pydantic_v1 import parse_obj_as, BaseModel as PydanticBaseModel
 from starlette_context import context
 from cachetools import TTLCache
-from loguru import logger
 
 from ..lib.httpcli import AioHttpCli
 from ..lib.utils import get_ignore_case, concat_url, retry, Wait
 from ..lib.repr import repr
 from ..lib.constants import INTERNAL_TOKEN_HEADER
+from ..log import safe_logger as logger
 from ..options import OPTION
 from ..errors.classes import (
     APICallError, APINotAvailError,
@@ -322,7 +322,7 @@ class Route:
                 try:
                     return parse_obj_as(model, data)
                 except Exception:
-                    logger.exception(f"Parse model failed.")
+                    logger.opt(exception=True).error("Platform API response did not match its model")
                     raise APIResponseModelError(
                         f"Expect model: '{model}', Got '{data}'"
                     ) from None
@@ -375,12 +375,11 @@ class BaseAPI(metaclass=APIMeta):
             self.header = header.copy()
 
         self.server_name = normalize_service_target(server_name)
-        self.log = logger.info
 
     def _parse_content_type(self, header):
         content_type = get_ignore_case(header, 'Content-Type', None)
         if content_type is None:
-            logger.warning('Missing content-type in request header.')
+            logger.debug('Missing content-type in request header.')
             return
 
         matched = self._RE_CONTENT_TYPE.match(content_type)
@@ -402,10 +401,6 @@ class BaseAPI(metaclass=APIMeta):
         header = self._merge_header(header)
         content_type = self._parse_content_type(header)
 
-        self.log(
-            f"Sending request: POST {url} "
-            f"body: {repr(body)} header: {repr(header)}")
-
         if content_type == 'json':
             return await AioHttpCli.post(url, json=body, headers=header)
         else:
@@ -414,27 +409,15 @@ class BaseAPI(metaclass=APIMeta):
     async def get(self, url, params=None, header=None):
         header = self._merge_header(header)
 
-        self.log(
-            f"Sending request: GET {url} "
-            f"params: {repr(params)} header: {repr(header)}")
-
         return await AioHttpCli.get(url, params=params, headers=header)
 
     async def put(self, url, body, header=None):
         header = self._merge_header(header)
 
-        self.log(
-            f"Sending request: PUT {url} "
-            f"body: {repr(body)} header: {repr(header)}")
-
         return await AioHttpCli.put(url, data=body, headers=header)
 
     async def delete(self, url, body, header=None):
         header = self._merge_header(header)
-
-        self.log(
-            f"Sending request: DELETE {url} "
-            f"body: {repr(body)} header: {repr(header)}")
 
         return await AioHttpCli.delete(url, data=body, headers=header)
 
@@ -453,10 +436,6 @@ class BaseAPI(metaclass=APIMeta):
                     error_fields = _upstream_error_fields(json.loads(body))
                 except (ValueError, UnicodeError):
                     error_fields = _plain_upstream_error(body, response.content_type)
-                logger.warning(
-                    "Platform API returned HTTP error: status={}, exception_type={}",
-                    status_code, APIStatusCodeError.__name__,
-                )
                 raise APIStatusCodeError(
                     _RE_TRIM_HOST.match(request.uri).group(2),
                     status_code, **error_fields)
@@ -476,16 +455,12 @@ class BaseAPI(metaclass=APIMeta):
                     return True, resp
 
                 if resp['status'] is False:
-                    logger.warning(
-                        "Platform API returned business error: status={}, exception_type={}",
-                        status_code, APIStatusNotTrue.__name__,
-                    )
                     return False, resp
             except (TypeError, ValueError):
                 if not data_wrapped and not text:
                     return True, None
 
-                logger.warning(
+                logger.opt(exception=True).warning(
                     "Platform API returned invalid JSON: status={}, exception_type={}",
                     status_code, APIResponseParseError.__name__,
                 )

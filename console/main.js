@@ -1,20 +1,21 @@
 import { initSecretInputs } from "./ui-secret-input.js?v=20260929-component-webhook";
-import "./assets/deepagent-pet/sprite-pet.js?v=20261023-console-load1";
+import "./assets/deepagent-pet/sprite-pet.js?v=0161-pet-transitions";
 import { initUserIdentityControls } from "./user-identity.js?v=20260917-release01010";
 import { initFieldHelp } from "./ui-field-help.js?v=20260913-49";
-import { initConsoleSelects } from "./ui-select.js?v=20261029-release01411";
-import { bindContextControls, refreshIdentity } from "./context.js?v=20261023-console-load1";
+import { initConsoleSelects } from "./ui-select.js?v=remote-agent-filter-icons";
+import { bindContextControls, refreshIdentity } from "./context.js?v=20261118-mcp-debug-hint";
 import { createPageLoader } from "./page-loader.js?v=20261023-console-load1";
 import "./time.js?v=20260913-49";
 import "./configuration-directory.js?v=20261019-release0137";
 
 initUserIdentityControls();
 
-const VALID_PAGES = new Set(["workspace", "configuration", "diagnostics"]);
+const VALID_PAGES = new Set(["workspace", "configuration", "diagnostics", "developer"]);
 const PAGE_LABELS = {
   workspace: "测试",
   configuration: "配置中心",
   diagnostics: "诊断中心",
+  developer: "开发调试",
 };
 let consoleAllowed = false;
 let toastTimer = null;
@@ -22,21 +23,28 @@ let navigationGeneration = 0;
 let configurationModule = null;
 let workspaceModule = null;
 let diagnosticsModule = null;
+let developerModule = null;
 const loadPage = createPageLoader({
+  developer: async () => {
+    const module = await import("./developer.js?v=0164-developer-catalog");
+    module.initDeveloper();
+    developerModule = module;
+    return module;
+  },
   configuration: async () => {
-    const module = await import("./configuration.js?v=20261103-model-compatibility-scope");
+    const module = await import("./configuration.js?v=20261119-release-0170");
     await module.initConfiguration();
     configurationModule = module;
     return module;
   },
   workspace: async () => {
-    const module = await import("./workspace.js?v=20261103-trajectory-files");
+    const module = await import("./workspace.js?v=20261118-a2a-test-merge");
     await module.initWorkspace();
     workspaceModule = module;
     return module;
   },
   diagnostics: async () => {
-    const module = await import("./diagnostics-center.js?v=20261103-trajectory-files");
+    const module = await import("./diagnostics-center.js?v=session-source-column");
     module.initDiagnostics();
     diagnosticsModule = module;
     return module;
@@ -73,6 +81,33 @@ async function loadProductVersion() {
   }
 }
 
+let connectionStatusRevision = 0;
+
+function setConnectionStatus(kind, text) {
+  const status = document.getElementById("connStatus");
+  if (!status) return;
+  connectionStatusRevision += 1;
+  status.classList.toggle("ok", kind === "ok");
+  status.classList.toggle("err", kind === "err");
+  status.querySelector(".conn-text").textContent = text;
+}
+
+async function checkHealth() {
+  const revision = connectionStatusRevision;
+  try {
+    const response = await daFetch(serviceUrl("health"), {
+      includeContext: false,
+      reportStatus: false,
+      signal: AbortSignal.timeout(5000),
+    });
+    if (revision !== connectionStatusRevision) return;
+    if (response.ok) setConnectionStatus("ok", "已连接");
+    else setConnectionStatus("err", `HTTP ${response.status}`);
+  } catch {
+    if (revision === connectionStatusRevision) setConnectionStatus("err", "未连接");
+  }
+}
+
 function toast(message, isError = false) {
   const element = document.getElementById("consoleToast");
   if (!element) return;
@@ -103,7 +138,19 @@ function syncNavigation() {
     : PAGE_LABELS[page];
 }
 
-async function showPage(page, { updateHash = true, restoreTab = true, diagnosticTarget = null } = {}) {
+async function showPage(page, { updateHash = true, restoreTab = true, diagnosticTarget = null, configurationReturn = null } = {}) {
+  if (page === "developer") {
+    if (!consoleAllowed) return false;
+    // A legacy deep link opens the dialog over the ordinary workspace.
+    if (!workspaceModule && !configurationModule && !diagnosticsModule) await showPage("workspace", { updateHash: false });
+    const generation = ++navigationGeneration;
+    try {
+      await loadPage("developer");
+      if (generation !== navigationGeneration || !consoleAllowed) return false;
+      developerModule.openDeveloper();
+      return true;
+    } catch (error) { toast(error.message, true); return false; }
+  }
   const next = VALID_PAGES.has(page) ? page : "workspace";
   const generation = ++navigationGeneration;
   const current = document.querySelector("[data-page-panel].active")?.dataset.pagePanel;
@@ -115,6 +162,8 @@ async function showPage(page, { updateHash = true, restoreTab = true, diagnostic
   }
   if (next !== "configuration" && window.integrationsAdmin?.deactivate() === false) return false;
   if (next !== "configuration" && window.wecomApplicationsAdmin?.deactivate() === false) return false;
+  if (next !== "configuration" && current === "configuration" && window.remoteAgentAdmin
+      && !(await window.remoteAgentAdmin.requestCloseEditor())) return false;
   if (generation !== navigationGeneration) return false;
   document.querySelectorAll("[data-page-panel]").forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.pagePanel === next);
@@ -130,12 +179,22 @@ async function showPage(page, { updateHash = true, restoreTab = true, diagnostic
   if (updateHash) {
     const target = next === "diagnostics" ? diagnosticTarget || (location.hash.startsWith("#/diagnostics/") ? location.hash : "#/diagnostics/logs") : `#/${next}`;
     if (location.hash !== target) {
-      if (next === "diagnostics" || current === "diagnostics") history.pushState(null, "", target);
-      else history.replaceState(null, "", target);
+      if (current === "configuration" && next === "diagnostics" && configurationReturn) {
+        history.replaceState({ ...history.state, configurationReturn }, "");
+        history.pushState({ diagnosticsFromConfiguration: true }, "", target);
+      } else if (["diagnostics", "developer"].includes(next) || ["diagnostics", "developer"].includes(current)) {
+        history.pushState(null, "", target);
+      } else history.replaceState(null, "", target);
     }
   }
   if (next !== "diagnostics") setDiagnosticsActive(false);
+  developerModule?.closeDeveloper();
   if (!consoleAllowed) return false;
+  const diagnosticsLoading = next === "diagnostics" ? document.getElementById("diagnosticsLoading") : null;
+  if (diagnosticsLoading && !diagnosticsModule) {
+    diagnosticsLoading.innerHTML = '<span class="loading-spinner"></span><span>正在加载诊断中心…</span>';
+    diagnosticsLoading.classList.remove("hidden");
+  }
   const workspaceWasReady = Boolean(workspaceModule);
   try {
     await loadPage(next);
@@ -147,6 +206,8 @@ async function showPage(page, { updateHash = true, restoreTab = true, diagnostic
     if (next === "workspace" && current !== "workspace" && workspaceWasReady) {
       void window.DeepAgentConsoleWorkspace?.refreshChannelAccounts();
       void window.DeepAgentConsoleChat?.refreshConfiguration({ force: true });
+      void window.DeepAgentConsoleChat?.syncSessionsFromBackend();
+      void window.DeepAgentConsoleChat?.refreshSessionFilterOptions({ force: true });
     }
   } catch (error) {
     if (generation !== navigationGeneration) return false;
@@ -154,12 +215,12 @@ async function showPage(page, { updateHash = true, restoreTab = true, diagnostic
     else if (next === "configuration") {
       if (!document.getElementById("configurationLoading")?.querySelector(".configuration-error")) showPageLoadError("configurationLoading", error);
     }
-    else showPageLoadError("diagnosticsLoading", error);
+    else showPageLoadError(next === "developer" ? "developerLoading" : "diagnosticsLoading", error);
     toast(error.message, true);
     return false;
   }
   if (generation !== navigationGeneration || !consoleAllowed) return false;
-  document.getElementById("diagnosticsLoading")?.classList.toggle("hidden", true);
+  diagnosticsLoading?.classList.add("hidden");
   window.lucide?.createIcons();
   return true;
 }
@@ -236,33 +297,12 @@ function bindConsoleNavigationResizer() {
 }
 
 function bindNavigation() {
-  const tutorialsDialog = document.getElementById("tutorialsDialog");
-  document.getElementById("openTutorialsBtn")?.addEventListener("click", () => {
-    if (consoleAllowed && !tutorialsDialog.open) tutorialsDialog.showModal();
-  });
-  tutorialsDialog.querySelectorAll("[data-close-tutorials]").forEach((button) => {
-    button.addEventListener("click", () => tutorialsDialog.close());
-  });
-  document.getElementById("downloadTutorialBtn")?.addEventListener("click", () => {
-    const selected = tutorialsDialog.querySelector('input[name="tutorialDocument"]:checked');
-    if (!selected) return;
-    const link = document.createElement("a");
-    link.href = new URL(selected.value, document.baseURI).href;
-    link.download = selected.dataset.filename;
-    document.body.append(link);
-    link.click();
-    link.remove();
-  });
   bindConsoleNavigationResizer();
   const resourceNav = document.getElementById("consoleResourceNav");
   const template = document.getElementById("configurationNavigation");
   if (resourceNav && template) resourceNav.append(template.content);
   const agentTab = resourceNav?.querySelector('[data-tab="agents"]');
   if (agentTab) document.querySelector(".console-rail .console-nav")?.append(agentTab);
-  const integrationTab = resourceNav?.querySelector('[data-tab="integrations"]');
-  if (integrationTab) document.querySelector(".console-rail .console-nav")?.append(integrationTab);
-  const channelTab = resourceNav?.querySelector('[data-tab="channels"]');
-  if (channelTab) document.querySelector(".console-rail .console-nav")?.append(channelTab);
   document.querySelectorAll(".console-rail [data-tab]").forEach((button) => {
     const label = button.querySelector("span")?.textContent.trim();
     if (label) { button.title = label; button.setAttribute("aria-label", label); }
@@ -386,7 +426,7 @@ function hideAccessLock() {
 }
 
 async function boot() {
-  window.DeepAgentConsole = { showPage, toast };
+  window.DeepAgentConsole = { showPage, toast, setConnectionStatus };
   bindNavigation();
   bindThemes();
   bindContextControls();
@@ -444,6 +484,7 @@ async function boot() {
     return;
   }
 
+  void checkHealth();
   await showPage(pageFromLocation(), { updateHash: true });
 }
 

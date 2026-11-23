@@ -19,7 +19,7 @@ from deepfos.element.base import ElementBase
 from deepfos.element.datatable import DataTableDeepModel
 from deepfos.options import OPTION
 
-from .deepagent_mcp_client import AGENT_CODE, MCP_URL, run
+from .deepagent_demo.deepagent_mcp_client import AGENT_CODE, MCP_URL, run
 
 PATH = "/Application/SANY/11_Approval_Process/"
 TEMPLATE = "811708849152061474"

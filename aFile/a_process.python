@@ -5,108 +5,115 @@
 上一轮已认领给别的实例的附件不再重复带上，且**原样保留**（不摘旗、不改归属），
 所以旧实例 ↔ 附件的归属仍然可查，那一轮被驳回后重提也仍能找回自己的附件。
 """
+import json
 import re
+from base64 import b64encode
 from datetime import datetime
-from urllib.parse import urlencode
+from time import monotonic
+from urllib.parse import parse_qs, urlencode, urlsplit
+from xml.etree import ElementTree as ET
 
 import pandas as pd
 import requests
+from deepfos.element.base import ElementBase
 from deepfos.element.datatable import DataTableDeepModel
+from deepfos.options import OPTION
+
+from .deepagent_mcp_client import AGENT_CODE, MCP_URL, run
 
 PATH = "/Application/SANY/11_Approval_Process/"
 TEMPLATE = "811708849152061474"
-# 固定展示测试样例：对应原型中的 AI 参考意见，内联样式便于直接提交给 BPP。
-APPROVAL_OPINION_HTML = """
-<div style="max-width:760px;margin:0 auto;color:#293d35;font:14px/1.8 'PingFang SC','Microsoft YaHei',sans-serif;box-sizing:border-box;overflow-wrap:break-word;">
-  <div style="color:#087d62;font-size:11px;font-weight:600;letter-spacing:1px;">预算审批</div>
-  <h2 style="margin:4px 0 14px;font-size:22px;line-height:1.4;">AI 审批参考</h2>
-  <p style="margin:0 0 20px;padding:10px 13px;border-radius:4px;background:#fffaf0;color:#987331;font-size:12px;">2027年制造费用 · 固定测试样例。以下金额与意见均为示例，用于审批表单展示测试。</p>
-
-  <h3 style="margin:24px 0 12px;font-size:15px;">01　总体摘要与审批重点</h3>
-  <div style="padding:14px 17px;border-left:3px solid #087d62;background:#eef7f0;font-size:13px;line-height:1.9;">本次制造费用预算为 <strong>1,320 万元</strong>，较示例下达目标增加 <strong>120 万元（10.0%）</strong>。建议重点核对<strong>同业对比是否合理</strong>、<strong>预算投入是否与 SP 战略目标一致</strong>，并补充增量依据。</div>
-  <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:14px;">
-    <div style="flex:1 1 280px;min-width:0;box-sizing:border-box;padding:15px 16px;border:1px solid #eadcbe;border-top:3px solid #b9893c;border-radius:6px;background:#fffcf5;">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
-        <h4 style="margin:0;font-size:15px;color:#8e6325;">同业对比</h4>
-        <span style="padding:2px 7px;border-radius:3px;background:#fff0d5;color:#8c611d;font-size:11px;">待补充可比数据</span>
-      </div>
-      <p style="margin:9px 0 0;font-size:13px;font-weight:600;color:#304f3e;">费用水平是否偏离同业？</p>
-      <p style="margin:9px 0 0;font-size:12px;color:#647c6d;">需按同期间、同指标定义及可比业务规模，对照制造费用率、单位产出成本。当前缺少同口径资料，尚无法判断差异。</p>
-      <p style="margin:12px 0 0;padding-top:10px;border-top:1px solid #eadfc9;font-size:12px;color:#856332;"><strong style="display:block;font-size:11px;">建议审批人追问</strong>与哪些企业比较？指标口径是否一致？若高于同业，差异原因是什么？</p>
-    </div>
-    <div style="flex:1 1 280px;min-width:0;box-sizing:border-box;padding:15px 16px;border:1px solid #d6e6db;border-top:3px solid #087d62;border-radius:6px;background:#f4f9f5;">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
-        <h4 style="margin:0;font-size:15px;color:#28674f;">战略目标一致性</h4>
-        <span style="padding:2px 7px;border-radius:3px;background:#fff0d5;color:#8c611d;font-size:11px;">一致性待核实</span>
-      </div>
-      <p style="margin:9px 0 0;font-size:13px;font-weight:600;color:#304f3e;">预算投入是否支撑 SP 战略目标？</p>
-      <p style="margin:9px 0 0;font-size:12px;color:#647c6d;">需补充本组织 SP 战略目标、关键指标与预算项目的对应关系，核对投入方向、目标值及预期贡献。</p>
-      <p style="margin:12px 0 0;padding-top:10px;border-top:1px solid #dce8de;font-size:12px;color:#39664e;"><strong style="display:block;font-size:11px;">建议审批人追问</strong>新增 120 万元对应哪项战略目标？预期成果和衡量指标是什么？</p>
-    </div>
-  </div>
-
-  <h3 style="margin:24px 0 12px;font-size:15px;">02　关键指标对照 <span style="font-size:11px;font-weight:400;color:#788b81;">单位：万元 · 示例</span></h3>
-  <div style="overflow-x:auto;border:1px solid #e3ece6;border-radius:5px;">
-    <table style="border-collapse:collapse;width:100%;text-align:left;font-size:12px;">
-      <thead style="background:#f3f6f4;color:#62796b;"><tr>
-        <th style="padding:10px 12px;font-weight:500;">指标</th><th style="padding:10px 12px;font-weight:500;">本次预算</th><th style="padding:10px 12px;font-weight:500;">下达目标</th><th style="padding:10px 12px;font-weight:500;">较目标</th>
-      </tr></thead>
-      <tbody>
-        <tr><td style="padding:11px 12px;border-top:1px solid #e3ece6;">制造费用合计</td><td style="padding:11px 12px;border-top:1px solid #e3ece6;">1,320</td><td style="padding:11px 12px;border-top:1px solid #e3ece6;">1,200</td><td style="padding:11px 12px;border-top:1px solid #e3ece6;color:#bd7344;">+10.0%</td></tr>
-        <tr><td style="padding:11px 12px;border-top:1px solid #e3ece6;">其中：设备维修费</td><td style="padding:11px 12px;border-top:1px solid #e3ece6;">420</td><td style="padding:11px 12px;border-top:1px solid #e3ece6;">300</td><td style="padding:11px 12px;border-top:1px solid #e3ece6;color:#bd7344;">+40.0%</td></tr>
-      </tbody>
-    </table>
-  </div>
-  <p style="margin:8px 0 0;font-size:12px;color:#788b81;">上年实际制造费用合计 1,100 万元，本次较上年增加 20.0%。</p>
-
-  <h3 style="margin:24px 0 12px;font-size:15px;">03　建议审批人重点核实</h3>
-  <div style="padding-bottom:15px;border-bottom:1px solid #e3ece6;">
-    <p style="margin:0;font-size:13px;font-weight:600;"><span style="padding:2px 6px;margin-right:8px;border-radius:3px;background:#fff4df;color:#a6742d;font-size:10px;font-weight:400;">目标偏差</span>设备维修费增量需要补充依据</p>
-    <p style="margin:7px 0;font-size:12px;color:#6d8074;">设备维修费较目标增加 120 万元，占本次制造费用超目标金额的 100%。建议核实是否涉及集中检修、设备老化或新增产线，并提供明细及测算依据。</p>
-    <p style="margin:7px 0;padding:9px 12px;border-radius:4px;background:#f0f8f2;color:#3a6d51;font-size:12px;"><strong>建议询问：</strong>420 万元维修费对应哪些检修项目？增加的 120 万元是否为一次性支出？</p>
-    <p style="margin:7px 0 0;font-size:11px;color:#788b81;"><strong>数据依据：</strong>[S1] 设备维修费 420 万元；[S2] 示例下达目标 300 万元。差额 120 万元，增幅 40.0%。原因为待核实假设，未作为已确认事实。</p>
-  </div>
-  <div style="padding-top:15px;">
-    <p style="margin:0;font-size:13px;font-weight:600;"><span style="padding:2px 6px;margin-right:8px;border-radius:3px;background:#fff4df;color:#a6742d;font-size:10px;font-weight:400;">战略一致性</span>新增投入与 SP 战略目标的对应关系待确认</p>
-    <p style="margin:7px 0;font-size:12px;color:#6d8074;">目前未提供本组织 SP 战略目标、关键指标及预算项目映射，尚不能判断新增投入是否与战略方向一致。建议编制人补充目标、投入及预期成果的对应说明。</p>
-    <p style="margin:7px 0;padding:9px 12px;border-radius:4px;background:#f0f8f2;color:#3a6d51;font-size:12px;"><strong>建议询问：</strong>新增 120 万元对应哪项 SP 战略目标？如何量化产能保障或设备效率的预期贡献？</p>
-    <p style="margin:7px 0 0;font-size:11px;color:#788b81;"><strong>核对依据：</strong>[S1] 送审预算与 [S2] 预算下达目标可用于核对金额差异。战略一致性还需补充 SP 战略目标、关键指标与预算项目映射资料，当前结论为待核实。</p>
-  </div>
-
-  <h3 style="margin:24px 0 12px;font-size:15px;">04　同业与战略核对所需资料</h3>
-  <div style="padding:10px 12px;margin-bottom:8px;border-radius:4px;background:#f6f9f6;font-size:12px;"><strong>同业｜可比企业、同期间与同口径指标</strong><br><span style="font-size:11px;color:#788b81;">补充制造费用率、单位产出成本、数据来源及业务规模差异说明。</span></div>
-  <div style="padding:10px 12px;margin-bottom:8px;border-radius:4px;background:#f6f9f6;font-size:12px;"><strong>战略｜本组织 SP 战略目标、关键指标与预算项目映射</strong><br><span style="font-size:11px;color:#788b81;">标明目标值、资源投入、预期成果及衡量方式，核对预算与战略是否一致。</span></div>
-  <div style="padding:10px 12px;border-radius:4px;background:#f6f9f6;font-size:12px;"><strong>业务｜设备维修明细、检修计划和产量预算</strong><br><span style="font-size:11px;color:#788b81;">用于说明预算增量的业务动因，补充后再判断投入合理性。</span></div>
-
-  <h3 style="margin:24px 0 12px;font-size:15px;">05　分析依据与版本</h3>
-  <div style="padding:10px 12px;margin-bottom:8px;border-radius:4px;background:#f6f9f6;font-size:12px;">S1　<strong>制造费用送审预算 · 示例数据</strong><br><span style="font-size:11px;color:#788b81;">本次展示测试所用的固定预算样例。</span></div>
-  <div style="padding:10px 12px;margin-bottom:8px;border-radius:4px;background:#f6f9f6;font-size:12px;">S2　<strong>2027年预算下达目标 · 示例资料</strong><br><span style="font-size:11px;color:#788b81;">按同组织、同表单及同期间进行对照。</span></div>
-  <div style="padding:10px 12px;border-radius:4px;background:#f6f9f6;font-size:12px;">S3　<strong>2026年全年实际 · 示例数据</strong><br><span style="font-size:11px;color:#788b81;">与本次预算使用相同科目范围和金额单位。</span></div>
-  <p style="margin:20px 0 0;font-size:11px;color:#788b81;">展示测试样例 V1 · 审批参考，最终由审批人判断。</p>
-</div>
-""".strip()
-FORM_LINK = {
-    "B_Exp01": "https://alpha.deepfos.com/element-deep-table/2-0-0/?elementName=B_Exp01&folderId=DIR748a8d9ff25b&moduleId=GRD2_0&sign=YXBwSWQ9dmJodmt3MDU5JnNwYWNlPXZiaHZrdw%3D%3D",
-    "B_Exp03": "https://alpha.deepfos.com/element-deep-table/2-0-0/?elementName=B_Exp03&folderId=DIR748a8d9ff25b&moduleId=GRD2_0&sign=YXBwSWQ9dmJodmt3MDU5JnNwYWNlPXZiaHZrdw%3D%3D",
-    "B_Exp04": "https://alpha.deepfos.com/element-deep-table/2-0-0/?elementName=B_Exp04&folderId=DIR748a8d9ff25b&moduleId=GRD2_0&sign=YXBwSWQ9dmJodmt3MDU5JnNwYWNlPXZiaHZrdw%3D%3D",
-}
+FORM_CODES = ("B_Exp01", "B_Exp03", "B_Exp04")
 COLS = [
     "year", "scenario", "version", "entity", "instance_id",
     "complete_status", "lock_flag", "starter", "budget_link",
     "last_update_time", "comment", "instance_title",
 ]
 
+# 回填边界只约束静态 HTML 和必要内容，具体版式由 Skill 的模板维护。
+OPINION_TAGS = set("div h2 h3 h4 p table thead tbody tr th td span strong b em".split())
+OPINION_CSS = set("""
+    background background-color border border-bottom border-collapse border-left border-radius
+    border-right border-top box-sizing color display flex flex-wrap font font-family font-size
+    font-weight gap letter-spacing line-height margin margin-bottom margin-left margin-right
+    margin-top max-width min-width overflow-wrap overflow-x padding text-align width
+""".split())
+
+
+def format_opinion(answer):
+    """确认业务栏目齐备，限制表单可嵌入的 HTML。字段和表格布局由 Skill 处理。"""
+    raw = (answer or "").strip()
+    fence = re.fullmatch(r"```(?:html)?\s*\n(.*)\n```", raw, re.I | re.S)
+    if fence:
+        raw = fence.group(1).strip()
+    if not raw or len(raw) > 100_000 or "<!" in raw or "<?" in raw:
+        raise ValueError("三一助手未返回有效的审批 HTML")
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as exc:
+        raise ValueError("三一助手返回的审批 HTML 不完整") from exc
+    if root.tag != "div" or root.attrib.pop("data-report", None) != "bpp-sales-opinion":
+        raise ValueError("未收到 BPP 审批模式的模板结果，请核对 sany-demo-workflows 的版本与关联")
+    sections = set()
+    for node in root.iter():
+        section = node.attrib.pop("data-section", None)
+        if section and "".join(node.itertext()).strip():
+            sections.add(section)
+        if node.tag not in OPINION_TAGS or set(node.attrib) - {"style"}:
+            raise ValueError("审批 HTML 包含未渲染字段或不支持的标签、属性")
+        for declaration in node.get("style", "").split(";"):
+            if declaration.strip():
+                name, _, value = declaration.partition(":")
+                if name.strip() not in OPINION_CSS or not re.fullmatch(r"[A-Za-z0-9 #%.,'/-]+", value.strip()):
+                    raise ValueError("审批 HTML 包含不支持的样式")
+    required = {"scope", "summary", "shares", "strategy", "metrics", "checks", "gaps", "sources"}
+    if not required.issubset(sections):
+        raise ValueError("审批 HTML 缺少必需的业务栏目")
+    return ET.tostring(root, encoding="unicode", method="html")
+
+
+def generate_opinion(context, attachments=None):
+    if AGENT_CODE != "sanyi-mcp-001":
+        raise ValueError("当前 deepagent_mcp_client 未指向三一发布 sanyi-mcp-001，请检查客户环境的客户端")
+    deadline = monotonic() + 300
+    question = "【BPP 销售预算审批回填】按 sany-demo-workflows 审批模式处理以下送审资料，本轮直接返回完整 HTML。\n"
+    task = run(
+        question=question + json.dumps(context, ensure_ascii=False, allow_nan=False),
+        attachments=attachments, wait_seconds=30,
+    )
+    task_id = task["task_id"]
+    while task["status"] in ("TASK_STATE_SUBMITTED", "TASK_STATE_WORKING"):
+        remaining = int(deadline - monotonic())
+        if remaining < 1:
+            raise ValueError(f"三一助手仍在处理，任务 {task_id}；审批尚未发起")
+        task = run(task_id=task_id, wait_seconds=min(30, remaining))
+    if task["status"] != "TASK_STATE_COMPLETED":
+        detail = (task.get("status_message") or "")[:360]
+        raise ValueError(f"三一助手任务 {task_id} 状态 {task['status']}：{detail}")
+    try:
+        return format_opinion(task["answer"])
+    except ValueError as exc:
+        raise ValueError(f"三一助手任务 {task_id}：{exc}") from exc
+
 
 def form_link(picked):
     s = str(picked or "").strip()
-    if s.startswith("http"):
+    url = urlsplit(s)
+    if url.scheme in ("https", "http") and url.hostname:
         return s
-    if s in FORM_LINK:
-        return FORM_LINK[s]
-    for code, url in FORM_LINK.items():
-        if s.startswith(code) or code in s:
-            return url
-    return ""
+    code = next((name for name in FORM_CODES if name in s), None)
+    if not code:
+        return ""
+    info = ElementBase.check_exist(code, ele_type="GRD", silent=False)
+    headers = {key.lower(): value for key, value in OPTION.api.header.items()}
+    if not headers.get("app") or not headers.get("space") or not info.folderId or not info.moduleId:
+        raise ValueError("无法确定预算表单的应用、空间、目录或组件，请传客户环境的完整 budget_link")
+    context = urlencode({"appId": headers["app"], "space": headers["space"]})
+    gateway = urlsplit(MCP_URL)
+    return f"{gateway.scheme}://{gateway.netloc}/element-deep-table/2-0-0/?" + urlencode({
+        "elementName": code, "folderId": info.folderId, "moduleId": info.moduleId,
+        "sign": b64encode(context.encode()).decode("ascii"),
+    })
 
 
 def val(src, *keys):
@@ -176,6 +183,10 @@ def call_bpp(code, env, body):
 
 def main(p1, p2):
     p2 = p2 or {}
+    preview_flag = str(p2.get("preview_only", False)).strip().lower()
+    if preview_flag not in ("true", "1", "false", "0"):
+        raise ValueError("preview_only 请传 true 或 false")
+    preview = preview_flag in ("true", "1")
     year = val(p2, "Year", "year")
     version = val(p2, "Version", "version")
     entity = val(p2, "Entity", "entity")
@@ -184,24 +195,25 @@ def main(p1, p2):
     bpp_user = val(p2, "userDomainNo")
     env = val(p2, "env") or "TEST"
     bu_name = val(p2, "bu_name", "EntityName") or entity
-    if not all([year, version, entity, submitter]):
-        raise ValueError("需要 Year / Version / Entity / user")
-    if not bpp_user:
+    if not all([year, version, entity]):
+        raise ValueError("需要 Year / Version / Entity")
+    if not preview and not submitter:
+        raise ValueError("需要 user")
+    if not preview and not bpp_user:
         raise ValueError("需要 userDomainNo（BPP 账号）")
 
     w = where(year, scenario, version, entity)
-    if val(row("bud_appr_status", w), "complete_status") == "20":
+    if not preview and val(row("bud_appr_status", w), "complete_status") == "20":
         raise ValueError("已被驳回，请走重新提交")
 
     picked = val(p2, "budget_link", "form_code", "form", "readonly_ux", "elementName")
     link = form_link(picked)
     if not link.startswith("http"):
         raise ValueError("请先选择表单")
-    if "year=" not in link:
-        sep = "&" if "?" in link else "?"
-        link = link + sep + urlencode({
-            "year": year, "scenario": scenario, "version": version, "entity": entity,
-        })
+    url = urlsplit(link)
+    params = parse_qs(url.query, keep_blank_values=True)
+    params.update(year=year, scenario=scenario, version=version, entity=entity)
+    link = url._replace(query=urlencode(params, doseq=True)).geturl()
 
     # 只带「还没被任何实例认领过」的附件（used_instance_id 为空）。
     # 已经认领过的 = 上一轮带过的：本轮**不带**，而且**一个字段都不动** ——
@@ -209,19 +221,33 @@ def main(p1, p2):
     #   ② 万一那个实例后来被驳回，重提时还能按 used_instance_id 把这些附件找回来
     #      ⇒ 所以这里**不能摘旗**：摘旗会让「审批中又发起一轮」之后的再提丢掉附件。
     # 判断放 Python 里做，不用 `is null / <> / or` 这类 where 语法（未经验证，避免踩坑）。
-    files = DataTableDeepModel(element_name="bud_appr_file", path=PATH)
-    df = files.select(where=w + " and attach_flag='1'")
-    all_rows = [] if df is None or df.empty else df.to_dict(orient="records")
+    all_rows = []
+    if not preview:
+        files = DataTableDeepModel(element_name="bud_appr_file", path=PATH)
+        df = files.select(where=w + " and attach_flag='1'")
+        if df is not None and not df.empty:
+            all_rows = df.to_dict(orient="records")
     carried = [r for r in all_rows if not val(r, "used_instance_id")]
-    file_rows = carried
     infos = [{"id": val(r, "file_id"), "fdName": val(r, "fd_name")}
-             for r in file_rows if val(r, "file_id") and val(r, "fd_name")]
+             for r in carried if val(r, "file_id") and val(r, "fd_name")]
     if isinstance(p2.get("fileInfos"), list):
         infos = p2["fileInfos"]
     infos = infos or None
     scene = val(p2, "ScenarioName", "scenario_name") or scenario
     title = val(p2, "instanceTitle") or f"预算编制详版表单审批流程发起_{scene} -- {datetime.now().strftime('%Y%m%d')}"
     comment = val(p2, "comment") or f"{bu_name}预算编制详版表单审批流程发起"
+
+    context = {
+        "年度": year, "期间": val(p2, "Period", "period") or "以表单期间为准",
+        "场景": scenario, "版本": version, "组织编码": entity, "组织名称": bu_name,
+        "表单": {k: params[k][0] for k in ("elementName", "folderId", "moduleId") if k in params},
+        "BPP附件名称（仅目录）": [v["fdName"] for v in infos or [] if isinstance(v, dict) and v.get("fdName")],
+    }
+    if p2.get("approval_evidence"):
+        context["送审补充材料"] = p2["approval_evidence"]
+    opinion = generate_opinion(context, p2.get("attachments"))
+    if preview:
+        return {"preview_only": True, "approval_opinion": opinion}
 
     data = call_bpp("0501200206", env, {
         "idempotentSeqNo": val(p2, "idempotentSeqNo") or f"{TEMPLATE}-{year}-{scenario}-{version}-{entity}-{datetime.now().strftime('%Y%m%d%H%M%S')}",
@@ -235,7 +261,7 @@ def main(p1, p2):
             "bu_name": bu_name,
             "user": submitter,
             "budget_link": link,
-            "approval_opinion": APPROVAL_OPINION_HTML,
+            "approval_opinion": opinion,
         },
         "additionalTag": {"year": year, "scenario": scenario, "version": version, "entity": entity},
         "comment": comment,
@@ -267,6 +293,7 @@ def main(p1, p2):
         files.insert_df(pd.DataFrame(carried))
     return {
         "success": 1, "biz_status": "10", "lock_flag": saved.get("lock_flag"),
+        "approval_opinion": opinion,
         "instance_id": instance_id, "instance_title": title, "comment": comment,
         "fileInfos": infos, "file_count": len(carried),
         "skipped_count": len(all_rows) - len(carried),

@@ -9,7 +9,6 @@ import json
 import re
 from base64 import b64encode
 from datetime import datetime
-from time import monotonic
 from urllib.parse import parse_qs, urlencode, urlsplit
 from xml.etree import ElementTree as ET
 
@@ -75,7 +74,6 @@ def format_opinion(answer):
 def generate_opinion(context, attachments=None):
     if AGENT_CODE != "sanyi-mcp-001":
         raise ValueError("当前 deepagent_mcp_client 未指向三一发布 sanyi-mcp-001，请检查客户环境的客户端")
-    deadline = monotonic() + 300
     question = "【BPP 销售预算审批回填】按 sany-demo-workflows 审批模式处理以下送审资料，本轮直接返回完整 HTML。\n"
     task = run(
         question=question + json.dumps(context, ensure_ascii=False, allow_nan=False),
@@ -83,10 +81,7 @@ def generate_opinion(context, attachments=None):
     )
     task_id = task["task_id"]
     while task["status"] in ("TASK_STATE_SUBMITTED", "TASK_STATE_WORKING"):
-        remaining = int(deadline - monotonic())
-        if remaining < 1:
-            raise ValueError(f"三一助手仍在处理，任务 {task_id}；审批尚未发起")
-        task = run(task_id=task_id, wait_seconds=min(30, remaining))
+        task = run(task_id=task_id, wait_seconds=30)
     if task["status"] != "TASK_STATE_COMPLETED":
         detail = (task.get("status_message") or "")[:360]
         raise ValueError(f"三一助手任务 {task_id} 状态 {task['status']}：{detail}")

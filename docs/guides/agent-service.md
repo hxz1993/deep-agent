@@ -22,7 +22,7 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
   --api-port 8002
 ```
 
-服务就绪后，通过有权访问测试应用的凭据读取 A2A Card，核对 `supportedInterfaces[].url` 包含访问时使用的主机和网关前缀，再发起一次任务。管理员接口 `GET /api/v1/agent-service/client-config` 返回完整 `mcp_url`。用 MCP `GetTask` 核对产物引用，通过鉴权下载校验文件字节。请求地址无法解析时，A2A 卡片与任务接口返回 503、MCP 的任务结果仍可查询，文件部分省略 HTTP 下载地址。A2A 的地址校验失败可在日志中按发布 ID 和 `phase=public_address` 定位。
+服务就绪后，通过有权访问测试应用的凭据读取 A2A Card，核对 `supportedInterfaces[].url` 包含访问时使用的主机和网关前缀，再发起一次任务。管理员接口 `GET /api/v1/agent-service/client-config` 返回完整 `mcp_url`。用 MCP `get_task` 核对产物引用，通过鉴权下载校验文件字节。请求地址无法解析时，A2A 卡片与任务接口返回 503、MCP 的任务结果仍可查询，文件部分省略 HTTP 下载地址。A2A 的地址校验失败可在日志中按发布 ID 和 `phase=public_address` 定位。
 
 ## 接入与取件
 
@@ -70,28 +70,28 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 | 工具 | 用途 |
 | --- | --- |
 | `list_agents` | 查找已启用的发布及 Agent 编码 |
-| `SendMessage` | 带发布 `agentCode` 和标准 `message` 发起任务。用 `configuration.waitSeconds` 控制等待。补答时使用原 `message.taskId` |
-| `GetTask` | 按 `id` 查询 Task。用 `waitSeconds` 控制等待，`historyLength` 控制历史条数 |
-| `ListTasks` | 按 `agentCode` 查询，筛选可用 `contextId`、`status`、`statusTimestampAfter`，分页使用 `pageSize`、`pageToken`，可用 `historyLength`、`includeArtifacts` 扩展返回 |
-| `CancelTask` | 按 `id` 请求停止任务，并查询返回的状态 |
+| `send_message` | 带发布 `agentCode` 和标准 `message` 发起任务。用 `configuration.waitSeconds` 控制等待。补答时使用原 `message.taskId` |
+| `get_task` | 按 `id` 查询 Task。用 `waitSeconds` 控制等待，`historyLength` 控制历史条数 |
+| `list_tasks` | 按 `agentCode` 查询，筛选可用 `contextId`、`status`、`statusTimestampAfter`，分页使用 `pageSize`、`pageToken`，可用 `historyLength`、`includeArtifacts` 扩展返回 |
+| `cancel_task` | 按 `id` 请求停止任务，并查询返回的状态 |
 
-两个工具默认等待 120 秒，传 `0` 立即返回。完成、失败或需要补答时直接返回相应状态。到时仍未结束，则返回带原 `id` 和 `contextId` 的任务快照，后台继续执行。调用方可立即用相同的 `id` 调用 `GetTask` 再等一轮。客户端和网关的请求超时需覆盖等待时间及请求开销。
+`send_message` 和 `get_task` 默认等待 120 秒，传 `0` 立即返回。完成、失败或需要补答时直接返回相应状态。到时仍未结束，则返回带原 `id` 和 `contextId` 的任务快照，后台继续执行。调用方可立即用相同的 `id` 调用 `get_task` 再等一轮。客户端和网关的请求超时需覆盖等待时间及请求开销。
 
 MCP 的 `message` 使用 `messageId`、`role: "ROLE_USER"`、`parts`。文字用 `text`，业务 JSON 用 `data`，输入文件用 `raw`（Base64）、`filename` 和 `mediaType`，单次附件合计最多 8 MiB。重试沿用消息 ID 和内容。收到 `TASK_STATE_INPUT_REQUIRED` 时读 `status.message.parts`，有信息即可用原 Task ID 和新消息 ID 续接。同一凭据主体和应用可以在 A2A 和 MCP 两端继续同一任务。
 
-`ListTasks` 的 `statusTimestampAfter` 接受带时区的 RFC 3339 时间戳，包含更新时间等于阈值的任务。发布结果中的业务 JSON 按 A2A Part 的数值精度传输。对需要逐位保真的长编号，建议在业务 Schema 中声明为字符串。
+`list_tasks` 的 `statusTimestampAfter` 接受带时区的 RFC 3339 时间戳，包含更新时间等于阈值的任务。发布结果中的业务 JSON 按 A2A Part 的数值精度传输。对需要逐位保真的长编号，建议在业务 Schema 中声明为字符串。
 
-MCP 的任务在 `structuredContent` 和 `content[].text` 中采用相同的 A2A Task 字段。任务标题和简介见 `metadata.title` 和 `metadata.description`。完成的正文及业务 JSON 分别在 `artifacts[].parts[].text` 和 `.data`。Agent 使用 `present(file_ids)` 明确要交付的文件。`SendMessage` 和 `GetTask` 返回任务 `id`、产物 `artifactId` 和文件的 `parts[].url`。用原 App、Space 和鉴权 Header 对该地址执行 HTTPS GET。
+MCP 的任务在 `structuredContent` 和 `content[].text` 中采用相同的 A2A Task 字段。任务标题和简介见 `metadata.title` 和 `metadata.description`。完成的正文及业务 JSON 分别在 `artifacts[].parts[].text` 和 `.data`。Agent 使用 `present(file_ids)` 明确要交付的文件。`send_message` 和 `get_task` 返回任务 `id`、产物 `artifactId` 和文件的 `parts[].url`。用原 App、Space 和鉴权 Header 对该地址执行 HTTPS GET。
 
 需让用户领取报告时，可委托发布 Agent 将成品登记到 DeepFOS 下载中心。确认登记成功后，告知用户文件名和领取位置。完整操作见 MCP 资源的「结果与文件」。
 
-支持 MCP Resources 的客户端可用 `resources/list` 和 `resources/read` 读取 `deepagent://guides/mcp` 中的完整示例。
+发布 Agent 的 MCP 提供一个资源 **Published Agent MCP Guide**。用 `resources/list` 查找，用 `resources/read` 读取 `deepagent://guides/mcp` 中的完整示例。
 
-CLI、Python SDK 和通用 HTTP 调用是待评审草案。`clients/python/pyproject.toml` 记录 Python 客户端包 `deepfos-agent-client` 的版本。当前服务仅注册 A2A、MCP 及必要的鉴权取件接口，暂无 wheel 下载入口。
+Python SDK 和通用 HTTP 调用是待评审草案。`clients/python/pyproject.toml` 记录 Python 客户端包 `deepfos-agent-client` 的版本。当前服务仅注册 A2A、MCP 及必要的鉴权取件接口，暂无 wheel 下载入口。
 
 ## 将远程 Agent 作为工具
 
-管理员在 Console「远程 Agent」保存、检查和直连调试 A2A、Codex 或 CodeBuddy。通过 MCP 调用另一套 DeepAgent 时，在「MCP」登记对方的 Streamable HTTP 地址和所需 Header，再在本地 Agent 的「MCP」资源中启用该工具包。用 `list_agents` 取得发布编码，再用 `SendMessage` 发起任务。
+管理员在 Console「远程 Agent」保存、检查和直连调试 A2A、Codex 或 CodeBuddy。通过 MCP 调用另一套 DeepAgent 时，在「MCP」登记对方的 Streamable HTTP 地址和所需 Header，再在本地 Agent 的「MCP」资源中启用该工具包。用 `list_agents` 取得发布编码，再用 `send_message` 发起任务。
 
 在本地 Agent 的资源配置开启指定远程连接。会话中的派单、补答、续接和取消走 Harness。每轮附件按权限由客户端发送，生成文件落到调用方 FileStore，可在原会话下载。待补答时在原会话回复，多个待答任务时通过工具卡指定任务。已保存结果和产物引用在调用方重启后仍从会话读取。已知远端任务 ID 可用于查询和恢复，远端过期或连接撤权时需要重新发起。
 
@@ -116,7 +116,7 @@ PYTHONPATH=src .venv/bin/python -m unittest tests.integration.test_agent_service
 
 ## 依赖变更（运维）
 
-相对一期已含官方 `a2a-sdk[http-server]==1.3.0` 的基线，二期服务端依赖变更为无。上线前确认基础镜像已包含一期 A2A SDK 及其传递依赖，以及当前运行依赖提供的 MCP SDK。二期本机验证使用 Python 3.12、MCP SDK 1.30.0、AnyIO 4.16.0。CLI 和 SDK 草案的依赖不进入本版服务端镜像。
+相对一期已含官方 `a2a-sdk[http-server]==1.3.0` 的基线，二期服务端依赖变更为无。上线前确认基础镜像已包含一期 A2A SDK 及其传递依赖，以及当前运行依赖提供的 MCP SDK。二期本机验证使用 Python 3.12、MCP SDK 1.30.0、AnyIO 4.16.0。
 
 一期由 `015` 升到 `016`，新增发布配置表和索引。二期沿用 `016`。若环境尚在 `015`，生产迁移前核对 DDL 权限、数据库方言、备份、锁和回退窗口。有发布记录时迁移会拒绝降级。
 

@@ -3,6 +3,13 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.17.9
+
+- 发布 Agent 的 MCP 使用 `list_agents`、`send_message`、`get_task`、`list_tasks` 和 `cancel_task`。原有驼峰工具名已移除。升级后刷新 MCP 工具目录，直接指定工具名的客户端需同步更新。A2A 仍使用标准方法名。
+- 简化控制台 MCP 接入帮助，将文件交付和鉴权取件说明集中到单个指南资源 `deepagent://guides/mcp`，并同步更新接入文档、工具清单和开发 Skill。[发布 Agent 接入指南](docs/guides/agent-service.md#mcp-接入)
+- 移除发布 Agent 的 CLI 页签及接入帮助中的计划占位。
+- 依赖变更：无（相对 `0.17.8`）。数据库版本为 `016`。
+
 ## v0.17.8
 
 - 程序编排可看到 DeepFOS 成员检索返回的关键词映射、可空命中列表和可选描述字段。

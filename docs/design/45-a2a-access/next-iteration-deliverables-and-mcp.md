@@ -35,7 +35,7 @@ A2A 和 MCP 请求使用同一个发布专用 `output_type`。原来的 `deepage
 
 **变更前**，发布 Agent 通过专用输出提出追问，MCP 将任务置为 `input_required`。调用方用 `reply_task` 携带原 `task_id` 和追问 ID 补答，服务端校验任务状态及追问归属。
 
-MCP 合并 `submit_task` 和 `reply_task` 为 `SendMessage`，沿用异步受理。`message` 的结构和任务回复语义向 A2A 对齐。带原 `message.taskId` 发普通消息即可接续待补充任务，省略时创建新任务。统一入口创建任务时保留有实际路由用途的发布编码。
+MCP 现在用 `send_message` 发起任务和补答。`message` 的结构和任务回复语义向 A2A 对齐。带原 `message.taskId` 发普通消息即可接续待补充任务，省略时创建新任务。统一入口创建任务时保留有实际路由用途的发布编码。
 
 `INPUT_REQUIRED` 表示原 Task 可接收后续信息。主控可自动提供答案、询问用户，或结束当前调用方流程。回复按标准 `message.parts` 传入，允许一句普通文字。统一工具不设 `reply_to`、`question_id` 或补答专用业务 Schema，服务端不审核答复是否回答了问题。保留协议入参、调用身份及原任务是否可续作的检查。
 
@@ -45,14 +45,14 @@ MCP 合并 `submit_task` 和 `reply_task` 为 `SendMessage`，沿用异步受理
 | --- | --- |
 | JSON-RPC 2.0 | MCP 两端传输和关联请求的外层报文规范。 |
 | MCP 工具结果 | 任务 `structuredContent` 向 A2A Task 字段对齐。列表回包沿用 A2A 的列表字段，按调用需要带历史与产物。 |
-| Agent 业务结果 | 由发布 Agent 自身配置决定正文与业务 JSON。A2A 暂缓处理 `acceptedOutputModes`，MCP `SendMessage` 不加该参数。 |
+| Agent 业务结果 | 由发布 Agent 自身配置决定正文与业务 JSON。A2A 暂缓处理 `acceptedOutputModes`，MCP `send_message` 不加该参数。 |
 
-当前 MCP 工具把同一个结果对象写进 `structuredContent`，也把序列化 JSON 放进 `content` 的文本块。对齐时核对现有调用方对工具名和旧回包字段的依赖。 [现有返回组装](../../../src/deep_agent/api/v1/agent_service_mcp.py#L144) · [MCP 工具结果规范](https://modelcontextprotocol.io/specification/latest/server/tools#structured-content)
+当前 MCP 工具把同一个结果对象写进 `structuredContent`，也把序列化 JSON 放进 `content` 的文本块。对齐时核对现有调用方对工具名和旧回包字段的依赖。 [现有返回组装](../../../src/deep_agent/api/v1/agent_service_mcp.py#L112) · [MCP 工具结果规范](https://modelcontextprotocol.io/specification/latest/server/tools#structured-content)
 
 ## 实施验收范围
 
 - 生成五个文件并明确交付一份。A2A 与 MCP 都应只交该份。补测未选、重复引用及无权限文件。
 - 发布 Agent 覆盖普通正文、纯业务 JSON、业务 JSON 加正文三种完成结果。严格结构化配置也能返回一句追问，补答后同一 Task 再交付正确的结构化结果。
-- 两种入口通过 `SendMessage` 发送普通补充消息，均沿用原 Task ID，无需追问编号。验证 MCP 的异步查询、取消和取件，在实际 MCP 客户端检查回包。
+- A2A 用 `SendMessage`、MCP 用 `send_message` 发送普通补充消息，均沿用原 Task ID，无需追问编号。验证 MCP 的异步查询、取消和取件，在实际 MCP 客户端检查回包。
 - 核对列表标题、简介、状态消息和时间筛选边界。覆盖 `statusTimestampAfter` 前、等于及后的任务。
 - 普通聊天回归核对实时流、刷新后的历史和 Console 回复底部的文件卡一致。旧回包缺附件字段时按空列表展示。

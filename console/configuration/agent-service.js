@@ -106,7 +106,6 @@
       "在 Agent 客户端添加以下 Streamable HTTP 配置。将 app 填为目标应用 ID，space 填为应用所属空间 ID。",
       config,
       "在客户端设置中填写一种凭据。有权访问该应用的 DeepFOS API Key 填入 X-Deepfos-Key。使用平台 Token 时，将 X-Deepfos-Key 换成 token 或 Authorization: Bearer <Token>。",
-      "客户端须能访问配置中的 URL。localhost 和 127.0.0.1 仅供同机客户端使用。",
     ].join("\n\n");
     const guideButton = copyButton(setupGuide, { label: "复制 Agent 接入指引", variant: "compact" });
     if (inGuide) {

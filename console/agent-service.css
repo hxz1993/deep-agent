@@ -42,7 +42,7 @@
 .agent-service-publications .agent-update-time { max-width:100%; overflow:hidden; text-overflow:ellipsis; }
 .console-segmented.agent-service-tabs {
   display:grid;
-  grid-template-columns:repeat(4,minmax(max-content,1fr));
+  grid-template-columns:repeat(3,minmax(max-content,1fr));
   flex:none;
 }
 .console-segmented.agent-service-tabs button { min-width:0; padding-inline:3px; white-space:nowrap; }
@@ -51,7 +51,6 @@
 .agent-protocol-logo[data-protocol="mcp"] { background-image:url("./assets/mcp-logo.png"); }
 [data-theme="dark"] .agent-protocol-logo[data-protocol="mcp"] { filter:invert(1); }
 .agent-service-tabs button svg { flex:none; }
-.agent-service-tabs [data-service-access="cli"] svg { color:var(--info, var(--accent)); }
 .agent-service-tabs [data-service-access="sdk"] svg { color:var(--warning, var(--accent)); }
 .agent-service-access-body { flex:1; min-height:0; overflow:auto; padding:12px; border:1px solid var(--console-card-border); border-radius:var(--console-card-radius); color:var(--text-dim); }
 .agent-service-access-body p { margin:6px 0 0; }

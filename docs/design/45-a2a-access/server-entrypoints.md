@@ -1,6 +1,6 @@
-# Agent 发布的四种接入方式
+# Agent 发布接入方式与历史草案
 
-> **0.17.0a4 发布状态**　正式启用 A2A 和 MCP。本文中的 CLI、SDK、通用 HTTP 调用和安装包分发均为保留的开发草案，未在产品注册，后续可能改写或移除。MCP 的鉴权取件路径继续开放。
+> **当前状态**　正式入口为 A2A 和 MCP。自有 CLI 方案已取消，相关内容保留为历史记录。Python SDK、通用 HTTP 和安装包分发仍是草案。MCP 的鉴权取件路径继续开放。
 
 [45 号课题](README.md)。A2A、MCP、公共 HTTP、CLI 和 Python SDK 共用同一套发布与任务服务。企业分发地址由部署方配置。
 
@@ -55,25 +55,25 @@ HTTP 路径均相对于 `/api/v1/agent-service`。CLI 示例省略 `deepfos-agen
 | **操作** | **现有 A2A** | **公共 HTTP** | **MCP 工具** | **CLI** | **Python SDK** |
 | --- | --- | --- | --- | --- | --- |
 | 列出发布 | 单 Agent Card 发现 | `GET /agents` | `list_agents()` | `agents list` | `list_agents()` |
-| 发起任务 | `SendMessage` | `POST /agents/{agent_code}/tasks` | `submit_task(agent_code, text, …)` | `tasks submit <agent_code> --text …` | `submit(agent_code=…, text=…)` |
-| 查任务、状态和结果 | `GetTask` | `GET /tasks/{task_id}` | `get_task(task_id)` | `tasks get <id>` | `get_task(task_id)` |
-| 查某个 Agent 的近期任务 | `ListTasks` | `GET /agents/{agent_code}/tasks` | `list_tasks(agent_code, …)` | `tasks list --agent <agent_code>` | `list_tasks(agent_code=…)` |
-| 原任务补材料 | `SendMessage` 带原 Task ID | `POST /tasks/{task_id}/messages` | `reply_task(task_id, text, …)` | `tasks reply <id> --text …` | `reply(task_id, text=…)` |
-| 取消任务 | `CancelTask` | `POST /tasks/{task_id}/cancel` | `cancel_task(task_id)` | `tasks cancel <id>` | `cancel(task_id)` |
-| 等待任务变化 | `SendStreamingMessage` / `SubscribeToTask` | 首版通过查询接口轮询 | `get_task(task_id)` | `tasks wait <id>` | `wait(task_id, timeout=…)` |
-| 读取文件产物 | Task Artifact 引用及授权下载 | `GET /tasks/{task_id}/artifacts/{artifact_id}/download` | `SendMessage` 和 `GetTask` 返回鉴权下载 URL | `artifacts download <id> <artifact> -o report.xlsx` | `download_artifact(task_id, artifact_id, destination=…)` |
+| 发起任务 | `SendMessage` | `POST /agents/{agent_code}/tasks` | `send_message(agentCode, message)` | `tasks submit <agent_code> --text …` | `submit(agent_code=…, text=…)` |
+| 查任务、状态和结果 | `GetTask` | `GET /tasks/{task_id}` | `get_task(id)` | `tasks get <id>` | `get_task(task_id)` |
+| 查某个 Agent 的近期任务 | `ListTasks` | `GET /agents/{agent_code}/tasks` | `list_tasks(agentCode, …)` | `tasks list --agent <agent_code>` | `list_tasks(agent_code=…)` |
+| 原任务补材料 | `SendMessage` 带原 Task ID | `POST /tasks/{task_id}/messages` | `send_message(message)` 带原 `message.taskId` | `tasks reply <id> --text …` | `reply(task_id, text=…)` |
+| 取消任务 | `CancelTask` | `POST /tasks/{task_id}/cancel` | `cancel_task(id)` | `tasks cancel <id>` | `cancel(task_id)` |
+| 等待任务变化 | `SendStreamingMessage` / `SubscribeToTask` | 首版通过查询接口轮询 | `get_task(id)` | `tasks wait <id>` | `wait(task_id, timeout=…)` |
+| 读取文件产物 | Task Artifact 引用及授权下载 | `GET /tasks/{task_id}/artifacts/{artifact_id}/download` | `send_message` 和 `get_task` 返回鉴权下载 URL | `artifacts download <id> <artifact> -o report.xlsx` | `download_artifact(task_id, artifact_id, destination=…)` |
 
-- MCP 的 `tools/list` 负责工具定义，业务目录由 `list_agents` 返回。发起和补答快速返回统一任务快照。Task ID 用于继续查询，Context ID 用于在原会话发起下一项任务。提交或补答携带稳定 `message_id`，同一次请求重试沿用该值。补材料时使用原 Task ID 和返回的问题标识。
+- MCP 的 `tools/list` 负责工具定义，业务目录由 `list_agents` 返回。`send_message` 和 `get_task` 默认最多等待 120 秒，传 `0` 立即返回任务快照。Task ID 用于继续查询，Context ID 用于在原会话发起下一项任务。提交或补答携带稳定的 `message.messageId`，同一次请求重试沿用该值。补材料时带原 `message.taskId`。
 - MCP 工具返回结构化快照，包含状态、待补说明、文本／结构化结果及文件引用。CLI、SDK 等到终态或待输入／待鉴权就返回，等待超时保留 Task ID，任务仍可查询。已有 A2A SSE 照常使用。
 - CLI `--attach` 和 SDK `attachments=[Path(…)]` 由客户端读取文件并作为内联附件提交。MCP 使用 `message.parts[].raw` 提交输入附件，服务端复用现有 MIME、数量和体积限制。鉴权下载及下载中心交付见 MCP 资源 `deepagent://guides/mcp`。
 
-例如用 `app: finops001` 调 `POST /agents/budget-variance-report/tasks`，HTTP 请求体与 MCP `submit_task` 使用相同的消息字段。MCP 把 `agent_code` 放在工具参数，HTTP 从路径取得。
+MCP 的请求示例见 `deepagent://guides/mcp`。以下为公共 HTTP 草案的独立示例，用 `app: finops001` 调 `POST /agents/budget-variance-report/tasks`。
 
 ```json
 {"message_id":"msg-001","text":"生成预算差异报告"}
 ```
 
-首次受理返回 Task ID 和 Context ID。后续 `get_task` 若返回 `input_required` 与 `question_id`，调用方用 `POST /tasks/t-001/messages` 或 `reply_task` 提交补充。每条新消息使用新的 `message_id`。
+在这份 HTTP 草案中，首次受理返回 Task ID 和 Context ID。若 HTTP 查询返回 `input_required` 与 `question_id`，调用方用 `POST /tasks/t-001/messages` 提交补充。每条新消息使用新的 `message_id`。
 
 ```json
 {"message_id":"msg-002","reply_to":"q-001","text":"预算期间是 2026-10"}

@@ -1,6 +1,6 @@
 # MCP、CLI 与 Python SDK 实施和验收
 
-> **0.17.0a4 发布状态**　正式启用 A2A 和 MCP。本文中的 CLI、SDK、通用 HTTP 调用和安装包分发均为保留的开发草案，未在产品注册，后续可能改写或移除。MCP 的鉴权取件路径继续开放。
+> **当前状态**　正式入口为 A2A 和 MCP。自有 CLI 方案已取消，相关实施规划和验收记录保留作历史参考。Python SDK、通用 HTTP 和安装包分发仍是草案。MCP 的鉴权取件路径继续开放。
 
 [接入契约与 Console](server-entrypoints.md) · [A2A 一期实测](server-validation.md)。本页用于二期一次交付三种接入。A2A 继续使用项目已锁定的官方 SDK。三种新增入口上线时共用现有发布、任务、执行器和文件权限，沿用数据库 Revision 016。
 
@@ -26,14 +26,14 @@
 - 同步适配由 CLI 进程自行组织，Python SDK 首版提供 async 客户端。SDK 核心采用轻量 HTTP 依赖，安装包无需 DeepAgent 服务、模型运行时或 A2A SDK。
 - MCP 使用 [输入 Schema](mcp-tool-inputs.json)，`tools/list` 返回稳定的一组工具，`list_agents()` 返回所有已启用发布。任务业务失败由任务状态表达，参数和访问错误使用 MCP 工具错误。工具结果以 `structuredContent` 为主，同时提供兼容只读取文本的宿主的 JSON 文本。
 - CLI 和 SDK 读取本地文件后用 `attachments[]` 提交。MCP 输入文件使用 `message.parts[].raw`。共用文件类型、数量和总量校验。三种服务端入口统一限制附件总量为 8 MiB，并在请求体读取阶段限制 JSON 至 11,446,954 字节。部署代理需容纳 Base64 和 JSON 包装，建议请求体上限至少 11 MiB。MCP 宿主未提供附件字节时，可通过 CLI 或 SDK 上传并完成同一 Task。
-- 文件产物来自可信的执行事件。MCP 的 `SendMessage` 和 `GetTask` 返回鉴权下载 URL。报告可登记到 DeepFOS 下载中心。鉴权 HTTP 下载和报告交付的操作说明见 `deepagent://guides/mcp`。验收区分「看到了文件名」「客户端拿到文件字节」「保存并打开成功」。
+- 文件产物来自可信的执行事件。MCP 的 `send_message` 和 `get_task` 返回鉴权下载 URL。报告可登记到 DeepFOS 下载中心。鉴权 HTTP 下载和报告交付的操作说明见 `deepagent://guides/mcp`。验收区分「看到了文件名」「客户端拿到文件字节」「保存并打开成功」。
 
 ## 客户端验收
 
 | **客户端** | **操作与成功证据** |
 | --- | --- |
 | WorkBuddy 桌面 | 在「连接器」添加自定义 Streamable HTTP，URL 指向 8002 的 MCP 端点，用宿主配置 `app` 及 `X-Deepfos-Key`。先记录连接及工具发现，再让 WorkBuddy 原生 MCP 发起任务。如果桌面端只能完成配置／握手，继续用 CodeBuddy 原生 MCP 完成任务并记录两个产品各自结果。 [WorkBuddy MCP 指南](https://www.codebuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/MCP-Guide) |
-| CodeBuddy 原生 MCP | 临时 MCP JSON 使用 `type: http`、同一个 URL、`app` 和凭据环境变量引用，启动时以 `--mcp-config` 指向该文件。让模型调用 `list_agents`、`submit_task`、`get_task`。验收记录原生 Tool Call、Task ID 和正确结果，服务端可对应，纯终端 HTTP 调用只用于诊断。 [CodeBuddy MCP 文档](https://www.codebuddy.ai/docs/cli/mcp) |
+| CodeBuddy 原生 MCP | 临时 MCP JSON 使用 `type: http`、同一个 URL、`app` 和凭据环境变量引用，启动时以 `--mcp-config` 指向该文件。让模型调用 `list_agents`、`send_message`、`get_task`。验收记录原生 Tool Call、Task ID 和正确结果，服务端可对应，纯终端 HTTP 调用只用于诊断。 [CodeBuddy MCP 文档](https://www.codebuddy.ai/docs/cli/mcp) |
 | Python SDK 与 CLI | 以测试 Agent 生成实际预算差异表，完成目录、提交、待补材料、续跑、取 XLSX 和校验内容。CLI 补测退出码、JSON 输出、超时恢复、独立 PATH。SDK 补测连接关闭、并发和按次替换 App |
 | CLI 加 Skill | 在临时 CodeBuddy 项目中粘贴 Console 的安装指令，使用构建好的 wheel 安装 CLI，将 Skill 落到项目 `.codebuddy/skills/deepfos-agent-call/`。新会话验证 Skill 被发现并实际指导终端执行 `deepfos-agent`，最后拿到同一端点的任务结果。为这个用例单独启动 CodeBuddy，关闭测试 MCP，避免模型换入口。 [CodeBuddy Skills](https://www.codebuddy.ai/docs/cli/skills) |
 

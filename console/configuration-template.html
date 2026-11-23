@@ -414,7 +414,6 @@
             <div id="agentServiceTabs" class="console-segmented agent-service-tabs" role="tablist" aria-label="接入方式">
               <button id="agentServiceTabMcp" class="active" type="button" role="tab" data-service-access="mcp" aria-selected="true" aria-controls="agentServiceAccess"><span class="agent-protocol-logo" data-protocol="mcp" aria-hidden="true"></span>MCP</button>
               <button id="agentServiceTabA2a" type="button" role="tab" data-service-access="a2a" aria-selected="false" aria-controls="agentServiceAccess" tabindex="-1"><span class="agent-protocol-logo" data-protocol="a2a" aria-hidden="true"></span>A2A</button>
-              <button id="agentServiceTabCli" type="button" role="tab" data-service-access="cli" aria-selected="false" aria-controls="agentServiceAccess" tabindex="-1"><i data-lucide="terminal" aria-hidden="true"></i>CLI</button>
               <button id="agentServiceTabSdk" type="button" role="tab" data-service-access="sdk" aria-selected="false" aria-controls="agentServiceAccess" aria-label="Python SDK" tabindex="-1"><i data-lucide="code-xml" aria-hidden="true"></i>SDK</button>
             </div>
             <div id="agentServiceAccess" class="agent-service-access-body" role="tabpanel" aria-labelledby="agentServiceTabMcp"></div>
@@ -510,15 +509,15 @@
           <section class="channel-help-panel agent-service-guide-flow" id="agentServiceOverviewPanel" role="tabpanel" aria-labelledby="agentServiceOverviewTab">
             <div class="table-wrap console-list-a agent-service-guide-table">
               <table class="data-table">
-                <thead><tr><th scope="col">能力</th><th scope="col">A2A</th><th scope="col">MCP</th><th scope="col">CLI（计划中）</th></tr></thead>
+                <thead><tr><th scope="col">能力</th><th scope="col">A2A</th><th scope="col">MCP</th></tr></thead>
                 <tbody>
-                  <tr><th scope="row">发现 Agent</th><td>读取已知地址的 Agent Card</td><td><code>list_agents</code></td><td>列出已发布 Agent</td></tr>
-                  <tr><th scope="row">发起任务</th><td><code>SendMessage</code></td><td><code>SendMessage</code>，默认等待 120 秒</td><td>提交任务</td></tr>
-                  <tr><th scope="row">补材料 / 追问</th><td><code>SendMessage</code> 带原 <code>message.taskId</code></td><td><code>SendMessage</code> 带原 <code>message.taskId</code></td><td>继续任务或会话</td></tr>
-                  <tr><th scope="row">查询结果 / 取消</th><td><code>GetTask</code>、<code>ListTasks</code>、<code>CancelTask</code></td><td><code>GetTask</code>、<code>ListTasks</code>、<code>CancelTask</code></td><td>查询、等待及取消</td></tr>
-                  <tr><th scope="row">获取进度</th><td><code>SendStreamingMessage</code>、<code>SubscribeToTask</code></td><td><code>GetTask</code> 可限时等待</td><td>等待及查询状态</td></tr>
-                  <tr><th scope="row">发送附件</th><td><code>message.parts[].raw</code> 传 Base64 字节</td><td><code>message.parts[].raw</code> 传 Base64 字节</td><td>读取本地文件后随任务发送</td></tr>
-                  <tr><th scope="row">获取产物</th><td>结果中的 Artifact 和鉴权下载链接</td><td><code>SendMessage</code> 和 <code>GetTask</code> 返回鉴权下载链接</td><td>读取结果并下载文件</td></tr>
+                  <tr><th scope="row">发现 Agent</th><td>读取已知地址的 Agent Card</td><td><code>list_agents</code></td></tr>
+                  <tr><th scope="row">发起任务</th><td><code>SendMessage</code></td><td><code>send_message</code>，默认等待 120 秒</td></tr>
+                  <tr><th scope="row">补材料 / 追问</th><td><code>SendMessage</code> 带原 <code>message.taskId</code></td><td><code>send_message</code> 带原 <code>message.taskId</code></td></tr>
+                  <tr><th scope="row">查询结果 / 取消</th><td><code>GetTask</code>、<code>ListTasks</code>、<code>CancelTask</code></td><td><code>get_task</code>、<code>list_tasks</code>、<code>cancel_task</code></td></tr>
+                  <tr><th scope="row">获取进度</th><td><code>SendStreamingMessage</code>、<code>SubscribeToTask</code></td><td><code>get_task</code> 可限时等待</td></tr>
+                  <tr><th scope="row">发送附件</th><td><code>message.parts[].raw</code> 传 Base64 字节</td><td><code>message.parts[].raw</code> 传 Base64 字节</td></tr>
+                  <tr><th scope="row">获取产物</th><td>结果中的 Artifact 和鉴权下载链接</td><td><code>send_message</code> 和 <code>get_task</code> 返回鉴权下载链接</td></tr>
                 </tbody>
               </table>
             </div>
@@ -526,12 +525,12 @@
               <h4 id="agentServiceHeaderMatrixTitle">请求 Header</h4>
               <div class="table-wrap console-list-a agent-service-guide-table agent-service-auth-matrix">
                 <table class="data-table" aria-labelledby="agentServiceHeaderMatrixTitle">
-                  <thead><tr><th scope="col">Header 键</th><th scope="col">A2A 通用卡片</th><th scope="col">A2A 指定应用卡片</th><th scope="col">MCP</th><th scope="col">CLI（计划中）</th></tr></thead>
+                  <thead><tr><th scope="col">Header 键</th><th scope="col">A2A 通用卡片</th><th scope="col">A2A 指定应用卡片</th><th scope="col">MCP</th></tr></thead>
                   <tbody>
-                    <tr><th scope="row"><code>app</code></th><td>必填，无默认值</td><td>从 URL 的 <code>{app_id}</code> 读取</td><td>必填，无默认值</td><td>从客户端配置读取</td></tr>
-                    <tr><th scope="row"><code>space</code></th><td>选填，默认取应用所属空间</td><td>从应用推导</td><td>选填，默认取应用所属空间</td><td>待定</td></tr>
-                    <tr><th scope="row"><code>language</code></th><td>选填，默认 <code>zh-cn</code></td><td>选填，默认 <code>zh-cn</code></td><td>选填，默认 <code>zh-cn</code></td><td>待定</td></tr>
-                    <tr><th scope="row"><code>A2A-Version</code></th><td colspan="2">读卡可省略，调用任务接口传 <code>1.0</code></td><td>无需传</td><td>待定</td></tr>
+                    <tr><th scope="row"><code>app</code></th><td>必填，无默认值</td><td>从 URL 的 <code>{app_id}</code> 读取</td><td>必填，无默认值</td></tr>
+                    <tr><th scope="row"><code>space</code></th><td>选填，默认取应用所属空间</td><td>从应用推导</td><td>选填，默认取应用所属空间</td></tr>
+                    <tr><th scope="row"><code>language</code></th><td>选填，默认 <code>zh-cn</code></td><td>选填，默认 <code>zh-cn</code></td><td>选填，默认 <code>zh-cn</code></td></tr>
+                    <tr><th scope="row"><code>A2A-Version</code></th><td colspan="2">读卡可省略，调用任务接口传 <code>1.0</code></td><td>无需传</td></tr>
                     <tr>
                       <th scope="row">鉴权</th>
                       <td colspan="3">
@@ -539,7 +538,6 @@
                         <div><code>token</code> 填平台 Token</div>
                         <div><code>Authorization</code> 填 <code>Bearer &lt;Token&gt;</code></div>
                       </td>
-                      <td>计划从客户端配置读取 API Key 或平台 Token</td>
                     </tr>
                   </tbody>
                 </table>
@@ -584,10 +582,10 @@
                   <thead><tr><th scope="col">工具</th><th scope="col">用途</th></tr></thead>
                   <tbody>
                     <tr><th scope="row"><code>list_agents</code></th><td>查找已启用的发布及 Agent 编码</td></tr>
-                    <tr><th scope="row"><code>SendMessage</code></th><td>发起或补答任务。<code>configuration.waitSeconds</code> 默认 120 秒，传 0 立即返回。</td></tr>
-                    <tr><th scope="row"><code>GetTask</code></th><td>查看状态、回复和产物。<code>waitSeconds</code> 默认 120 秒，传 0 立即返回。超时后可用原 Task ID 继续查询。</td></tr>
-                    <tr><th scope="row"><code>ListTasks</code></th><td>按发布、状态、Context ID 或更新时间筛选近期任务</td></tr>
-                    <tr><th scope="row"><code>CancelTask</code></th><td>请求停止未结束的任务</td></tr>
+                    <tr><th scope="row"><code>send_message</code></th><td>发起或补答任务。<code>configuration.waitSeconds</code> 默认 120 秒，传 0 立即返回。</td></tr>
+                    <tr><th scope="row"><code>get_task</code></th><td>查看状态、回复和产物。<code>waitSeconds</code> 默认 120 秒，传 0 立即返回。超时后可用原 Task ID 继续查询。</td></tr>
+                    <tr><th scope="row"><code>list_tasks</code></th><td>按发布、状态、Context ID 或更新时间筛选近期任务</td></tr>
+                    <tr><th scope="row"><code>cancel_task</code></th><td>请求停止未结束的任务</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -595,8 +593,7 @@
                 <table class="data-table" aria-label="MCP 资源">
                   <thead><tr><th scope="col">资源</th><th scope="col">URI / 读取方式</th></tr></thead>
                   <tbody>
-                    <tr><th scope="row">发布 Agent MCP 接入指南</th><td>用 <code>resources/read</code> 读取 <code>deepagent://guides/mcp</code></td></tr>
-                    <tr><th scope="row">任务文件</th><td>报告可登记到 DeepFOS 下载中心。程序可带原凭据请求返回的下载链接。见上方接入指南。</td></tr>
+                    <tr><th scope="row">Published Agent MCP Guide</th><td>用 <code>resources/read</code> 读取 <code>deepagent://guides/mcp</code>。任务文件交付与鉴权下载见指南中的「结果与文件」。</td></tr>
                   </tbody>
                 </table>
               </div>

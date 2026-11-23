@@ -2,7 +2,7 @@
 
 2026-11-12 · 基于 [Dot 开发交接详稿](https://chatgpt.com/space/page_dd86da26ca8c8191b5c07d19ef7ff85f) 的独立课题。当前一期在独立工作树实施，接入和部署见 [A2A 服务端指南](../../guides/agent-service.md)。
 
-[阅读两阶段实施总案](server-implementation-plan.md) · [四种接入方式与功能对照](server-entrypoints.md) · [发布选路、协议操作与联调](server-routing-and-testing.md) · [查阅实测证据与验收矩阵](server-validation.md) · [FastA2A 与官方 SDK 对照](server-fasta2a-comparison.md)
+[阅读两阶段实施总案](server-implementation-plan.md) · [接入方式与功能对照](server-entrypoints.md) · [发布选路、协议操作与联调](server-routing-and-testing.md) · [查阅实测证据与验收矩阵](server-validation.md) · [FastA2A 与官方 SDK 对照](server-fasta2a-comparison.md)
 
 ## 页面与交付范围
 
@@ -13,13 +13,12 @@ Console 的「发布 Agent」提供 A2A 和 MCP 接入，外部调用方可以�
 | 服务端 · 被调用 | 选已有 Agent，填写 Agent 编码和用途，选择全部应用或指定应用。客户端通过路径或 Header 提供本次 App，调用需携带平台凭据。保存后可按需启停。 | 发布 Agent |
 | 客户端 · 调用外部 Agent | 配置 Agent Card 或 CLI 的执行环境。指定本地 Agent 可用的连接，直连调试并查看近期调用。 | 远程 Agent |
 
-A2A Agent Card 随所选发布切换。MCP 按环境接入。A2A 和 MCP 共用发布范围、执行权限、任务归属和产物授权。DeepAgent 自有 CLI 和 Python SDK 的设计留待后续评审。
+A2A Agent Card 随所选发布切换。MCP 按环境接入。A2A 和 MCP 共用发布范围、执行权限、任务归属和产物授权。Python SDK 的设计留待评审，发布 Agent 的自有 CLI 方案已取消。
 
 | 入口 | 页面展示 | 调用方拿到什么 |
 | --- | --- | --- |
 | A2A API | Agent Card、协议版本、鉴权声明、提交与查任务示例 | 标准消息、Task、状态流和 Artifact。 |
 | MCP | 连接配置与授权范围、已发布工具、提交／查询／取消示例 | Task ID、任务状态、公开结果及授权文件引用。 |
-| DeepAgent CLI（阶段 2） | 安装与凭据配置、提交／查询／等待／取消／下载命令 | 可供 shell 和业务脚本处理的结果及退出状态。建议命令复用 Python SDK。 |
 | Python SDK（设计） | 安装与最小代码、提交／查询／等待／取消／下载示例 | 结构化任务与结果、异步状态及可下载产物。 |
 
 **业务验收**用同一份脱敏预算数据，从 Python 和一个真实 MCP 客户端分别提交。客户端可在断开后通过 Task ID 查询，最终可下载并打开 XLSX。这是阶段 2 的业务验收；阶段 1 先用官方 A2A 客户端验证补材料续跑、文件和重启清空近期任务，并回归现有 Console 和聊天入口。

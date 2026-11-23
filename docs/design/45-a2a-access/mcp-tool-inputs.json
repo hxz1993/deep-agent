@@ -11,7 +11,7 @@
       }
     },
     {
-      "name": "SendMessage",
+      "name": "send_message",
       "description": "Start a task with agentCode and an A2A message. To continue an input-required task, send a new message containing the original taskId and a new messageId. Use contextId alone to start a new task in the same conversation. Waits up to configuration.waitSeconds (default 120, 0 for immediate return). If still running when the wait expires, returns the current task with its original id and contextId. File parts include an authenticated download URL when available. For downloadable reports, ask the published Agent to register the file in the caller's DeepFOS Download Center. See deepagent://guides/mcp for report delivery and authenticated direct downloads.",
       "inputSchema": {
         "$defs": {
@@ -231,7 +231,7 @@
       }
     },
     {
-      "name": "GetTask",
+      "name": "get_task",
       "description": "Read an A2A Task by id. Waits up to waitSeconds (default 120, 0 for immediate return). Check status.state, status.message for questions, and artifacts for results. File parts include an authenticated download URL when available. For downloadable reports, ask the published Agent to register the file in the caller's DeepFOS Download Center. See deepagent://guides/mcp for report delivery and authenticated direct downloads.",
       "inputSchema": {
         "additionalProperties": false,
@@ -272,7 +272,7 @@
       }
     },
     {
-      "name": "ListTasks",
+      "name": "list_tasks",
       "description": "List tasks for agentCode in this App with A2A filters and paging. Use nextPageToken as pageToken and includeArtifacts to include results.",
       "inputSchema": {
         "additionalProperties": false,
@@ -388,7 +388,7 @@
       }
     },
     {
-      "name": "CancelTask",
+      "name": "cancel_task",
       "description": "Cancel a task by id and return its current task state.",
       "inputSchema": {
         "additionalProperties": false,

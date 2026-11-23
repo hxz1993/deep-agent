@@ -17,7 +17,13 @@ from mcp.shared.exceptions import McpError
 from pydantic import ValidationError
 
 from deep_agent.agent_service.download import ArtifactDownloadResponse
-from deep_agent.agent_service.mcp_guides import MCP_FILE_DELIVERY_HINT, MCP_GUIDE, MCP_GUIDE_URI, MCP_INSTRUCTIONS
+from deep_agent.agent_service.mcp_guides import (
+    MCP_FILE_DELIVERY_HINT,
+    MCP_GUIDE,
+    MCP_GUIDE_NAME,
+    MCP_GUIDE_URI,
+    MCP_INSTRUCTIONS,
+)
 from deep_agent.agent_service.mcp_tasks import CancelTool, GetTool, ListTool, McpTasks, SendTool
 from deep_agent.agent_service.public import PublicInput, TaskId, task_error
 from deep_agent.agent_service.security import needs_platform_address, observe_access, platform_caller, service_base_url
@@ -58,22 +64,22 @@ async def download(ctx: AppContextDep, request: Request, task_id: TaskId, artifa
 TOOLS: dict[str, tuple[str, type[PublicInput], Callable[..., Awaitable[dict]]]] = {
     "list_agents": ("Discover enabled published Agents and their agent_code values.",
                     PublicInput, lambda tasks, _: tasks.list_agents()),
-    "SendMessage": ("Start a task with agentCode and an A2A message. To continue an input-required task, "
-                    "send a new message containing the original taskId and a new messageId. "
-                    "Use contextId alone to start a new task in the same conversation. Waits up to "
-                    "configuration.waitSeconds (default 120, 0 for immediate return). If still running when "
-                    "the wait expires, returns the current task with its original id and contextId. "
-                    f"{MCP_FILE_DELIVERY_HINT}",
-                    SendTool, lambda tasks, a: tasks.send(a)),
-    "GetTask": ("Read an A2A Task by id. Waits up to waitSeconds (default 120, 0 for immediate return). "
-                "Check status.state, status.message for questions, and artifacts for results. "
-                f"{MCP_FILE_DELIVERY_HINT}",
-                GetTool, lambda tasks, a: tasks.get_task(a)),
-    "ListTasks": ("List tasks for agentCode in this App with A2A filters and paging. "
-                  "Use nextPageToken as pageToken and includeArtifacts to include results.",
-                  ListTool, lambda tasks, a: tasks.page(a)),
-    "CancelTask": ("Cancel a task by id and return its current task state.",
-                   CancelTool, lambda tasks, a: tasks.cancel(a.id)),
+    "send_message": ("Start a task with agentCode and an A2A message. To continue an input-required task, "
+                     "send a new message containing the original taskId and a new messageId. "
+                     "Use contextId alone to start a new task in the same conversation. Waits up to "
+                     "configuration.waitSeconds (default 120, 0 for immediate return). If still running when "
+                     "the wait expires, returns the current task with its original id and contextId. "
+                     f"{MCP_FILE_DELIVERY_HINT}",
+                     SendTool, lambda tasks, a: tasks.send(a)),
+    "get_task": ("Read an A2A Task by id. Waits up to waitSeconds (default 120, 0 for immediate return). "
+                 "Check status.state, status.message for questions, and artifacts for results. "
+                 f"{MCP_FILE_DELIVERY_HINT}",
+                 GetTool, lambda tasks, a: tasks.get_task(a)),
+    "list_tasks": ("List tasks for agentCode in this App with A2A filters and paging. "
+                   "Use nextPageToken as pageToken and includeArtifacts to include results.",
+                   ListTool, lambda tasks, a: tasks.page(a)),
+    "cancel_task": ("Cancel a task by id and return its current task state.",
+                    CancelTool, lambda tasks, a: tasks.cancel(a.id)),
 }
 
 
@@ -117,7 +123,7 @@ def tool_error(status_code: int, detail: str):
 @server.list_resources()
 async def list_resources():
     return [types.Resource(
-        uri=MCP_GUIDE_URI, name="发布 Agent MCP 接入指南",
+        uri=MCP_GUIDE_URI, name=MCP_GUIDE_NAME,
         description="工具示例、任务续跑、附件与产物", mimeType="text/markdown",
     )]
 

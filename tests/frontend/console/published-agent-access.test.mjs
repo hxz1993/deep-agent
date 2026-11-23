@@ -5,6 +5,7 @@ import vm from "node:vm";
 import { trajectoryDomHarness } from "./trajectory-dom-harness.mjs";
 
 const script = readFileSync(new URL("../../../console/configuration/agent-service.js", import.meta.url), "utf8");
+const template = readFileSync(new URL("../../../console/configuration-template.html", import.meta.url), "utf8");
 const prefix = "https://gateway.example.test/deepfos-server/deep-agent-server1-0/";
 const publication = {
   agent_code: "reports", name: "Reports", enabled: true,
@@ -35,6 +36,15 @@ function setup(apiFetch) {
   document.ready();
   return { refresh: window.agentServiceAdmin.refresh, element, poll: () => tick() };
 }
+
+test("发布接入页签保留 MCP、A2A 和 SDK，帮助总览只列已开放方式", () => {
+  const tabs = template.match(/id="agentServiceTabs"[^>]*>([\s\S]*?)<\/div>/)[1];
+  const accessMethods = [...tabs.matchAll(/data-service-access="([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(accessMethods, ["mcp", "a2a", "sdk"]);
+  const overview = template.match(/id="agentServiceOverviewPanel"[^>]*>([\s\S]*?)id="agentServiceMethodsPanel"/)[1];
+  assert.doesNotMatch(overview, /CLI/);
+  assert.match(overview, /<td><code>SendMessage<\/code><\/td><td><code>send_message<\/code>/);
+});
 
 test("最近更新优先显示操作人的平台名称，查不到时显示账号 ID", async () => {
   const ui = setup(async path => {

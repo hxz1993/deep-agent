@@ -1,6 +1,7 @@
 """Secret-free discovery and usage guidance for published-Agent MCP clients."""
 
 MCP_GUIDE_URI = "deepagent://guides/mcp"
+MCP_GUIDE_NAME = "Published Agent MCP Guide"
 
 MCP_FILE_DELIVERY_HINT = (
     "File parts include an authenticated download URL when available. "
@@ -9,10 +10,10 @@ MCP_FILE_DELIVERY_HINT = (
 )
 
 MCP_INSTRUCTIONS = (
-    "Discover enabled Agents with list_agents, then call SendMessage with agentCode and a user message. "
-    "SendMessage and GetTask wait up to 120 seconds by default. Set configuration.waitSeconds on SendMessage "
-    "or waitSeconds on GetTask to change the wait; use 0 for an immediate snapshot. If the task is still running, "
-    "call GetTask with the returned id. It can wait again while the same task continues in the background. "
+    "Discover enabled Agents with list_agents, then call send_message with agentCode and a user message. "
+    "send_message and get_task wait up to 120 seconds by default. Set configuration.waitSeconds on send_message "
+    "or waitSeconds on get_task to change the wait; use 0 for an immediate snapshot. If the task is still running, "
+    "call get_task with the returned id. It can wait again while the same task continues in the background. "
     "If status.state is TASK_STATE_INPUT_REQUIRED, read status.message.parts. "
     "If you have the answer, send it as a new message with the same taskId and a new messageId. "
     "Ask the user only if you need their input. After completion use contextId without taskId for a new task. "
@@ -27,23 +28,25 @@ MCP_GUIDE = """# DeepAgent 发布 Agent · MCP 接入
 | 工具 | 用途 |
 | --- | --- |
 | list_agents | 列出已启用的发布及 agent_code |
-| SendMessage | 新建任务或向待补充的任务发送消息，configuration.waitSeconds 控制等待秒数 |
-| GetTask | 按 id 查任务状态、追问和交付，waitSeconds 控制等待秒数，historyLength 控制历史条数 |
-| ListTasks | 按 agentCode 查任务，可筛选 contextId、status、statusTimestampAfter；用 pageToken 翻页 |
-| CancelTask | 按 id 请求取消任务 |
+| send_message | 新建任务或向待补充的任务发送消息，configuration.waitSeconds 控制等待秒数 |
+| get_task | 按 id 查任务状态、追问和交付，waitSeconds 控制等待秒数，historyLength 控制历史条数 |
+| list_tasks | 按 agentCode 查任务，可筛选 contextId、status、statusTimestampAfter；用 pageToken 翻页 |
+| cancel_task | 按 id 请求取消任务 |
 
 ## 发起与续接
+
+首次提交时，给 `send_message` 传入以下参数。
 
 ```json
 {"agentCode":"budget-report","message":{"messageId":"budget-001","role":"ROLE_USER","parts":[{"text":"核对预算"}]}}
 ```
 
-两种工具默认等待 120 秒，传 0 立即返回。任务完成、失败或进入待补答等需要调用方处理的状态时立即返回。
-等到时限仍未完成时，返回原 id 和 contextId，任务在后台继续。可立即用 `{"id":"<Task ID>"}` 调用 GetTask，
+`send_message` 和 `get_task` 默认等待 120 秒，传 0 立即返回。任务完成、失败或进入待补答等需要调用方处理的状态时立即返回。
+等到时限仍未完成时，返回原 id 和 contextId，任务在后台继续。可立即用 `{"id":"<Task ID>"}` 调用 get_task，
 也可传 `{"id":"<Task ID>","waitSeconds":30}` 继续等 30 秒。客户端 HTTP 超时需覆盖等待时间和请求开销。
 
 若状态为 TASK_STATE_INPUT_REQUIRED，从 status.message.parts 读取问题。
-主控已有答案时可以直接回复，缺信息时再询问用户。补充时用新消息编号和原 taskId。
+主控已有答案时可以直接回复，缺信息时再询问用户。补答时再调用 `send_message`，带新消息编号和原 taskId。
 
 ```json
 {"message":{"messageId":"budget-002","role":"ROLE_USER","taskId":"<Task ID>","parts":[{"text":"按十一月口径"}]}}
@@ -56,7 +59,7 @@ MCP_GUIDE = """# DeepAgent 发布 Agent · MCP 接入
 
 完整 Task 同时出现在 structuredContent 和 content 的 JSON 文本中。status.state 是任务状态，
 status.message 包含追问或状态说明。artifacts 的 parts 中，text 是正文，data 是业务 JSON，url 是文件下载链接。
-ListTasks 的每项可通过 metadata.title 和 metadata.description 识别，includeArtifacts 默认为 false。
+list_tasks 的每项可通过 metadata.title 和 metadata.description 识别，includeArtifacts 默认为 false。
 
 文件产物通过 present 随任务交付。任务 id 与 artifacts[].artifactId 共同标识产物，
 文件名、类型和鉴权地址分别见 parts[].filename、parts[].mediaType 和 parts[].url。链接随任务记录失效。

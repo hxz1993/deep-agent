@@ -35,7 +35,7 @@ OPINION_CSS = set("""
     background background-color border border-bottom border-collapse border-left border-radius
     border-right border-top box-sizing color display flex flex-wrap font font-family font-size
     font-weight gap letter-spacing line-height margin margin-bottom margin-left margin-right
-    margin-top max-width min-width overflow-wrap overflow-x padding text-align width
+    margin-top max-width min-width overflow-wrap overflow-x padding text-align white-space width
 """.split())
 
 

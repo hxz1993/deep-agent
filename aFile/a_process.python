@@ -272,8 +272,10 @@ def main(p1, p2):
         "年度": year, "期间": val(p2, "Period", "period") or "以表单期间为准",
         "场景": scenario, "场景名称": scene, "版本": version, "组织编码": entity, "组织名称": bu_name,
         "表单": {k: params[k][0] for k in ("elementName", "folderId", "moduleId") if k in params},
-        "BPP附件名称（仅目录）": [v["fdName"] for v in infos or [] if isinstance(v, dict) and v.get("fdName")],
     }
+    attachment_names = [item["fdName"] for item in infos or [] if isinstance(item, dict) and item.get("fdName")]
+    if attachment_names:
+        context["BPP附件名称（仅目录）"] = attachment_names
     if p2.get("approval_evidence"):
         context["送审补充材料"] = p2["approval_evidence"]
     opinion = generate_opinion(context, p2.get("attachments"))

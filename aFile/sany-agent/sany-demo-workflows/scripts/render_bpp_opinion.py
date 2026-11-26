@@ -24,7 +24,6 @@ def scope_fields(scope):
         "organization": label("organization") or "未提供",
         "budget_range": " / ".join(part for part in parts if part) or "未提供",
         "form": label("form") or "未提供",
-        "batch": label("batch") or "未提供",
     }
 
 
@@ -62,7 +61,7 @@ def render(inputs):
         raise ValueError("审批意见 inputs 应为对象")
     scope = inputs.get("scope")
     if isinstance(scope, str) and scope.strip():
-        # 旧版的一段口径文字只保留作依据，不能拿来推断四个送审字段。
+        # 旧版自由文本保留在取数依据中，页首只使用结构化字段。
         if isinstance(inputs.get("sources"), list) and inputs["sources"]:
             inputs = {**inputs, "sources": [*inputs["sources"], scope.strip()]}
         scope = {}

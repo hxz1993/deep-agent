@@ -271,7 +271,6 @@ def main(p1, p2):
     context = {
         "年度": year, "期间": val(p2, "Period", "period") or "以表单期间为准",
         "场景": scenario, "场景名称": scene, "版本": version, "组织编码": entity, "组织名称": bu_name,
-        "送审批次": val(p2, "batch", "送审批次"),
         "表单": {k: params[k][0] for k in ("elementName", "folderId", "moduleId") if k in params},
         "BPP附件名称（仅目录）": [v["fdName"] for v in infos or [] if isinstance(v, dict) and v.get("fdName")],
     }

@@ -7,11 +7,34 @@ from xml.etree import ElementTree as ET
 from deepagent_files import publish_path
 
 
+def scope_fields(scope):
+    def label(key):
+        value = scope.get(key)
+        return str(value).strip() if isinstance(value, (str, int)) and not isinstance(value, bool) else ""
+
+    year, period = label("year"), label("period")
+    scenario, version = label("scenario"), label("version")
+    parts = [
+        f"{year}年" if year.isdecimal() else year,
+        "" if period == "以表单期间为准" else period,
+        "预算" if scenario.casefold() == "budget" else scenario,
+        "工作版" if version.casefold() == "working" else version,
+    ]
+    return {
+        "organization": label("organization") or "未提供",
+        "budget_range": " / ".join(part for part in parts if part) or "未提供",
+        "form": label("form") or "未提供",
+        "batch": label("batch") or "未提供",
+    }
+
+
 def render(inputs):
     asset = Path(__file__).resolve().parents[1] / "assets/bpp-sales-opinion.html"
     root = ET.parse(asset).getroot()
 
     def fill(node, values):
+        if node.get("data-section") == "scope":
+            values = header
         field = node.attrib.pop("data-field", None)
         if field is not None:
             value = values if field == "." else values.get(field)
@@ -37,6 +60,15 @@ def render(inputs):
 
     if not isinstance(inputs, dict):
         raise ValueError("审批意见 inputs 应为对象")
+    scope = inputs.get("scope")
+    if isinstance(scope, str) and scope.strip():
+        # 旧版的一段口径文字只保留作依据，不能拿来推断四个送审字段。
+        if isinstance(inputs.get("sources"), list) and inputs["sources"]:
+            inputs = {**inputs, "sources": [*inputs["sources"], scope.strip()]}
+        scope = {}
+    if not isinstance(scope, dict):
+        raise ValueError("审批意见 scope 应为送审信息对象")
+    header = scope_fields(scope)
     fill(root, inputs)
     return ET.tostring(root, encoding="unicode", method="html")
 

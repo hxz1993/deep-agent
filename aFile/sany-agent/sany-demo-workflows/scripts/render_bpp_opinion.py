@@ -4,6 +4,8 @@ from copy import deepcopy
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
+from deepagent_files import publish_path
+
 
 def render(inputs):
     asset = Path(__file__).resolve().parents[1] / "assets/bpp-sales-opinion.html"
@@ -41,5 +43,5 @@ def render(inputs):
 
 if __name__ == "__main__":
     inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
-    result = {"html": render(inputs)}
-    Path("outputs/result.json").write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+    html = render(inputs)
+    Path(publish_path("approval.html", mime="text/html")).write_text(html, encoding="utf-8")
